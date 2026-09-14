@@ -4,10 +4,10 @@ import { driveRun, PrintContext, PromptContext, useBackend } from '../../backend
 import { Button } from '../../components/ui/Button';
 import { Dialog, DialogDescription, DialogPopup, DialogTitle } from '../../components/ui/Dialog';
 import { Small, TerminalHint } from '../../components/domain/Primitives';
-import { localActionReason } from '../../components/domain/skill-card-actions';
+import { localActionReason, localRef } from '../../components/domain/skill-card-actions';
 import { publishOutcomeText } from '../skill/publish-outcome';
 import { plural } from '../marketplace/market-data';
-import { publishRef, rowText } from './bulk-publish';
+import { rowText } from './bulk-publish';
 import type { BulkPublishSummary, BulkRow, BulkRowState } from './bulk-publish';
 
 /**
@@ -43,7 +43,7 @@ export function BulkPublishDialog({ cards, onClose, onFinished }: { cards: reado
       setRow(row.key, { kind: 'publishing', label: null });
       let result: Result<PublishResult>;
       try {
-        const run = backend.publish({ ref: publishRef(row.card) });
+        const run = backend.publish({ ref: localRef(row.card) });
         activeRun.current = run;
         result = await driveRun<PublishResult>(run, {}, unexpected, print, frame => setRow(row.key, { kind: 'publishing', label: frame.label ?? null }));
       } catch (error) {

@@ -10,6 +10,7 @@
 .library-selection-bar{display:flex;align-items:center;gap:8px;padding:0 20px 12px;flex-shrink:0}
 .library-selection-count{font-size:13px;color:var(--tk-text2);font-variant-numeric:tabular-nums;margin-right:auto}
 .library-notice{padding:0 20px 12px;font-size:13px;color:var(--tk-text2)}
+.library-selection-note{padding:0 20px 12px;margin-top:-4px;font-size:12px;line-height:16px;color:var(--tk-text2)}
 /* The bulk publish dialog (BulkPublishDialog.tsx): the shared 440px popup; only the row list scrolls, with the
    repo's hidden scrollbar, so a long selection never grows the dialog past the window. */
 .bulk-publish-rows{display:flex;flex-direction:column;max-height:240px;overflow:auto;scrollbar-width:none;border:1px solid var(--tk-border1);border-radius:6px}

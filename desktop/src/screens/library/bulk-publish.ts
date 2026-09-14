@@ -26,6 +26,3 @@ export function rowText(state: BulkRowState): string {
     case 'not-started': return 'Not started';
   }
 }
-
-/** The same ref rule as the skill page's dialog: a folder the team has never seen is named by its path (the CLI accepts one since #193), a team skill by its name. `team` is omitted — one team per machine, exactly as `SkillScreen.publish` passes it when the detail carries none. */
-export function publishRef(card: Pick<SkillCard, 'teamed' | 'path' | 'name'>): string { return !card.teamed && card.path ? card.path : card.name; }

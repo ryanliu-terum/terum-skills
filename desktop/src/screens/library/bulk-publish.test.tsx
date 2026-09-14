@@ -8,8 +8,8 @@ import { createMockBackend } from '../../backend/mock';
 import { createRun } from '../../backend/mock/run';
 import type { Backend } from '../../backend/Backend';
 import type { PublishResult, Result, SkillCard } from '../../backend/types';
-import { localActionReason } from '../../components/domain/skill-card-actions';
-import { publishRef, rowText } from './bulk-publish';
+import { localActionReason, localRef } from '../../components/domain/skill-card-actions';
+import { rowText } from './bulk-publish';
 
 // Batch E (2026-09-13): Library selection mode (`?select=1`) and the bulk "Publish to team" dialog. The CLI's
 // `publish <ref>` takes one ref and the team clone is write-locked, so the queue is strictly sequential.
@@ -121,7 +121,7 @@ it('lists Ready and Skipped rows and never sends a skipped one', async () => {
   fireEvent.click(within(dialog).getByRole('button', { name: 'Publish 1 skill' }));
   await within(dialog).findByText('Published 1 of 1 skill');
   expect(publish).toHaveBeenCalledTimes(1);
-  expect(publish.mock.calls[0]?.[0]).toEqual({ ref: publishRef(cards.find(card => card.name === 'deploy-check')!) });
+  expect(publish.mock.calls[0]?.[0]).toEqual({ ref: localRef(cards.find(card => card.name === 'deploy-check')!) });
   expect(rowState(broken.name)).toBe(`Skipped · ${localActionReason(broken, 'publish')}`);
 });
 
@@ -129,7 +129,7 @@ it('publishes the rows one at a time, reports each outcome, and Done refreshes t
   const backend = createMockBackend();
   const pick = sendable(await globalCards(backend)).slice(0, 3);
   const gate = deferred(), refs: string[] = [];
-  vi.spyOn(backend, 'publish').mockImplementation(args => { refs.push(args.ref); return createRun(async ctx => { if (args.ref === publishRef(pick[0]!)) await gate.promise; ctx.progress(1, 1, 'committing'); return published(args.ref); }); });
+  vi.spyOn(backend, 'publish').mockImplementation(args => { refs.push(args.ref); return createRun(async ctx => { if (args.ref === localRef(pick[0]!)) await gate.promise; ctx.progress(1, 1, 'committing'); return published(args.ref); }); });
   await enterSelection(backend);
   for (const card of pick) fireEvent.click(checkbox(card.name));
   const dialog = await openDialog(3);
@@ -140,9 +140,9 @@ it('publishes the rows one at a time, reports each outcome, and Done refreshes t
   expect(rowState(pick[2]!.name)).toBe('Queued');
   expect(within(dialog).getByRole('button', { name: 'Publish 3 skills' })).toBeDisabled();
   // The second ref is not even requested until the first run has settled.
-  expect(refs).toEqual([publishRef(pick[0]!)]);
+  expect(refs).toEqual([localRef(pick[0]!)]);
   gate.resolve();
-  await waitFor(() => expect(refs).toEqual(pick.map(publishRef)));
+  await waitFor(() => expect(refs).toEqual(pick.map(localRef)));
   await within(dialog).findByText('Published 3 of 3 skills');
   for (const card of pick) expect(rowState(card.name)).toBe(`${card.name} was published to Global as Version 3.`);
   expect(within(dialog).queryByRole('button', { name: 'Cancel' })).toBeNull();
@@ -158,7 +158,7 @@ it('publishes the rows one at a time, reports each outcome, and Done refreshes t
 it('a failing row reports the CLI sentence and the queue goes on', async () => {
   const backend = createMockBackend();
   const pick = sendable(await globalCards(backend)).slice(0, 3);
-  vi.spyOn(backend, 'publish').mockImplementation(args => createRun(async () => args.ref === publishRef(pick[1]!) ? { ok: false, error: 'fatal: the team clone is locked by another publish' } : published(args.ref)));
+  vi.spyOn(backend, 'publish').mockImplementation(args => createRun(async () => args.ref === localRef(pick[1]!) ? { ok: false, error: 'fatal: the team clone is locked by another publish' } : published(args.ref)));
   await enterSelection(backend);
   for (const card of pick) fireEvent.click(checkbox(card.name));
   const dialog = await openDialog(3);
@@ -174,7 +174,7 @@ it('a failing row reports the CLI sentence and the queue goes on', async () => {
 it('Cancel mid-queue stops after the active run and keeps the finished outcome', async () => {
   const backend = createMockBackend();
   const pick = sendable(await globalCards(backend)).slice(0, 3);
-  vi.spyOn(backend, 'publish').mockImplementation(args => createRun(async ctx => { if (args.ref === publishRef(pick[1]!)) await ctx.sleep(60_000); return published(args.ref); }));
+  vi.spyOn(backend, 'publish').mockImplementation(args => createRun(async ctx => { if (args.ref === localRef(pick[1]!)) await ctx.sleep(60_000); return published(args.ref); }));
   await enterSelection(backend);
   for (const card of pick) fireEvent.click(checkbox(card.name));
   const dialog = await openDialog(3);

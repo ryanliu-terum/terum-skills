@@ -1,4 +1,4 @@
-import { localActionReason } from '../../components/domain/skill-card-actions';
+import { localActionReason, localRef } from '../../components/domain/skill-card-actions';
 import { SkillFileDialog } from './SkillFileDialog';
 import { useWorkflow } from '../../components/domain/useWorkflow';
 import { plural } from '../marketplace/market-data';
@@ -95,7 +95,7 @@ function SkillPage(){const evalRun=useEvalRun(),queryClient=useQueryClient();
   if(!s||busy||activeRun.current)return;
   setBusy(true);setProgressLabel(null);setActionError(null);setNotice(null);
   try{
-   const run=backend.publish({ref:!s.teamed&&s.path?s.path:s.name,...(s.team?{team:s.team}:{})});
+   const run=backend.publish({ref:localRef(s),...(s.team?{team:s.team}:{})});
    activeRun.current=run;
    const result=await driveRun<PublishResult>(run,{},unexpected,print,frame=>setProgressLabel(frame.label??null));
    if(activeRun.current!==run)return;
