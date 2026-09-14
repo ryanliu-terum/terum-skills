@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import type { Launch } from '../launch.js';
 import lockfile from 'proper-lockfile';
 import { CommandResult, Runner, RunOptions, systemRunner } from '../runner.js';
-import { type AskOptions, Prompter, PromptClosedError } from '../prompt.js';
+import { type AskOptions, Prompter, PromptClosedError, type ProgressUpdate } from '../prompt.js';
 import { cloneLockPath } from '../teamRepo.js';
 
 /** Every temp dir created through `temporaryDirectory` — removed by setup.ts after each test. */
@@ -35,7 +35,11 @@ export class ScriptedPrompter implements Prompter {
   readonly asked: string[] = [];
   readonly offeredDefaults: (string | undefined)[] = [];
   readonly offered: (readonly string[])[] = [];
+  /** Every `io.progress?.()` a verb reported, in order. `steps` is the bare ladder, for readable assertions. */
+  readonly progressed: ProgressUpdate[] = [];
+  get steps(): string[] { return this.progressed.map((update) => update.step); }
   constructor(private readonly answers: string[] = [], private readonly confirms: boolean[] = [], readonly interactive = false) {}
+  progress(update: ProgressUpdate): void { this.progressed.push(update); }
   private next(question: string): string {
     this.asked.push(question);
     const answer = this.answers.shift();

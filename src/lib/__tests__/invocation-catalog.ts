@@ -1274,7 +1274,7 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "file": "docs/frame-protocol.md",
     "line": 18,
     "policy": "prose",
-    "pattern": "| `progress` | `{\"t\":\"progress\",\"step\":\"...\",\"current\":n,\"total\":n}` | Coarse step reporting for a long verb. `install` and eval batches (including setup’s `evals` step) emit it. `step` names the step (`evals`, or `install`'s four phases); `current` counts what is done so far and `total` appears only when the verb knows it. `features.progress` is `true`. Never required, never ordered against `ask`; a shell that ignores it is unaffected. |"
+    "pattern": "| `progress` | `{\"t\":\"progress\",\"step\":\"...\",\"current\":n,\"total\":n}` | Coarse step reporting for a long verb. `install`, `publish` and eval batches (including setup’s `evals` step) emit it. `step` names the step (`evals`, `install`'s four phases, or `publish`'s five — refresh, category, check, publish, profile, of which the category rung is skipped when the folder already declares one or `--category` was passed); `current` counts what is done so far and `total` appears only when the verb knows it. `features.progress` is `true`. Never required, never ordered against `ask`; a shell that ignores it is unaffected. |"
   },
   {
     "file": "docs/frame-protocol.md",
