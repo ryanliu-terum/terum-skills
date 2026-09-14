@@ -23,7 +23,8 @@ test('lays a chip icon out on the same line as its chip text',async({page})=>{
   const chip=document.createElement('span');chip.className='chip';chip.setAttribute('data-probe','chip-icon');
   const label=document.createElement('span');label.className='chip-label';
   const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');
-  for(const [key,value] of [['aria-hidden','true'],['width','12'],['height','12'],['viewBox','0 0 24 24'],['fill','none'],['stroke','currentColor'],['stroke-width','2']])svg.setAttribute(key,value);
+  const attributes:[string,string][]=[['aria-hidden','true'],['width','12'],['height','12'],['viewBox','0 0 24 24'],['fill','none'],['stroke','currentColor'],['stroke-width','2']];
+  for(const [key,value] of attributes)svg.setAttribute(key,value);
   svg.style.cssText='color:inherit;flex-shrink:0;display:block'; // Icon.tsx's inline style, the thing the rule has to beat
   const path=document.createElementNS('http://www.w3.org/2000/svg','path');path.setAttribute('d','M20 6 9 17l-5-5');svg.append(path);
   label.append(svg,document.createTextNode('Installed · on this machine'));chip.append(label);

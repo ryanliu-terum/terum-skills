@@ -69,6 +69,21 @@ it('a selected card that cannot be evaluated here is left out, and the bar says 
   expect(await screen.findByRole('dialog', { name: 'Evaluate 1 skill?' })).toBeVisible();
 });
 
+it('with runEvalInApp off, neither the button nor the left-out line renders — a hidden control leaves no trace', async () => {
+  const backend = createMockBackend(), real = backend.library.bind(backend), features = await backend.features();
+  vi.spyOn(backend, 'features').mockResolvedValue({ ...features, runEvalInApp: false });
+  vi.spyOn(backend, 'library').mockImplementation(async (args, opts) => { const result = await real(args, opts); return result.ok ? { ...result, value: { ...result.value, skills: result.value.skills.map((card, i) => i === 0 ? { ...card, path: null, teamed: true } : card) } } : result; });
+  const cards = await globalCards(backend);
+  await enterSelection(backend);
+  fireEvent.click(checkbox(cards[0]!.name));
+  fireEvent.click(checkbox(evaluable(cards)[0]!.name));
+  await screen.findByText('2 of 15 selected');
+  const bar = screen.getByRole('toolbar', { name: 'Selection' });
+  expect(within(bar).queryByRole('button', { name: /^Evaluate/ })).toBeNull();
+  expect(within(bar).getByRole('button', { name: 'Publish 2 skills to team…' })).toBeEnabled();
+  expect(screen.queryByRole('note')).toBeNull();
+});
+
 it('hands the selection to the app-wide question by URL and keeps the selection when the question closes', async () => {
   const backend = createMockBackend();
   const pick = evaluable(await globalCards(backend)).slice(0, 2);
