@@ -522,6 +522,10 @@ BEST prose in the study while making the worst calls; fluency is not a quality s
 scoring and never-summing, not Cost itself (7/8/9 within noise). Cost let the model prefer the
 cheaper fix over the one the spec describes, so it is now Fit, with effort as a footnote.*
 
+*Amendment 2026-09-14 (Ryan): Depth is now **Bug risk**, how likely the change itself is to
+introduce a new defect; cause-versus-symptom is judged in Fit. Neither trial has been re-run
+with this pair.*
+
 - **Fit (0-4)**: how exactly the fixed behaviour is what the governing spec describes and
   the ratified North Star asks for — 0 contradicts a spec sentence or the North Star (cite) ·
   1 both silent, the option guesses · 2 spec silent but the North Star or a root CLAUDE.md
@@ -529,35 +533,41 @@ cheaper fix over the one the spec describes, so it is now Fit, with effort as a 
   AND the North Star names that behaviour as the point. Spec = latest `.planning/specs/*.md`
   for the area; North Star = `north_star:` of the newest `.planning/decisions/*-decision-walk.md`.
   A Fit without a citation reads as 1.
-- **Depth (0-4)**: 0 masks the symptom · 1 buys headroom (bigger cap/timeout/retries),
-  same bug recurs · 2 removes the coupling here · 3 removes it here + sweeps siblings ·
-  4 makes the class unrepresentable (lint rule, gate, type, schema constraint, wrapper)
+- **Bug risk (0-4)**, lower is better: 0 a constant, copy or config swap the tests pin exactly ·
+  1 mechanical code with a fallback to today's behaviour, worst case the old bug · 2 new logic on
+  a tested path, a mistake is a wrong value or a red test · 3 a boundary the tests cannot exercise
+  (native call, second language, startup path, threading rule), a mistake is a crash or hang only
+  a launched build reveals · 4 the write path, a migration or a shared invariant with no fallback,
+  a mistake loses or corrupts data. Name the concrete failure, not the category. Cause-versus-
+  symptom is judged in Fit (a symptom mask reads Fit 1 at most).
 - **Effort** (one line, never a score): hours, files, migrations, revert path. Reported, never
-  deciding — highest Fit wins, then highest Depth; only a tie on both lets effort break it.
+  deciding — highest Fit wins, then lowest Bug risk; only a tie on both lets effort break it.
+  Highest Fit at Bug risk 3-4 against a lower Fit at 0-1 is a fork for the human, not a pick.
 
-Do not pad to three options: if an option is Depth 0 and you can't state its "Wins if",
+Do not pad to three options: if an option is Fit 0 or 1 and you can't state its "Wins if",
 delete it.
 
-| Option | Fit | Depth | Hinges on |
+| Option | Fit | Bug risk | Hinges on |
 |---|---|---|---|
 | 1. {name} | {0-4} ({§} / silent) | {0-4} | {U1 — or "nothing; right in every world"} |
 
-**Option 1: {name} — Fit {f}/4 · Depth {d}/4**
+**Option 1: {name} — Fit {f}/4 · Bug risk {r}/4**
 - What it does (plain English): {what the fix does and how that removes the symptom —
   the mechanism and resulting behavior, not just the files}
 - What to change: {files and changes}
 - Fit rests on: {section + quoted sentence, or "silent"}
 - Effort (not a score): {hours, files, revert path}
-- Risk: {what could go wrong}
+- Bug risk rests on: {the concrete failure that earns the number}
 - **Wins if**: {the specific condition under which this beats the recommended option — a
   fact about the world, tied to a numbered uncertainty where possible, not "you want
   something simpler". For the recommended option, state what would make it lose instead.}
 
 {1-3 options total. End with the conformance sentence — "Option N implements {spec §X:
 'quoted'} (or: the spec is silent and {North Star: 'quoted'} implies it) and beats Option M
-because ___" — then a one-line Recommendation naming the option + its Fit·Depth pair + the
-single deciding reason. Never pick the less-conformant or shallower option because it is
-cheaper. If a cheap observation would flip the recommendation, say that INSTEAD of picking.}
+because ___" — then a one-line Recommendation naming the option + its Fit·Bug-risk pair + the
+single deciding reason. Never pick the less-conformant option because it is cheaper, nor the
+riskier one because it is more thorough. If a cheap observation would flip the recommendation,
+say that INSTEAD of picking.}
 ```
 
 ### After triage agents complete
