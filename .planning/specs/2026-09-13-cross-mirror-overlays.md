@@ -416,15 +416,15 @@ says so and offers no Publish, the check wraps with the words, and card strings 
    `v10 · you have v2 (edited)` + check + Reinstall, at the narrowest card width the grid produces
    (`repeat(3–5, minmax(0,1fr))` has no floor), both themes. Nothing may clip or ellipsize inside the version
    words; the whole unit moves to the next row instead.
-7. `desktop/src/backend/mock/data.ts` `cardOf`, `mock/index.ts` `localProjection`, `withInstall` — **M1.1
-   (correction 4):** one scenario per mirror produces every state, on rows named here so a board and a test can
-   point at them. Marketplace, `?__mock=stale-eval` (extended): every placed card is state 3 (`latestVersion:'v5'`,
-   `installedVersion:'v2'`, `localMatch:'identical'`); additionally the first placed card in fixture order is
-   state 3b (`localMatch:'differs'`), the second is state 2 (`installedVersion:'v5'`). `?__mock=on-disk-only`:
-   `deploy-check` is state 4 (`installedVersion:null`, `localMatch:'differs'`, `onDiskOnly:true`). `default`:
-   states 1 (`installed:'absent'`) and 6 (`installed:'recorded'`, one card) as today; state 5 needs no fixture
-   (old CLI). Library, new `?__mock=overlays`: the first five Library cards in fixture order become §3.1 states
-   1–5 in order — `{installedVersion:'v3',localMatch:'identical',placed:true}`,
+7. `desktop/src/backend/mock/{scenario,index}.ts` — **M1.1 (correction 4):** one new scenario, `?__mock=overlays`,
+   produces every overlay state on both mirrors, on rows named here by position so a board and a test can point at
+   them; the existing `stale-eval` and `on-disk-only` scenarios are unchanged. Marketplace under `overlays`: every
+   placed card is state 3 (`latestVersion:'v5'`, `installedVersion:'v2'`, `localMatch:'identical'`), except the
+   first placed card in fixture order, which is state 3b (`localMatch:'differs'`), and the second, which is state 2
+   (`installedVersion:'v5'`); unplaced cards are state 1. `?__mock=on-disk-only` (unchanged): `deploy-check` is
+   state 4 (`installedVersion:null`, `localMatch:'differs'`, `onDiskOnly:true`). `default` (unchanged): states 1
+   and 6 (`installed:'recorded'`, one card) as today; state 5 needs no fixture (old CLI). Library under `overlays`:
+   the first five Library cards in fixture order become §3.1 states 1–5 in order — `{installedVersion:'v3',localMatch:'identical',placed:true}`,
    `{installedVersion:'v3',localMatch:'differs',placed:true,edited:true}`,
    `{installedVersion:null,localMatch:'differs',placed:true,edited:true}`,
    `{installedVersion:null,localMatch:'differs',placed:false,knownToTeam:true}`,
@@ -556,8 +556,9 @@ Desktop (`desktop/src/**`):
   `matchedVersion:'v1'` → `v1`, no Edited chip (D1), and its Marketplace twin → `v3 · you have v1`; edited install
   behind → `v10 · you have v2 (edited)` + Reinstall; edited install on latest → `v10 · you have v10 (edited)`,
   no Reinstall; Library edited install → `v2 (edited)`; the check renders inside `.card-version` for states 2–5
-  and nowhere in the right-hand group.
-- `skill-card-actions.test.ts` — **M1.1:** an edited install (state 3b) offers no Publish; state 4 does.
+  and nowhere in the right-hand group; an edited install (state 3b) offers no Publish button, state 4 does; a
+  byte-matched placed folder with `edited:true` shows no Edited chip. (`skill-card-actions.test.ts` covers the
+  `⋯` menu, whose Publish row is gated on the local folder alone per parent §11.4 and is unchanged.)
 - `desktop/src/backend/tauri/__tests__/index.test.ts` — `overview.evaluated` counts an overlay-eval card
   (correction 9); **M1.1:** a seeded twin (same `run_id` in both stores, team `mine:false`) names the runner; the
   same twin with team `mine:true` names nobody; `libraryVersion` prefers the byte match over the placement.
