@@ -201,10 +201,15 @@ export function repositoryUrl(remote: string): string {
 }
 
 /** Pure diagnostics for known git access failures; callers supply the actual transport URL. */
+/** git's HTTPS vocabulary for a repository that does not exist or that this account cannot see. One definition, shared by the access explanation and the successor lookup. */
+export function isRepositoryNotFound(stderr: string): boolean {
+  return /^remote: Repository not found\.$|^fatal: repository '.+' not found$/m.test(stderr);
+}
+
 export function explainGitAccessFailure(remote: string, stderr: string): string | null {
   try {
     const parsed = parseRemote(remote);
-    const notFound = /^remote: Repository not found\.$|^fatal: repository '.+' not found$/m.test(stderr);
+    const notFound = isRepositoryNotFound(stderr);
     const credentials = /could not read Username for 'https:\/\/github\.com'|terminal prompts disabled|Authentication failed for/m.test(stderr);
     const pushDenied = /^remote: Permission to .+ denied to .+\.$/m.test(stderr);
     const sshDenied = /^ERROR: Repository not found\.$|Permission denied \(publickey\)|^ERROR: Permission to .+ denied to .+\.$/m.test(stderr);

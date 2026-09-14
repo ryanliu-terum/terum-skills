@@ -1,6 +1,6 @@
 import { mapWithConcurrency } from './concurrency.js';
 import { lstat, readdir, readFile, realpath, stat } from 'node:fs/promises';
-import { basename, dirname, join, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, join, resolve, sep } from 'node:path';
 import { FRONTMATTER, type Config, type LibraryProject } from './schema.js';
 import { AGENT_PATHS } from './placer/agent-paths.js';
 import { assertNotInsideStateRoot, inspectSkillSource, scanSkillFolder, type SourceProblem } from './skill-source.js';
@@ -254,7 +254,21 @@ export async function librarySize(home: string, config: Pick<Config, 'placements
 export interface LibrarySkillMatch { name: string; path: string; libraryRoot: string; inspection: Inspection }
 
 /**
- * Resolve a bare skill name to a folder in the Library — the global root plus every `config.projects`
+ * Whether a ref names a FOLDER rather than a skill: `~`, `~/…`, an absolute path, or anything carrying a
+ * path separator. A legal skill name (1–64 lowercase alphanumerics or single hyphens) can contain none
+ * of these, so the two grammars never overlap and no name is ever mistaken for a path.
+ */
+export function refIsPath(ref: string): boolean {
+  return ref === '~' || ref.startsWith('~/') || isAbsolute(ref) || ref.includes('/') || ref.includes(sep);
+}
+
+/** A path ref as an absolute path: `~` expands to `home` (the shell never sees a ref the desktop passes, so the CLI expands it), a relative one resolves against the process cwd. */
+export function expandRefPath(ref: string, home: string): string {
+  return resolve(ref === '~' ? home : ref.startsWith('~/') ? join(home, ref.slice(2)) : ref);
+}
+
+/**
+ * Resolve a skill name OR a folder path to a folder in the Library — the global root plus every `config.projects`
  * root, and nothing else. Shared by `publish` and `eval` (§5.1 step 1, §6.3) so there is exactly one
  * answer to "which folder does this ref mean"; two resolvers would let the verb that publishes bytes
  * and the verb that evaluates them disagree about which bytes they mean.
@@ -267,21 +281,35 @@ export interface LibrarySkillMatch { name: string; path: string; libraryRoot: st
  * (`unusableSkillFolder`). A usable folder in a LATER root still wins over an unusable one in an
  * earlier root, so no ref that resolved before turns into a refusal. `undefined` now means exactly
  * one thing: no Library root holds an entry by that name.
+ *
+ * A PATH ref (`refIsPath`) matches the entry whose folder it is — compared as typed after `~` expansion,
+ * and again through the parent's realpath so a symlinked home or a `/var` → `/private/var` alias still
+ * matches. The desktop passes the Library card's path for a skill the team has never seen, because a
+ * name alone cannot tell two roots' same-named folders apart; the CLI must therefore accept the path
+ * or every first publish and eval from the app fails. The Library roots stay the only place a ref can
+ * land: a path that resolves outside them is `undefined` like any unknown name, so publish can never be
+ * pointed at an arbitrary folder on disk.
  */
 export async function resolveLibrarySkill(home: string, config: Pick<Config, 'placements' | 'projects'>, stateRoot: string, ref: string): Promise<LibrarySkillMatch | undefined> {
   const discovery = await localSkillRoots(home, config.projects ?? []);
   const ledger = await canonicalLedger(config);
   let unusable: LibrarySkillMatch | undefined;
+  const wanted = refIsPath(ref) ? expandRefPath(ref, home) : undefined;
+  const wantedCanonical = wanted === undefined ? undefined : await canonicalParentPath(wanted);
   const inventories = await Promise.all(discovery.roots.map(root => localSkills(root.root, config, { scope: root.scope, stateRoot, ledger })));
   for (const [index, root] of discovery.roots.entries()) {
     const inventory = inventories[index]!;
+    const realRoot = wanted === undefined ? undefined : await realpath(root.root).then((value) => value, () => undefined);
+    const isWanted = (candidate: LocalEntry) => wanted === undefined
+      ? candidate.name === ref
+      : resolve(candidate.path) === wanted || (wantedCanonical !== undefined && realRoot !== undefined && join(realRoot, candidate.name) === wantedCanonical);
     // Deliberately NOT `candidatesOf`: that filter answers "what may the picker offer to connect",
     // which excludes an already-placed folder and a privileged one. This answers "which folder does
     // this ref mean" — and an installed skill the user then edited is the commonest thing both
     // `publish` and `eval` are pointed at. Telling them no such folder exists when it is plainly
     // there is the opposite of "you can always see exactly what's on each"; the privilege and
     // hygiene gates still fire afterwards, with a message that says what is actually wrong.
-    const entry = inventory.entries.find((candidate) => candidate.name === ref);
+    const entry = inventory.entries.find(isWanted);
     if (!entry) continue;
     const match = { name: entry.name, path: entry.path, libraryRoot: root.root, inspection: entry.inspection };
     if (entry.inspection.kind === 'candidate') return match;

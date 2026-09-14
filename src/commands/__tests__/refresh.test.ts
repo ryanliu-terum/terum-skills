@@ -5,8 +5,8 @@ import { createConfigStore } from '../../lib/config.js';
 import { stampedAt, stampIsFresh } from '../../lib/hook.js';
 import { receiptSchema } from '../../lib/evals/receipt.js';
 import { systemRunner, type RunOptions } from '../../lib/runner.js';
-import { bareTeam, pushFromSeed, cloneWithIdentity, git, holdCloneLock, denyingRunner, ScriptedPrompter, clean, exists, wrapRunner, temporaryDirectory } from '../../lib/__tests__/fixtures.js';
-import { run, REFRESH_DEADLINE_MS } from '../refresh.js';
+import { bareTeam, pushFromSeed, cloneWithIdentity, git, holdCloneLock, denyingRunner, fakeGh, ScriptedPrompter, clean, exists, wrapRunner, temporaryDirectory } from '../../lib/__tests__/fixtures.js';
+import { run, REFRESH_DEADLINE_MS, SUCCESSOR_CACHE_MS } from '../refresh.js';
 import { run as evalReport } from '../evalReport.js';
 
 const ID = '11111111-1111-4111-8111-111111111111';
@@ -198,5 +198,110 @@ describe('refresh', () => {
     const root = await temporaryDirectory(); const store = createConfigStore(join(root, 'state')); await mkdir(store.root);
     await writeFile(join(store.root, 'config.json'), '{');
     expect(await run({ config: store, runner: denyingRunner([]) }, new ScriptedPrompter())).toMatchObject({ ok: false, error: expect.stringContaining('config.json') });
+  });
+});
+
+describe('refresh when the team repository no longer exists (2026-09-13: terum-shared-skills → shared-skills)', () => {
+  const NOT_FOUND = "remote: Repository not found.\nfatal: repository 'https://github.com/acme/team.git/' not found";
+  const successor = { ownerRepo: 'acme/team-2', source: 'invitation' as const, invitationId: 5, teamName: null, at: '2026-09-13T22:25:29Z' };
+  /** A GitHub-looking remote whose fetch answers "not found"; the clone itself is the local bare fixture. */
+  async function gone(successors: (runner: unknown, remote: string) => Promise<{ successors: typeof successor[]; reason?: string }>) {
+    const { store, ...rest } = await setup();
+    await git(['remote', 'set-url', 'origin', 'https://github.com/acme/team.git'], store.teamClone('team'));
+    await store.update(c => { c.teams.team!.remote = 'https://github.com/acme/team.git'; });
+    const runner = denyingRunner([
+      { command: 'git', argsPrefix: ['fetch', 'origin'], respond: () => ({ code: 128, stdout: '', stderr: NOT_FOUND }) },
+      { command: 'git', argsPrefix: [] },
+    ], systemRunner);
+    const asked: string[] = [];
+    const lookup = async (r: unknown, remote: string) => { asked.push(remote); return successors(r, remote); };
+    return { store, runner, asked, lookup, ...rest };
+  }
+
+  it('marks the team missing, looks up a successor, and carries the facts in the result for a program', async () => {
+    const { store, runner, asked, lookup } = await gone(async () => ({ successors: [successor] }));
+    const io = new ScriptedPrompter(); (io as { channel?: 'frames' }).channel = 'frames';
+    const outcome = await run({ config: store, runner, successors: lookup }, io);
+    expect(outcome).toMatchObject({ ok: true, value: { teams: [{ team: 'team', state: 'unreachable', missing: true, successors: [successor], summary: expect.stringContaining('acme/team no longer exists on GitHub') }] } });
+    expect(outcome.value?.teams[0]?.lookup).toBeUndefined();
+    expect(asked).toEqual(['https://github.com/acme/team.git']);
+    expect(io.asked).toEqual([]); expect(io.lines).toEqual([]);
+  });
+
+  it('offers the move to a person at a terminal and performs it when they pick the replacement', async () => {
+    const { store, runner, lookup } = await gone(async () => ({ successors: [successor] }));
+    const io = new ScriptedPrompter(['acme/team-2'], [], true);
+    let moved: unknown;
+    // The move itself is exercised in teamMove.test.ts; here it is intercepted at the runner: gh is a fake that reports
+    // no invitation, and the join's clone of acme/team-2 is where the run is stopped.
+    const gh = fakeGh('me', { 'api user/repository_invitations': { code: 0, stdout: '[]', stderr: '' } });
+    const intercepting = { run: async (command: 'git' | 'gh', args: readonly string[], options?: object) => { if (command === 'gh') return gh(args, options); if (command === 'git' && args[0] === 'clone') { moved = args; return { code: 1, stdout: '', stderr: 'stop here' }; } return runner.run(command, args, options); } };
+    const outcome = await run({ config: store, runner: intercepting, successors: lookup }, io);
+    expect(io.lines).toContain("team's repository acme/team no longer exists on GitHub. A replacement from the same owner is available: acme/team-2 (you were invited to it on 2026-09-13).");
+    expect(io.asked).toContain('Move this machine from team to the replacement?');
+    expect(io.offered[0]).toEqual(['acme/team-2', 'Not now']); expect(io.offeredDefaults[0]).toBe('acme/team-2');
+    expect(moved).toBeDefined();
+    // The refresh facts survive a failed move: the result carries them beside the error.
+    expect(outcome.ok).toBe(false); expect(outcome.value?.teams[0]?.missing).toBe(true);
+    expect(Object.keys((await store.read()).teams)).toEqual([]); // the old team was left; the join is what failed
+  });
+
+  it('respects "Not now", prints the command for a pipe, and says why nothing could be found', async () => {
+    const { store, runner, lookup } = await gone(async () => ({ successors: [successor] }));
+    const later = new ScriptedPrompter(['Not now'], [], true);
+    expect((await run({ config: store, runner, successors: lookup }, later)).value?.moved).toBeUndefined();
+    expect(Object.keys((await store.read()).teams)).toEqual(['team']);
+    const piped = new ScriptedPrompter();
+    await run({ config: store, runner, successors: lookup }, piped);
+    expect(piped.asked).toEqual([]);
+    expect(piped.lines).toContain("To follow it, run `npx -y terum-skills@latest team move 'acme/team-2'`.");
+    const { store: store2, runner: runner2 } = await gone(async () => ({ successors: [], reason: 'gh is logged out.' }));
+    const nothing = new ScriptedPrompter([], [], true);
+    const outcome = await run({ config: store2, runner: runner2, successors: async () => ({ successors: [], reason: 'gh is logged out.' }) }, nothing);
+    expect(outcome.value?.teams[0]).toMatchObject({ missing: true, successors: [], lookup: 'gh is logged out.' });
+    expect(nothing.asked).toEqual([]);
+    expect(nothing.lines).toContain("team's repository acme/team no longer exists on GitHub. gh is logged out.");
+  });
+
+  it('caches the lookup for a program (the app refreshes on every focus) for ten minutes, keyed on the remote, and never for a person at a terminal', async () => {
+    const { store, runner, asked, lookup } = await gone(async () => ({ successors: [successor] }));
+    const frames = () => { const io = new ScriptedPrompter(); (io as { channel?: 'frames' }).channel = 'frames'; return io; };
+    let clock = 1_000_000;
+    const now = () => clock;
+    await run({ config: store, runner, successors: lookup, now }, frames());
+    await run({ config: store, runner, successors: lookup, now }, frames());
+    expect(asked).toHaveLength(1);
+    expect(JSON.parse(await readFile(join(store.root, 'run', 'team.successors.json'), 'utf8'))).toMatchObject({ remote: 'https://github.com/acme/team.git', at: clock, search: { successors: [successor] } });
+    clock += SUCCESSOR_CACHE_MS;
+    const later = await run({ config: store, runner, successors: lookup, now }, frames());
+    expect(asked).toHaveLength(2);
+    expect(later.value?.teams[0]?.successors).toEqual([successor]);
+    // A person is about to act on the answer: always fresh. A "Not now" leaves the cache for the app.
+    await run({ config: store, runner, successors: lookup, now }, new ScriptedPrompter(['Not now'], [], true));
+    expect(asked).toHaveLength(3);
+    // A cache written for another remote is ignored.
+    await writeFile(join(store.root, 'run', 'team.successors.json'), JSON.stringify({ remote: 'https://github.com/acme/elsewhere.git', at: clock, search: { successors: [] } }));
+    await run({ config: store, runner, successors: lookup, now }, frames());
+    expect(asked).toHaveLength(4);
+    // Garbage in the cache file is not an error either.
+    await writeFile(join(store.root, 'run', 'team.successors.json'), '{not json');
+    expect((await run({ config: store, runner, successors: lookup, now }, frames())).ok).toBe(true);
+    expect(asked).toHaveLength(5);
+  });
+
+  it('never looks anything up in hook mode, for a non-GitHub remote, or for an access failure that is not "not found"', async () => {
+    const { store, runner, asked, lookup } = await gone(async () => ({ successors: [successor] }));
+    const hook = await run({ config: store, runner, successors: lookup, hook: true }, new ScriptedPrompter());
+    expect(hook.value?.teams[0]).toMatchObject({ state: 'unreachable' }); expect(hook.value?.teams[0]?.missing).toBeUndefined();
+    expect(asked).toEqual([]);
+    const { store: generic, seed } = await setup(); await pushFromSeed(seed, 'x.txt', 'x');
+    const genericRunner = denyingRunner([{ command: 'git', argsPrefix: ['fetch', 'origin'], respond: () => ({ code: 128, stdout: '', stderr: "fatal: repository '/gone.git' not found" }) }, { command: 'git', argsPrefix: [] }], systemRunner);
+    const outcome = await run({ config: generic, runner: genericRunner, successors: lookup }, new ScriptedPrompter([], [], true));
+    expect(outcome.value?.teams[0]).toMatchObject({ state: 'unreachable' }); expect(outcome.value?.teams[0]?.missing).toBeUndefined();
+    const { store: denied, runner: deniedRunner } = await gone(async () => ({ successors: [successor] }));
+    const deniedOutcome = await run({ config: denied, runner: denyingRunner([{ command: 'git', argsPrefix: ['fetch', 'origin'], respond: () => ({ code: 128, stdout: '', stderr: 'remote: Permission to acme/team.git denied to me.' }) }, { command: 'git', argsPrefix: [] }], systemRunner), successors: lookup }, new ScriptedPrompter([], [], true));
+    expect(deniedOutcome.value?.teams[0]?.missing).toBeUndefined();
+    expect(asked).toEqual([]);
+    void deniedRunner;
   });
 });

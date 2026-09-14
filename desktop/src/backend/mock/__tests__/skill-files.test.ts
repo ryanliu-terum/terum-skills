@@ -16,6 +16,12 @@ it('refuses a rename onto an occupied name and keeps a move collision in old-ski
  expect((await backend.library({scope:{kind:'checkout',root}})).value!.skills.filter(s=>s.name===target)).toHaveLength(1);
  expect(await backend.localSkill({path:root+'/.claude/skills/'+target})).toMatchObject({ok:true,value:{name:target}});
 });
+it('answers skill fix as the CLI does for a folder that already parses',async()=>{
+ const backend=createMockBackend(),path='~/.claude/skills/deploy-check',lines:string[]=[];
+ const run=backend.skillFile.fix({path});for await(const frame of run.frames)if(frame.t==='print')lines.push(frame.line);
+ expect(await run.done).toEqual({ok:true,value:{kind:'fix',path,destination:null,quarantined:null,installed:false,notices:['deploy-check: SKILL.md frontmatter is already valid YAML; nothing changed.']}});
+ expect(lines).toEqual(['deploy-check: SKILL.md frontmatter is already valid YAML; nothing changed.']);
+});
 it('keeps mock file operations visible in the Library and the path detail',async()=>{
  const backend=createMockBackend(),path='~/.claude/skills/deploy-check',renamed='~/.claude/skills/renamed';
  const before=await backend.library({scope:{kind:'global'}});expect(before.value?.skills.every(s=>!s.teamed&&s.installs==='—'&&s.latestVersion===null&&!s.flags.includes('update'))).toBe(true);

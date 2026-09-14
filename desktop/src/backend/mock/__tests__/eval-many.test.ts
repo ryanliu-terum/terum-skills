@@ -44,7 +44,7 @@ it('adds every shared skill without a receipt under --pending, and needs a team 
 
 it('refuses an unknown skill before any paid work, and the two malformed requests before a run exists', async () => {
   const backend = createMockBackend();
-  expect((await drive(backend, { refs: ['deploy-check', 'nowhere'], mode: 'now' })).result).toEqual({ ok: false, error: 'No local skill folder named `nowhere` in your library; install it from the marketplace first.' });
+  expect((await drive(backend, { refs: ['deploy-check', 'nowhere'], mode: 'now' })).result).toEqual({ ok: false, error: 'No local skill folder named `nowhere` in your library; install it from the marketplace first, or pass the folder\'s path.' });
   expect(() => backend.evalMany({ refs: [], mode: 'now' })).toThrow('Provide at least one skill, or --pending.');
   expect(() => backend.evalMany({ refs: ['deploy-check'], mode: 'batches', batch: 0 })).toThrow('--batch must be a positive integer.');
 });

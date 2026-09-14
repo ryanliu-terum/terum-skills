@@ -59,6 +59,15 @@ async function localReceipt(store: ConfigStore, folder: string, overrides: Recor
 const show = async (bare: string, path: string) => git(['show', `main:${path}`], bare);
 
 describe('publish (§5) — the only bridge between the two mirrors', () => {
+  // The desktop passes the Library card's path (`~/…`) for a skill the team has never seen — the only
+  // shape a first publish from the app ever takes — so the ref must resolve as a path too.
+  it('publishes from the folder\'s ~-prefixed path exactly as from its name', async () => {
+    const { store, home } = await prepared();
+    await librarySkill(home);
+    const result = await run({ ref: '~/.claude/skills/sample', home, config: store }, new ScriptedPrompter([], [false]));
+    expect(result).toMatchObject({ ok: true, value: { team: 'team', name: 'sample', project: 'Global', version: 'v1', created: true } });
+  });
+
   it('mints v1 from the LOCAL folder, injects the managed fields, and lands on main', async () => {
     const { fixture, store, home } = await prepared();
     const folder = await librarySkill(home);
@@ -205,6 +214,10 @@ describe('publish (§5) — the only bridge between the two mirrors', () => {
     await librarySkill(home, 'sample');
     expect(await run({ ref: 'sample', home, config: store, project: 'nope', yesProfile: false }, new ScriptedPrompter())).toMatchObject({ ok: false, error: 'Unknown project nope.' });
     expect(await run({ ref: 'ghost', home, config: store, yesProfile: false }, new ScriptedPrompter())).toMatchObject({ ok: false, error: expect.stringContaining('No local skill folder named ghost in your library.') });
+    // A path outside every Library root misses in the path grammar — publish never reads an arbitrary folder.
+    const outside = join(await (await import('../../lib/__tests__/fixtures.js')).temporaryDirectory(), 'sample');
+    await mkdir(outside, { recursive: true }); await writeFile(join(outside, 'SKILL.md'), '---\nname: sample\ndescription: elsewhere\n---\n');
+    expect(await run({ ref: outside, home, config: store, yesProfile: false }, new ScriptedPrompter())).toMatchObject({ ok: false, error: expect.stringContaining(`No skill folder at ${outside} in your library.`) });
 
     const linked = join(home, '.claude', 'skills', 'linked');
     await symlink(join(home, '.claude', 'skills', 'sample'), linked, 'dir');

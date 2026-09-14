@@ -5,7 +5,7 @@
  * `TERUM_SKILLS_AGENT_CMD` (default `claude`) so tests can substitute a stub.
  */
 import { spawn, type ChildProcess } from 'node:child_process';
-import { statSync } from 'node:fs';
+import { readFileSync, statSync } from 'node:fs';
 import { writeFile, mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -30,6 +30,7 @@ const agentCmd = (): string => process.env['TERUM_SKILLS_AGENT_CMD'] ?? 'claude'
 const hostEvidence = (): AgentCommandEvidence => ({
   platform: process.platform, env: process.env, execPath: process.execPath,
   isFile: (path) => { try { return statSync(path).isFile(); } catch { return false; } }, // a candidate that does not exist is simply not the binary
+  readText: (path) => { try { return readFileSync(path, 'utf8'); } catch { return null; } }, // an unreadable shim is reported by the resolver, not thrown here
 });
 
 export class AgentRunError extends Error {}

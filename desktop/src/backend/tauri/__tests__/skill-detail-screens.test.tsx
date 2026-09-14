@@ -117,7 +117,7 @@ it.each([0,1,2])('keeps a successful validation with %s warnings in Quality and 
   const {backend,client}=open('#/skill/deploy-check?tab=quality');
   await screen.findByText('Hygiene checks · passed on connect · free, no model calls');
   const invalidate=vi.spyOn(client,'invalidateQueries');
-  vi.spyOn(backend,'validate').mockResolvedValue({ok:true,value:{name:'deploy-check',findings:0,warnings}});
+  vi.spyOn(backend,'validate').mockResolvedValue({ok:true,value:{name:'deploy-check',findings:0,warnings,repairable:0}});
   fireEvent.click(screen.getByRole('button',{name:'Validate'}));
   expect(await screen.findByText(`hygiene passed${warnings?` · ${warnings} warning${warnings===1?'':'s'}`:''}`)).toBeVisible();
   expect(invalidate).toHaveBeenCalledWith({queryKey:['skill','deploy-check']});
@@ -126,7 +126,7 @@ it.each([0,1,2])('keeps a successful validation with %s warnings in Quality and 
 it.each([true,false])('keeps validation failure (with value=%s) in Quality',async hasValue=>{
   const {backend}=open('#/skill/deploy-check?tab=quality');
   await screen.findByText('Hygiene checks · passed on connect · free, no model calls');
-  vi.spyOn(backend,'validate').mockResolvedValue({ok:false,error:'Cannot validate.',...(hasValue?{value:{name:'deploy-check',findings:2,warnings:1}}:{})});
+  vi.spyOn(backend,'validate').mockResolvedValue({ok:false,error:'Cannot validate.',...(hasValue?{value:{name:'deploy-check',findings:2,warnings:1,repairable:0}}:{})});
   fireEvent.click(screen.getByRole('button',{name:'Validate'}));
   expect(await screen.findByText(hasValue?'2 findings · 1 warning':'Cannot validate.')).toBeVisible();
   expect(screen.getByRole('heading',{name:'deploy-check'})).toBeVisible();
@@ -196,12 +196,12 @@ it('renders a team SKILL.md through the drawn Markdown vocabulary',async()=>{
   expect(document.querySelector('.skill-md-meta')).toHaveTextContent('17 lines');
 });
 const uncRoot=String.raw`\\wsl.localhost\Ubuntu\home\teniroo`,uncPath=uncRoot+String.raw`\.claude\skills\adopt-agent-tooling`;
-function localFolder(root=uncRoot,invalid=false):AmendResult{return (name,value)=>{
+function localFolder(root=uncRoot,invalid=false,reason='invalid-yaml'):AmendResult{return (name,value)=>{
  if(name!=='ls-local')return;
  const sections=value.local as Record<string,unknown>[];
  const separator=root===uncRoot?String.raw`\\`.slice(0,1):'/';
  const folder=root+separator+'.claude'+separator+'skills',path=folder+separator+'adopt-agent-tooling';
- Object.assign(sections[1]!,{root:folder,repoRoot:root,label:'teniroo',rootState:'scanned',registered:false,detected:true,rows:invalid?[]:[{name:'adopt-agent-tooling',path,state:'untracked locally',tracked:false,placement:null,health:'untracked'}],notOffered:invalid?[{name:'adopt-agent-tooling',path,reason:'invalid-yaml'}]:[]});
+ Object.assign(sections[1]!,{root:folder,repoRoot:root,label:'teniroo',rootState:'scanned',registered:false,detected:true,rows:invalid?[]:[{name:'adopt-agent-tooling',path,state:'untracked locally',tracked:false,placement:null,health:'untracked'}],notOffered:invalid?[{name:'adopt-agent-tooling',path,reason}]:[]});
 };}
 it.each([['UNC',uncRoot,uncPath],['POSIX','/home/teniroo','/home/teniroo/.claude/skills/adopt-agent-tooling']] as const)('names the checkout in the crumb and the sidebar when a %s payload holds the folder',async(_label,root,path)=>{
  open('#/skill/local?path='+encodeURIComponent(path),localFolder(root));
@@ -217,10 +217,45 @@ it('opens a folder the CLI could not parse, by path, and still names its checkou
  expect(screen.getByRole('link',{name:/^teniroo/})).toHaveAttribute('aria-current','page');
  expect(screen.getByText('invalid-yaml')).toBeVisible();
 });
+it('draws Fix beside an invalid-yaml flag and sends the exact folder to skill fix',async()=>{
+ const {backend}=open('#/skill/local?path='+encodeURIComponent(uncPath),localFolder(uncRoot,true));
+ const mock=createMockBackend();const fix=vi.spyOn(backend.skillFile,'fix').mockImplementation(mock.skillFile.fix);
+ fireEvent.click(await screen.findByRole('button',{name:'Fix'}));
+ await waitFor(()=>expect(fix).toHaveBeenCalledWith({path:uncPath}));
+});
+it('draws no Fix for a broken folder skill fix cannot repair',async()=>{
+ open('#/skill/local?path='+encodeURIComponent(uncPath),localFolder(uncRoot,true,'description-missing'));
+ await screen.findByRole('heading',{name:'adopt-agent-tooling'});
+ expect(screen.getByText('description-missing')).toBeVisible();
+ expect(screen.queryByRole('button',{name:'Fix'})).toBeNull();
+});
+it('draws Fix beside a name-mismatch flag too',async()=>{
+ open('#/skill/local?path='+encodeURIComponent(uncPath),localFolder(uncRoot,true,'name-mismatch'));
+ await screen.findByRole('heading',{name:'adopt-agent-tooling'});
+ expect(await screen.findByRole('button',{name:'Fix'})).toBeVisible();
+});
+it('offers Fix in Quality when a failed validation counts repairable findings, runs skill fix on the folder, then validates again',async()=>{
+ const {backend}=open('#/skill/local?path='+encodeURIComponent(uncPath)+'&tab=quality',localFolder());
+ await screen.findByRole('heading',{name:'adopt-agent-tooling'});
+ const validate=vi.spyOn(backend,'validate').mockResolvedValue({ok:false,error:'Hygiene failed.',value:{name:'adopt-agent-tooling',findings:3,warnings:0,repairable:2}});
+ const mock=createMockBackend();const fix=vi.spyOn(backend.skillFile,'fix').mockImplementation(mock.skillFile.fix);
+ fireEvent.click(screen.getByRole('button',{name:'Validate'}));
+ fireEvent.click(await screen.findByRole('button',{name:'Fix 2 findings'}));
+ await waitFor(()=>expect(fix).toHaveBeenCalledWith({path:uncPath}));
+ await waitFor(()=>expect(validate).toHaveBeenCalledTimes(2));
+});
+it('draws no Fix in Quality when nothing is repairable or the CLI predates the count',async()=>{
+ const {backend}=open('#/skill/local?path='+encodeURIComponent(uncPath)+'&tab=quality',localFolder());
+ await screen.findByRole('heading',{name:'adopt-agent-tooling'});
+ vi.spyOn(backend,'validate').mockResolvedValue({ok:false,error:'Hygiene failed.',value:{name:'adopt-agent-tooling',findings:1,warnings:0,repairable:0}});
+ fireEvent.click(screen.getByRole('button',{name:'Validate'}));
+ expect(await screen.findByText('1 finding · 0 warnings')).toBeVisible();
+ expect(screen.queryByRole('button',{name:/^Fix/})).toBeNull();
+});
 it('sends the folder, not the route segment, to validate',async()=>{
  const {backend,client}=open('#/skill/local?path='+encodeURIComponent(uncPath)+'&tab=quality',localFolder());
  await screen.findByRole('heading',{name:'adopt-agent-tooling'});
- const validate=vi.spyOn(backend,'validate').mockResolvedValue({ok:true,value:{name:'adopt-agent-tooling',findings:0,warnings:0}}),invalidate=vi.spyOn(client,'invalidateQueries');
+ const validate=vi.spyOn(backend,'validate').mockResolvedValue({ok:true,value:{name:'adopt-agent-tooling',findings:0,warnings:0,repairable:0}}),invalidate=vi.spyOn(client,'invalidateQueries');
  fireEvent.click(screen.getByRole('button',{name:'Validate'}));
  expect(await screen.findByText('hygiene passed')).toBeVisible();
  expect(validate).toHaveBeenCalledExactlyOnceWith({ref:uncPath});
@@ -287,7 +322,7 @@ it('routes a by-path removal through D6 with the exact folder and typed confirma
 it('validates the team name on a qualified name route, not its placed folder or qualified ref',async()=>{
  const {backend}=open('#/skill/acme%2Fdeploy-check?'+seedOrigin+'&tab=quality',projectCopy());
  await screen.findByRole('heading',{name:'deploy-check'});
- const validate=vi.spyOn(backend,'validate').mockResolvedValue({ok:true,value:{name:'deploy-check',findings:0,warnings:0}});
+ const validate=vi.spyOn(backend,'validate').mockResolvedValue({ok:true,value:{name:'deploy-check',findings:0,warnings:0,repairable:0}});
  fireEvent.click(screen.getByRole('button',{name:'Validate'}));
  await waitFor(()=>expect(validate).toHaveBeenCalledWith({ref:'deploy-check',team:'acme'}));
  expect(validate.mock.calls.every(([args])=>args.ref==='deploy-check')).toBe(true);

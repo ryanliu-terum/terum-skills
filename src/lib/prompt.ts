@@ -1,6 +1,8 @@
 import { colorCapable, style } from './banner.js';
 import { createInterface } from 'node:readline/promises';
-import { stdin as processStdin, stdout as processStdout } from 'node:process';
+import { emitKeypressEvents } from 'node:readline';
+import { env as processEnv, stdin as processStdin, stdout as processStdout } from 'node:process';
+import { CancelledError } from './result.js';
 
 /** Lines the person needs in order to answer; a terminal prints them once, immediately before the question; frame mode carries them on the ask frame. */
 export interface AskOptions {
@@ -64,11 +66,22 @@ export class PromptClosedError extends Error {
 
 export const MAX_SELECT_ATTEMPTS = 3;
 
+/** What a cursor-driven select needs from its streams beyond a line reader: raw key events in, cursor movement out. */
+export interface CursorCapableInput { isTTY?: boolean; setRawMode?(mode: boolean): unknown; resume?(): unknown; pause?(): unknown; }
+export interface CursorCapableOutput { isTTY?: boolean; columns?: number; }
+
 export interface TerminalStreams {
-  input?: NodeJS.ReadableStream & { isTTY?: boolean };
-  output?: NodeJS.WritableStream;
+  input?: NodeJS.ReadableStream & CursorCapableInput;
+  output?: NodeJS.WritableStream & CursorCapableOutput;
   /** Override TTY detection (tests). Defaults to `input.isTTY`. */
   interactive?: boolean;
+  /**
+   * Override the cursor-select capability check (tests). Defaults to: interactive, both streams are TTYs, the input
+   * can enter raw mode, TERM is not `dumb`, and TERUM_SKILLS_PLAIN_PROMPTS is unset. Off means the numbered line prompt.
+   */
+  cursor?: boolean;
+  /** The environment the capability check reads (tests). Defaults to process.env. */
+  env?: NodeJS.ProcessEnv;
   /** Settles when the output stream broke (a reader that went away): a pending or later question fails closed instead of hanging. */
   outputClosed?: Promise<void>;
 }
@@ -111,6 +124,101 @@ export function terminalPrompter(streams: TerminalStreams = {}): Prompter {
     }
   }
 
+  const environment = streams.env ?? processEnv;
+  /**
+   * A cursor-driven select needs a person at a terminal on both ends: keys arrive raw (no line discipline), and the
+   * list is redrawn in place with cursor movement, which a pipe, a log file, a dumb terminal or a screen reader
+   * cannot follow. Anything less keeps the numbered line prompt, which is the same question with the same answers.
+   */
+  const cursorCapable = (): boolean => streams.cursor ?? (
+    interactive && Boolean(input.isTTY) && typeof input.setRawMode === 'function' && Boolean(output.isTTY)
+    && environment['TERM'] !== 'dumb' && !environment['TERUM_SKILLS_PLAIN_PROMPTS']
+  );
+  const visibleLength = (line: string): number => [...line.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '')].length;
+  const rowsOf = (lines: readonly string[]): number => {
+    const columns = Math.max(1, output.columns ?? 80);
+    return lines.reduce((total, line) => total + Math.max(1, Math.ceil(visibleLength(line) / columns)), 0);
+  };
+
+  /**
+   * The list with a movable cursor: ↑/↓ (also j/k, Tab/Shift-Tab, Home/End) move, Enter chooses, a digit chooses that
+   * row outright, Esc or Ctrl-C cancels (CancelledError, the same typed decline every verb reports), Ctrl-D or the input
+   * ending closes (PromptClosedError). The frame is redrawn in place and replaced by a two-line transcript of the answer
+   * when it settles, so a scrollback reads the same as the line prompt's. Raw mode, the hidden cursor and the key
+   * listener are all undone in `finally`, whichever way the question ends.
+   */
+  async function selectWithCursor(question: string, choices: readonly string[], defaultChoice: string | undefined, descriptions: readonly string[] | undefined, decorated: boolean): Promise<string> {
+    if (!interactive) throw new PromptClosedError(question.trim(), 'not-interactive');
+    if (outputBroken) throw new PromptClosedError(question.trim(), 'output-closed');
+    // The same indent rule as the line prompts: decorated output is indented only where colour is on.
+    const color = colorCapable();
+    const pad = decorated && color ? '  ' : '';
+    const paint = (kind: 'cyan' | 'dim', line: string): string => (color ? style(kind, line) : line);
+    let index = Math.max(0, defaultChoice === undefined ? 0 : choices.indexOf(defaultChoice));
+    const frame = (): string[] => {
+      const rows = choices.flatMap((choice, i) => [
+        i === index ? paint('cyan', `${pad}› ${i + 1}. ${choice}`) : `${pad}  ${i + 1}. ${choice}`,
+        ...(descriptions?.[i] ? [paint('dim', `${pad}     ${descriptions[i]}`)] : []),
+      ]);
+      return [`${pad}${question}`, ...rows, paint('dim', `${pad}↑/↓ to move, Enter to choose${choices.length <= 9 ? ', or type a number' : ''}.`)];
+    };
+    let drawn = 0;
+    const draw = (): void => {
+      const lines = frame();
+      output.write(`${drawn > 0 ? `\x1b[${drawn}A\x1b[0J` : ''}${lines.join('\n')}\n`);
+      drawn = rowsOf(lines);
+    };
+    const settle = (chosen: string | null): void => {
+      // Replace the frame with the answer (or the cancellation) so the transcript stays readable.
+      const lines = [`${pad}${question}`, chosen === null ? paint('dim', `${pad}(cancelled)`) : paint('cyan', `${pad}› ${chosen}`)];
+      output.write(`\x1b[${drawn}A\x1b[0J${lines.join('\n')}\n`);
+    };
+    emitKeypressEvents(input);
+    const raw = input.setRawMode?.bind(input);
+    output.write('\x1b[?25l');
+    raw?.(true);
+    input.resume?.();
+    let onKey: ((sequence: string | undefined, key: { name?: string; ctrl?: boolean; shift?: boolean; sequence?: string } | undefined) => void) | undefined;
+    let onEnd: (() => void) | undefined;
+    try {
+      draw();
+      const answered = new Promise<string>((resolve, reject) => {
+        onEnd = () => reject(new PromptClosedError(question.trim(), 'closed'));
+        onKey = (sequence, key) => {
+          const name = key?.name ?? '';
+          const text = sequence ?? key?.sequence ?? '';
+          if (key?.ctrl && name === 'c') { reject(new CancelledError('Selection was cancelled.')); return; }
+          if (key?.ctrl && name === 'd') { reject(new PromptClosedError(question.trim(), 'closed')); return; }
+          if (name === 'escape') { reject(new CancelledError('Selection was cancelled.')); return; }
+          if (name === 'return' || name === 'enter') { resolve(choices[index]!); return; }
+          if (/^[1-9]$/.test(text) && Number(text) <= choices.length && choices.length <= 9) { index = Number(text) - 1; draw(); resolve(choices[index]!); return; }
+          const before = index;
+          if (name === 'up' || name === 'k' || (name === 'tab' && key?.shift)) index = (index - 1 + choices.length) % choices.length;
+          else if (name === 'down' || name === 'j' || name === 'tab') index = (index + 1) % choices.length;
+          else if (name === 'home') index = 0;
+          else if (name === 'end') index = choices.length - 1;
+          if (index !== before) draw();
+        };
+        input.on('keypress', onKey);
+        input.once('end', onEnd);
+      });
+      const failClosed = (): never => { throw new PromptClosedError(question.trim(), 'output-closed'); };
+      const broken = streams.outputClosed?.then<never>(failClosed, failClosed);
+      const chosen = await Promise.race(broken ? [answered, broken] : [answered]);
+      settle(chosen);
+      return chosen;
+    } catch (error) {
+      if (error instanceof CancelledError && !outputBroken) settle(null);
+      throw error;
+    } finally {
+      if (onKey) input.off('keypress', onKey);
+      if (onEnd) input.off('end', onEnd);
+      raw?.(false);
+      input.pause?.();
+      output.write('\x1b[?25h');
+    }
+  }
+
   return {
     interactive,
     channel: 'terminal',
@@ -130,6 +238,8 @@ export function terminalPrompter(streams: TerminalStreams = {}): Prompter {
       const descriptions = options?.descriptions?.length === choices.length ? options.descriptions : undefined;
       if (options?.descriptions && !descriptions) output.write('Select descriptions do not match choices; descriptions omitted.\n');
       if (defaultChoice !== undefined && !choices.includes(defaultChoice)) throw new Error('Select default must be one of the choices.');
+      if (choices.length === 0) throw new Error('Select needs at least one choice.');
+      if (cursorCapable()) return selectWithCursor(question, choices, defaultChoice, descriptions, Boolean(options?.decorated));
       const decorated = options?.decorated && colorCapable();
       const lines = choices.map((choice, index) => `${index + 1}. ${choice}`).join('\n');
       for (let attempt = 0; attempt < MAX_SELECT_ATTEMPTS; attempt++) {

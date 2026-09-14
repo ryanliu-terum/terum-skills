@@ -12,12 +12,17 @@
 import { ConfigStore, createConfigStore, selectTeam } from '../lib/config.js';
 import type { WithForm } from '../lib/invocation.js';
 import type { Prompter } from '../lib/prompt.js';
-import { normalizeRemote } from '../lib/remote.js';
+import { githubOwnerRepo, isRepositoryNotFound, normalizeRemote } from '../lib/remote.js';
 import { fromError, type Result, success } from '../lib/result.js';
 import { type Runner, systemRunner } from '../lib/runner.js';
+import { findSuccessors, type Successor, successorSummary, type SuccessorSearch } from '../lib/successor.js';
 import { CloneBusy, type CloneState, describeClone, refreshClone, RemoteAccessError } from '../lib/teamRepo.js';
+import { invocation } from '../lib/invocation.js';
+import { run as move, type MoveResult } from './teamMove.js';
 import { defaultWrapperOptions, installWrapper, wrapperState } from '../lib/wrapper.js';
 import { writeStamp } from '../lib/hook.js';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
 
 export interface SyncArgs extends WithForm {
   /** Absent means every configured team. */
@@ -30,6 +35,10 @@ export interface SyncArgs extends WithForm {
   deadlineMs?: number;
   /** Session-start hook mode; it may refresh only Terum's managed bundled manual. */
   hook?: boolean;
+  /** Test knob: the successor lookup for a team whose repository no longer exists. Defaults to lib/successor's GitHub lookup. */
+  successors?: (runner: Runner, remote: string) => Promise<SuccessorSearch>;
+  /** Test knob: the clock the successor cache is judged by. */
+  now?: () => number;
 }
 export type RefreshState = 'refreshed' | 'busy' | 'unreachable' | 'no-clone' | 'error';
 export interface RefreshTeam {
@@ -41,13 +50,36 @@ export interface RefreshTeam {
   head: string | null;
   /** This CLI's own explanation for a state other than 'refreshed'. */
   detail?: string;
+  /**
+   * `unreachable` because the remote answered "repository not found": it was deleted, moved, or this account was never
+   * given access. Set only for a GitHub remote, and only outside hook mode (the hook must stay fast and silent).
+   */
+  missing?: true;
+  /** Where the team may have gone, best first, when `missing`; empty when GitHub was asked and knows of nothing. */
+  successors?: Successor[];
+  /** Why no successor could be looked up (gh absent, logged out, offline), when `missing`. */
+  lookup?: string;
+  /** One line for a person: the repository is gone, and what was found. Present exactly when `missing`. */
+  summary?: string;
 }
-export interface SyncResult { changed: boolean; teams: RefreshTeam[]; notices: string[]; }
+export interface SyncResult {
+  changed: boolean;
+  teams: RefreshTeam[];
+  notices: string[];
+  /** Set when an interactive terminal run offered a move to a found successor and the person took it. */
+  moved?: MoveResult;
+}
 export type RefreshArgs = SyncArgs;
 export type RefreshResult = SyncResult;
 
 /** A fetch that has not finished in this long is killed; a background caller must never wedge (W-08). */
 export const REFRESH_DEADLINE_MS = 20_000;
+/**
+ * A successor lookup is a handful of GitHub calls, and the desktop app refreshes on every window focus (at most once a
+ * minute) for as long as the team stays unresolved. The answer is cached under `run/<team>.successors.json` for this
+ * long; a person at a terminal always asks afresh, because they are about to act on it.
+ */
+export const SUCCESSOR_CACHE_MS = 10 * 60_000;
 /**
  * git already runs without a terminal prompt for piped runs (lib/runner.ts), but Git Credential Manager can raise
  * a GUI dialog on Windows for an expired credential, which a silent background verb must never do. Passed as
@@ -85,7 +117,20 @@ export async function run(args: SyncArgs, io: Prompter): Promise<Result<SyncResu
         // still readable: report what happened and keep going. Re-read HEAD so the report is not a guess.
         const head = await headOf(runner, clone);
         if (error instanceof CloneBusy) teams.push({ team, state: 'busy', changed: false, head, detail: error.message });
-        else if (error instanceof RemoteAccessError) teams.push({ team, state: 'unreachable', changed: false, head, detail: [error.stderr, error.explanation].filter(Boolean).join('\n') });
+        else if (error instanceof RemoteAccessError) {
+          const outcome: RefreshTeam = { team, state: 'unreachable', changed: false, head, detail: [error.stderr, error.explanation].filter(Boolean).join('\n') };
+          // A repository that is gone is the one unreachable state a person can act on, so say where it went. The hook
+          // is exempt: it runs at every session start with nobody reading, and the lookup is a network round trip.
+          const ownerRepo = githubOwnerRepo(binding.remote);
+          if (!args.hook && ownerRepo && isRepositoryNotFound(error.stderr)) {
+            const search = await cachedSuccessors(store.root, team, binding.remote, io.interactive && io.channel !== 'frames', () => (args.successors ?? findSuccessors)(runner, binding.remote), args.now ?? Date.now);
+            outcome.missing = true;
+            outcome.successors = search.successors;
+            if (search.reason) outcome.lookup = search.reason;
+            outcome.summary = successorSummary(team, ownerRepo, search);
+          }
+          teams.push(outcome);
+        }
         else teams.push({ team, state: 'error', changed: false, head, detail: error instanceof Error ? error.message : String(error) });
       }
     }
@@ -102,12 +147,54 @@ export async function run(args: SyncArgs, io: Prompter): Promise<Result<SyncResu
     if (args.hook) notices.push(...lines);
     else if (io.channel !== 'frames') for (const line of lines) io.print(line);
     const result: SyncResult = { changed: teams.some((outcome) => outcome.changed), teams, notices };
+    // The self-driving half: a person at a terminal is offered the move right here, one question, and a shell over frames
+    // gets the same facts in `successors` to draw its own button. A hook or a pipe gets the summary line and the command.
+    for (const outcome of teams) {
+      if (!outcome.missing || !outcome.summary) continue;
+      if (io.channel === 'frames') continue;
+      io.print(outcome.summary);
+      const choices = (outcome.successors ?? []).map((entry) => entry.ownerRepo);
+      if (choices.length === 0) continue;
+      if (!io.interactive || args.hook) { io.print(`To follow it, run \`${invocation(args.form, 'team move', choices[0]!)}\`.`); continue; }
+      const NOT_NOW = 'Not now';
+      const picked = await io.select(`Move this machine from ${outcome.team} to the replacement?`, [...choices, NOT_NOW], choices.length === 1 ? choices[0] : NOT_NOW, { descriptions: [...(outcome.successors ?? []).map((entry) => `${entry.source === 'invitation' ? 'Invitation pending' : 'You already have access'}${entry.teamName ? `; team.json names it ${entry.teamName}` : ''}${entry.at ? `; ${entry.at.slice(0, 10)}` : ''}.`), `Leave ${outcome.team} as it is; run \`${invocation(args.form, 'team move', choices[0]!)}\` later.`] });
+      if (picked === NOT_NOW) continue;
+      const moved = await move({ form: args.form, target: picked, from: outcome.team, yes: true, config: store, runner }, io);
+      // The refresh itself succeeded; a failed move is reported as this run's failure with the refresh facts kept.
+      if (!moved.ok) return { ok: false, error: moved.error, value: result, ...(moved.cancelled ? { cancelled: true as const } : {}), ...(moved.refused ? { refused: true as const } : {}) };
+      result.moved = moved.value;
+      break; // one team per machine: after a move there is nothing else to offer
+    }
     // This internal marker keeps the public DTO to its three declared fields while allowing the bin
     // to route hook notices to stderr. It is intentionally non-enumerable, so frames and JSON retain
     // the same SyncResult shape as ordinary sync.
     if (args.hook) Object.defineProperty(result, 'hook', { value: true });
     return success(result);
   } catch (error) { return fromError(error); }
+}
+
+interface SuccessorCache { remote: string; at: number; search: SuccessorSearch; }
+
+/**
+ * The successor lookup, cached per team for SUCCESSOR_CACHE_MS unless `fresh` (a person at a terminal). A cache that
+ * cannot be read or written is simply not a cache: the lookup runs, and the result is returned either way. The cache
+ * is keyed on the remote it answered for, so a re-bound team never reads a stale answer.
+ */
+async function cachedSuccessors(root: string, team: string, remote: string, fresh: boolean, lookup: () => Promise<SuccessorSearch>, now: () => number): Promise<SuccessorSearch> {
+  const path = join(root, 'run', `${team}.successors.json`);
+  if (!fresh) {
+    try {
+      const cached = JSON.parse(await readFile(path, 'utf8')) as Partial<SuccessorCache>;
+      if (cached.remote === remote && typeof cached.at === 'number' && now() - cached.at < SUCCESSOR_CACHE_MS && now() >= cached.at && cached.search && Array.isArray(cached.search.successors)) return cached.search;
+    } catch { /* absent, unreadable or malformed: look it up below and overwrite */ }
+  }
+  const search = await lookup();
+  try {
+    await mkdir(join(root, 'run'), { recursive: true, mode: 0o700 });
+    const record: SuccessorCache = { remote, at: now(), search };
+    await writeFile(path, `${JSON.stringify(record)}\n`, { mode: 0o600 });
+  } catch { /* a cache that cannot be written costs one more lookup next time; the answer is still returned */ }
+  return search;
 }
 
 function cloneDetail(state: Exclude<CloneState, { state: 'ok' }>): string {
