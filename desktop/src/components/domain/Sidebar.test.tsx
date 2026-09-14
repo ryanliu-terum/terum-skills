@@ -15,14 +15,14 @@ afterEach(() => { cleanup(); location.hash = ''; vi.restoreAllMocks(); });
 
 it('omits the entire Inbox group when its surface is unavailable', async () => {
   const surfaces = { ...await createMockBackend().surfaces(), inbox: false };
-  render(<BackendContext value={createMockBackend()}><QueryClientProvider client={new QueryClient()}><HashRouter><Sidebar selected="Global" counts={null} machine={undefined} surfaces={surfaces}/></HashRouter></QueryClientProvider></BackendContext>);
+  render(<BackendContext value={createMockBackend()}><QueryClientProvider client={new QueryClient()}><HashRouter><Sidebar selected="Global" counts={null} surfaces={surfaces}/></HashRouter></QueryClientProvider></BackendContext>);
   for (const name of ['Inbox', 'Pushes', 'Updates', 'Alerts']) expect(screen.queryByRole('link', { name })).toBeNull();
   expect(screen.getByRole('link', { name: 'Members' })).toBeVisible();
 });
 
 it.each([true, false])('renders served navigation and hides Inbox until its surface resolves: %s', async loaded => {
   const status = await createMockBackend().status();
-  render(<QueryClientProvider client={new QueryClient()}><HashRouter><Sidebar selected="Global" counts={null} machine={undefined} surfaces={loaded ? await createMockBackend().surfaces() : undefined} roots={status.ok ? status.value.roots ?? undefined : undefined}/></HashRouter></QueryClientProvider>);
+  render(<QueryClientProvider client={new QueryClient()}><HashRouter><Sidebar selected="Global" counts={null} surfaces={loaded ? await createMockBackend().surfaces() : undefined} roots={status.ok ? status.value.roots ?? undefined : undefined}/></HashRouter></QueryClientProvider>);
   for (const name of ['Global', 'Projects', 'Terum', 'SSM', 'MRF', 'Marketplace', 'Members']) expect(screen.getByRole('link', { name })).toBeVisible();
   for (const name of ['Inbox','Pushes','Updates','Alerts']) { if (loaded) expect(screen.getByRole('link',{name})).toBeVisible(); else expect(screen.queryByRole('link',{name})).toBeNull(); }
   expect(document.querySelectorAll('.nav-count')).toHaveLength(0);
@@ -77,7 +77,7 @@ it('renders no Global number when the served status omits its count', async () =
 });
 
 function openSidebar(backend=createMockBackend(),selected='Global',counts:Record<string,string>|null={Global:'15'}) {
- return backend.status().then(status=>{if(!status.ok)throw new Error(status.error);return render(<BackendContext value={backend}><QueryClientProvider client={new QueryClient()}><HashRouter><Sidebar selected={selected} roots={status.value.roots} counts={counts} machine={undefined}/></HashRouter></QueryClientProvider></BackendContext>);});
+ return backend.status().then(status=>{if(!status.ok)throw new Error(status.error);return render(<BackendContext value={backend}><QueryClientProvider client={new QueryClient()}><HashRouter><Sidebar selected={selected} roots={status.value.roots} counts={counts}/></HashRouter></QueryClientProvider></BackendContext>);});
 }
 it('keys and selects same-label projects by canonical root',async()=>{
  const backend=createMockBackend(),status=await backend.status();if(!status.ok)throw new Error(status.error);
@@ -177,7 +177,7 @@ const surfaceCases:{label:string;of:(base:Surfaces)=>Surfaces|undefined}[]=[
 
 it.each(surfaceCases)('renders the Team group as the second .nav-group when $label',async({of})=>{
  const surfaces=of(await createMockBackend().surfaces());
- const {container}=render(<BackendContext value={createMockBackend()}><QueryClientProvider client={new QueryClient()}><HashRouter><Sidebar selected="Global" counts={null} machine={undefined} surfaces={surfaces}/></HashRouter></QueryClientProvider></BackendContext>);
+ const {container}=render(<BackendContext value={createMockBackend()}><QueryClientProvider client={new QueryClient()}><HashRouter><Sidebar selected="Global" counts={null} surfaces={surfaces}/></HashRouter></QueryClientProvider></BackendContext>);
  const groups=groupsOf(container);
  expect(groups).toHaveLength(2);
  expect(groups[0]).toHaveTextContent('Library');
@@ -187,7 +187,7 @@ it.each(surfaceCases)('renders the Team group as the second .nav-group when $lab
 
 it('renders no second .nav-group when neither Team surface is available, so nothing takes the 56px margin',async()=>{
  const surfaces={...await createMockBackend().surfaces(),catalog:false,roster:false};
- const {container}=render(<BackendContext value={createMockBackend()}><QueryClientProvider client={new QueryClient()}><HashRouter><Sidebar selected="Global" counts={null} machine={undefined} surfaces={surfaces}/></HashRouter></QueryClientProvider></BackendContext>);
+ const {container}=render(<BackendContext value={createMockBackend()}><QueryClientProvider client={new QueryClient()}><HashRouter><Sidebar selected="Global" counts={null} surfaces={surfaces}/></HashRouter></QueryClientProvider></BackendContext>);
  const groups=groupsOf(container);
  expect(groups).toHaveLength(1);
  expect(groups[0]).toHaveTextContent('Library');
@@ -198,7 +198,7 @@ it('renders no second .nav-group when neither Team surface is available, so noth
 it('keeps the Inbox rows inside the Library group, so folding Inbox never changes the group count',async()=>{
  const surfaces=await createMockBackend().surfaces();
  for(const collapsed of [[],['inbox'],['projects'],['inbox','projects']]){
-  const {container,unmount}=render(<BackendContext value={createMockBackend()}><QueryClientProvider client={new QueryClient()}><HashRouter><Sidebar selected="Global" counts={null} machine={undefined} surfaces={surfaces} collapsedSections={collapsed}/></HashRouter></QueryClientProvider></BackendContext>);
+  const {container,unmount}=render(<BackendContext value={createMockBackend()}><QueryClientProvider client={new QueryClient()}><HashRouter><Sidebar selected="Global" counts={null} surfaces={surfaces} collapsedSections={collapsed}/></HashRouter></QueryClientProvider></BackendContext>);
   expect(groupsOf(container),collapsed.join('+')||'nothing collapsed').toHaveLength(2);
   expect(groupsOf(container)[1]).toHaveTextContent('Team');
   unmount();
