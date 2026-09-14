@@ -1,5 +1,5 @@
 import { PassThrough } from 'node:stream';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { readFileSync } from 'node:fs';
@@ -146,7 +146,9 @@ describe('serve serial frame session', () => {
   });
 
   it.each([false, true])('restores cwd after a request (throws=%s)', async throws => {
-    const original = process.cwd(), directory = await mkdtemp(path.join(tmpdir(), 'serve-cwd-'));
+    // `process.cwd()` always reports a resolved path, so the expectation has to be resolved too:
+    // on macOS `tmpdir()` is under the `/var` -> `/private/var` symlink.
+    const original = process.cwd(), directory = await realpath(await mkdtemp(path.join(tmpdir(), 'serve-cwd-')));
     try {
       const observed: string[] = [];
       const s = shell(async argv => { observed.push(process.cwd()); if (throws && argv[0] === 'status') throw new Error('oops'); });
