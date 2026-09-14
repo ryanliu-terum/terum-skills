@@ -147,8 +147,10 @@ command: use `sync`. Neither belongs in the advertised verb list.
 `hello.features` names `libraryProjects`, `projects`, `memberRole`, `localIdentity`, `roles`, `favorites`, `follow`, `lastSeen`, `installScope`, `inviteScoping`, `disablePerMachine`, `projectMembers`, `liftOnCards`, `runEvalInApp`, `perCase`, `progress`, `refresh`, `appUpdate`, `reconcile`, and `serve`.
 
 True: `libraryProjects`, `projects`, `memberRole`, `localIdentity`, `roles`, `installScope`,
-`liftOnCards`, `runEvalInApp`, `progress`, `refresh`, `appUpdate`, `reconcile`, `serve`.
-False: `favorites`, `follow`, `lastSeen`, `inviteScoping`, `disablePerMachine`, `projectMembers`, `perCase`.
+`liftOnCards`, `runEvalInApp`, `perCase`, `progress`, `refresh`, `appUpdate`, `reconcile`, `serve`.
+False: `favorites`, `follow`, `lastSeen`, `inviteScoping`, `disablePerMachine`, `projectMembers`.
+
+`perCase` turned true with eval-engine spec rev 20 (2026-09-14): receipts now carry `per_case` rows and a `case_runs` tally, and the desktop gates its per-case table on this flag.
 
 `libraryProjects` is the explicit local registry (`project add`, `project remove`, `project list`);
 `projects` is team grouping (`team project create`). `memberRole` is the owner-written job label;
