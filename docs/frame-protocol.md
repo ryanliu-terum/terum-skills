@@ -132,7 +132,7 @@ A second-team binding refused before any side effect:
 
 ## Versioning
 
-The current package reports version `0.17.0`, protocol `1`. The re-recorded 0.14.0
+The current package reports version `0.18.0`, protocol `1`. The re-recorded 0.14.0
 hello lines under `.planning/codex-runs/*/frames/` precede B5's three skill verbs;
 `src/lib/frames.ts` now advertises this complete verb list:
 
