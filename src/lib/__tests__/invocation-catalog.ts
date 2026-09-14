@@ -935,6 +935,12 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
   },
   {
     "file": ".claude/skills/terum-skills/SKILL.md",
+    "line": 56,
+    "policy": "fixed",
+    "pattern": "| `skill fix <abs-path>` | none; the folder is the user's own | show stdout; it applies the repairs with one right answer (quote a frontmatter value YAML refuses, `name` to the folder, `license` to team policy, strip invisible characters, clear an executable bit on a non-script) and prints `Still needs you` for the rest |"
+  },
+  {
+    "file": ".claude/skills/terum-skills/SKILL.md",
     "line": 109,
     "policy": "fixed",
     "pattern": "| `prune` | none; an empty quarantine simply returns | `npx -y terum-skills@latest prune` |"
@@ -1169,9 +1175,9 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
   },
   {
     "file": "README.md",
-    "line": 374,
+    "line": 381,
     "policy": "prose",
-    "pattern": "| | `skill move <path> --to global\\|<project root>` / `skill rename <path> --to <new-name>` / `skill delete <path>` | Move, rename, or delete a folder in your Library, after confirming by name. Delete removes an unmodified placement outright (the team repo still holds its bytes; reinstall restores them) and quarantines an edited placement or any folder that is not a placement; `prune` permanently deletes quarantine contents |"
+    "pattern": "| | `skill move <path> --to global\\|<project root>` / `skill rename <path> --to <new-name>` / `skill delete <path>` / `skill fix <path>` | Move, rename, delete, or fix a folder in your Library. Move, rename, and delete confirm by name; fix applies the repairs with one right answer (quote a frontmatter value YAML refuses, set `name` to the folder, set `license` to the team policy, strip invisible characters, clear an executable bit on a non-script) and lists what still needs you. Delete removes an unmodified placement outright (the team repo still holds its bytes; reinstall restores them) and quarantines an edited placement or any folder that is not a placement; `prune` permanently deletes quarantine contents |"
   },
   {
     "file": "README.md",
@@ -1472,6 +1478,36 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "line": 227,
     "policy": "prose",
     "pattern": "`skill delete <path>` are one-shot frame writes. Their `text` ask is `Type <name> to <operation> this folder`."
+  },
+  {
+    "file": "docs/frame-protocol.md",
+    "line": 236,
+    "policy": "prose",
+    "pattern": "`skill fix <path>` is a one-shot frame write with no ask. It applies every repair whose outcome is"
+  },
+  {
+    "file": "docs/frame-protocol.md",
+    "line": 239,
+    "policy": "prose",
+    "pattern": "team policy, removing HYG2's invisible characters, and clearing an executable mode on a non-script."
+  },
+  {
+    "file": "docs/frame-protocol.md",
+    "line": 238,
+    "policy": "prose",
+    "pattern": "(the `ls --local` `invalid-yaml` reason), setting `name` to the folder name, setting `license` to the"
+  },
+  {
+    "file": "docs/frame-protocol.md",
+    "line": 240,
+    "policy": "prose",
+    "pattern": "It then runs the same inspection and hygiene gate as `ls --local` and `validate` and prints what still"
+  },
+  {
+    "file": "docs/frame-protocol.md",
+    "line": 244,
+    "policy": "prose",
+    "pattern": "three, and `validate`'s result carries `repairable`, the count of changes `skill fix` would make."
   },
   {
     "file": "docs/frame-protocol.md",

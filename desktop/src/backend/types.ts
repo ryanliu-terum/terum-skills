@@ -38,7 +38,7 @@ export interface SkillCard {
  localEval:(ReceiptSummary & {runnerHandle:string|null;version:string|null})|null;localEvalStale:boolean;
  /** Machine-local annotation from placements; never used for catalogue ordering or counts. */
  installedVersion:string|null;latestVersion:string|null;evalVersion:number|null;evalStale:boolean;latestEvalState:'ok'|'none'|'invalid'|null;profileVersion:string|null;
-teamed:boolean;path:string|null;updated:string|null;favorites?:number|null;grants:string[]|null;normalizedGrants:string|null;grantsHash:string|null;project:string;category:string;name:string;desc:string;size:string;installs:string;favorite:boolean;flags:IndicatorKey[];flagText:Partial<Record<IndicatorKey,string>>;enabled:boolean;installed:InstallState;placed:boolean;onDiskOnly:boolean;teamState:TeamState;paths:[string,string][];projectRoots?:string[];provenance?:CardProvenance|null;wlt:[number,number,number]|null;cases?:number|undefined;partial?:[number,number]|null|undefined;summary:ReceiptSummary|null;installsN:number;tokensK:number;indicators:Record<IndicatorKey,{icon:string;token:TokenKey;text:string}>}
+teamed:boolean;path:string|null;updated:string|null;favorites?:number|null;grants:string[]|null;normalizedGrants:string|null;grantsHash:string|null;project:string;category:string;name:string;desc:string;size:string;installs:string;favorite:boolean;flags:IndicatorKey[];flagText:Partial<Record<IndicatorKey,string>>;/** The broken flag names a fault `skill fix` repairs (an `invalid-yaml` or `name-mismatch` folder); the detail page draws Fix beside it. */fixable?:boolean;enabled:boolean;installed:InstallState;placed:boolean;onDiskOnly:boolean;teamState:TeamState;paths:[string,string][];projectRoots?:string[];provenance?:CardProvenance|null;wlt:[number,number,number]|null;cases?:number|undefined;partial?:[number,number]|null|undefined;summary:ReceiptSummary|null;installsN:number;tokensK:number;indicators:Record<IndicatorKey,{icon:string;token:TokenKey;text:string}>}
 export type Receipt=NonNullable<Design['DETAIL']['receipt']>;
 export interface SkillMdBlock {kind:'h2'|'p'|'ol'|'code';content:string|string[]}
 export interface ReportNumbers {holes:number;nRounds:number;triggerTotal:number;precisionObserved?:string}
@@ -148,7 +148,8 @@ export interface EvalArgs {team?:string;ref:string;cases?:number}
 /** §6.3: `team` and `id` are null for a folder that belongs to no team, which is now the common case. */
 export interface EvalResult {name:string;runDir:string;executionStatus:'complete'|'partial'|'failed';team:string|null;id:string|null;shareHint:boolean}
 export interface ValidateArgs {team?:string;ref?:string;cwd?:string}
-export interface ValidateResult {name:string;findings:number;warnings:number}
+/** `repairable` counts the changes `skill fix` would make; a CLI that predates the verb omits it and the adapter reads 0, so the app draws no Fix. */
+export interface ValidateResult {name:string;findings:number;warnings:number;repairable:number}
 export interface UpdateAdvice {running:string|null;latest:string|null;observation:'newer'|'same'|'older'|'unknown';launch:'global'|'local'|'npx'|'source'|'unknown';description:string;advice:string[];lines:string[]}
 export type AppUpdatePhase='waiting'|'installing'|'launched'|'failed';
 export type AppUpdateReason='on-close'|'overnight'|'manual';
@@ -166,4 +167,4 @@ HOOK:Design['HOOK']|null;QUARANTINE:Design['QUARANTINE']|null;CLI_LATEST:string|
 INVITEE?:string;K:number|null;AGENT_CLI_AUTH:'signed-in'|'unknown';MACHINE:Machine;ME:Identity;TEAMS:TeamStatus[];TEAM_POLICY:{license:string|null;categories:string[]|null;categoriesNote:string;projects:string[]|null};SHARED_SPECIMEN:[string,string,string,string]|null;tools:{git:boolean;gh:boolean};syncNote:string|null};
 export type Onboarding = Pick<Design, 'ONBOARD_STEPS'|'ONBOARD_BASICS'|'GLOBAL_SET'|'BOOT_STEPS'|'ONBOARD_LATER'|'ONBOARD_COMMUNITY'|'ONBOARD_FETCH_ERROR'|'WELCOME_LINES'|'BASICS_COPY'|'BASICS_HINT'|'THEME_OPTIONS'|'LIBRARY_OVERVIEW'|'INVITEE'|'TEAM_REPO'|'INVITE_TIP'|'JOIN_BLOCK_NOTE'> & {skill:SkillCard;summary:ReceiptSummary|null;arm:Receipt['arm'];used_by:string[];installs_n:number;shareCommand:string;rosterInitials:string[];team:Design['TEAMS'][number];me:Design['ME'];teamN:number;searchResults:{kind:'skill'|'person'|'project';name:string;meta:string;initials?:string}[];joinBlock:string;bootRows:[string,string,string][];failedBootRows:[string,string,string][]};
 
-export interface SkillFileResult {kind:'move'|'rename'|'delete';path:string;destination:string|null;quarantined:string|null;installed:boolean;notices:string[]}
+export interface SkillFileResult {kind:'move'|'rename'|'delete'|'fix';path:string;destination:string|null;quarantined:string|null;installed:boolean;notices:string[]}

@@ -32,7 +32,8 @@ export interface HygieneInput {
 }
 
 const ALLOWED_EXTENSIONS = new Set(['.md', '.txt', '.json', '.yaml', '.yml', '.csv', '.toml', '.xml', '.html', '.css', '.js', '.ts', '.py', '.sh', '.sql', '.svg', '.png', '.jpg', '.jpeg', '.gif', '.webp', '.pdf']);
-const INVISIBLE = /[\u202A-\u202E\u2066-\u2069\u200B-\u200D\u2060\uFEFF]/u;
+/** HYG2's invisible set; exported so `skill fix` strips exactly what this check names. */
+export const INVISIBLE = /[\u202A-\u202E\u2066-\u2069\u200B-\u200D\u2060\uFEFF]/u;
 const EMAIL = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
 const SCRIPTS = ['Latin', 'Cyrillic', 'Greek', 'Armenian', 'Hebrew', 'Arabic', 'Syriac', 'Thaana', 'Devanagari', 'Bengali', 'Gurmukhi', 'Gujarati', 'Oriya', 'Tamil', 'Telugu', 'Kannada', 'Malayalam', 'Sinhala', 'Thai', 'Lao', 'Tibetan', 'Myanmar', 'Georgian', 'Hangul', 'Ethiopic', 'Cherokee', 'Canadian_Aboriginal', 'Ogham', 'Runic', 'Khmer', 'Mongolian', 'Hiragana', 'Katakana', 'Bopomofo', 'Han', 'Yi', 'Old_Italic', 'Gothic', 'Deseret', 'Inherited', 'Common'] as const;
 const SCRIPT_PATTERNS = SCRIPTS.map((script) => [script, new RegExp(`^\\p{Script=${script}}$`, 'u')] as const);
@@ -152,7 +153,7 @@ export function reportHygieneWarnings(print: (line: string) => void, assessment:
 
 function thousands(value: number): string { return String(value).replace(/\B(?=(\d{3})+(?!\d))/g, ','); }
 
-function decodeText(contents: Buffer): string | undefined {
+export function decodeText(contents: Buffer): string | undefined {
   if (contents.subarray(0, 8192).includes(0)) return undefined;
   // ignoreBOM keeps a leading U+FEFF in the decoded text so HYG2 can see it — the default
   // decoder strips it, which would exempt exactly one of the code points HYG2 names (review P2).
@@ -194,7 +195,7 @@ function emailOffset(text: string, author: string | undefined): number | undefin
   }
   return undefined;
 }
-function normalizeLicense(value: string): string { return value.trim().toLowerCase().replace(/^apache license(?:,)? version 2\.0$/i, 'apache-2.0').replace(/^mit license$/i, 'mit').replace(/^bsd 3-clause(?: license)?$/i, 'bsd-3-clause'); }
+export function normalizeLicense(value: string): string { return value.trim().toLowerCase().replace(/^apache license(?:,)? version 2\.0$/i, 'apache-2.0').replace(/^mit license$/i, 'mit').replace(/^bsd 3-clause(?: license)?$/i, 'bsd-3-clause'); }
 function detectLicense(text: string): string | undefined {
   const spdx = /SPDX-License-Identifier:\s*([A-Za-z0-9.+-]+)/i.exec(text)?.[1];
   if (spdx) return normalizeLicense(spdx);

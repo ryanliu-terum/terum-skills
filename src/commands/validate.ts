@@ -10,9 +10,11 @@ import { assertSkillDirectory, sourceFiles } from '../lib/skill-source.js';
 import { readTeam } from '../lib/skills.js';
 import { listVersions } from '../lib/teamRepo.js';
 import { parseVersionFolder } from '../lib/versions.js';
+import { planRepairs } from '../lib/skill-repair.js';
 
 export interface ValidateArgs extends WithForm { target: string; team?: string; cwd?: string; config?: ConfigStore; }
-export interface ValidateResult { name: string; findings: number; warnings: number; }
+/** `repairable` counts the changes `skill fix` would make to this folder — the app draws Fix when it is above zero. */
+export interface ValidateResult { name: string; findings: number; warnings: number; repairable: number; }
 
 interface Target { directory: string; name: string }
 
@@ -94,13 +96,14 @@ export async function run(args: ValidateArgs, io: Prompter): Promise<Result<Vali
     try { assessment = assessHygiene(name, input, policy.skill_license); }
     catch (error) { if (!(error instanceof HygieneRefused)) throw error; assessment = error.assessment; }
     reportHygieneWarnings((line) => io.print(line), assessment);
+    const repairable = planRepairs({ name, ...input, policyLicense: policy.skill_license }).repaired.length;
     if (assessment.errors.length) {
       const errors = formatHygieneFindings(assessment.errors);
       for (const line of errors.split('\n')) io.print(line);
-      return failure(`Hygiene failed for ${name}:\n${errors}`, { name, findings: assessment.errors.length, warnings: assessment.warnings.length });
+      return failure(`Hygiene failed for ${name}:\n${errors}`, { name, findings: assessment.errors.length, warnings: assessment.warnings.length, repairable });
     }
     const warnings = assessment.warnings.length;
     io.print(`${name}: hygiene passed${warnings ? ` (${warnings} warning${warnings === 1 ? '' : 's'})` : ''}.`);
-    return success({ name, findings: 0, warnings });
+    return success({ name, findings: 0, warnings, repairable });
   } catch (error) { return fromError(error); }
 }
