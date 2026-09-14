@@ -164,7 +164,12 @@ the folder, else null), `matchedName` and `matchedTeam` (the skill and team that
 plus its `path`, the team name, and `mine` — whether this machine's handle ran it), and `knownToTeam`
 (the folder's frontmatter uuid belongs to a team skill). A row from an older CLI omits all five; a shell
 that reads them must treat absence as unknown, never as "unpublished". Identical bytes in more than
-one team match nothing and add a `problems[]` entry unless a placement names the team.
+one team match nothing and add a `problems[]` entry unless a placement names the team. The row's own-store
+`localEval` receipt carries the same `mine` flag (true when any handle this machine holds ran it, or when the run
+was made with no team binding at all and carries the `local` placeholder handle), so a shell
+choosing between the two receipts for one folder can name a runner exactly when the shown receipt is not the
+viewer's own; a `localEval` without `mine` comes from an older CLI and should keep its earlier reading (a
+seeded copy carries a version and names its runner, an own run carries none).
 Team `ls` includes `people` with automatic `installed` records and curated `profile` entries.
 
 Each team skill's `latestVersion` is its highest `v<N>` folder; `versionCount` counts versions.
