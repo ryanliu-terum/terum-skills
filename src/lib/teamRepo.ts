@@ -1,6 +1,6 @@
 import { packageRoot } from './package-root.js';
 import { existsSync, readFileSync } from 'node:fs';
-import { chmod, lstat, mkdir, readdir, realpath, rm, rmdir, stat, writeFile } from 'node:fs/promises';
+import { chmod, lstat, mkdir, readdir, realpath, rm, rmdir, stat, unlink, writeFile } from 'node:fs/promises';
 import { packageVersion } from './package.js';
 import { basename, dirname, join, posix, resolve, sep } from 'node:path';
 import lockfile from 'proper-lockfile';
@@ -602,10 +602,11 @@ export async function refreshClone(runner: Runner, clone: string, options: { lab
   // whose commit the reset would otherwise rewind.
   await withCloneLock(clone, async (assertHeld) => {
     for (const args of [['fetch', 'origin'], ['reset', '--hard', 'origin/main']]) {
-      assertHeld();
-      // A hung fetch must not hold a child slot or the writer lock; the local reset needs no deadline.
-      const result = await runner.run('git', args, { cwd: clone, env: options.env, ...(args[0] === 'fetch' ? { deadlineMs: options.deadlineMs } : {}) });
-      if (result.code !== 0) {
+      for (let attempt = 1; ; attempt++) {
+        assertHeld();
+        // A hung fetch must not hold a child slot or the writer lock; the local reset needs no deadline.
+        const result = await runner.run('git', args, { cwd: clone, env: options.env, ...(args[0] === 'fetch' ? { deadlineMs: options.deadlineMs } : {}) });
+        if (result.code === 0) break;
         const stderr = (result.stderr || result.stdout).trim();
         const message = `Could not refresh ${options.label ?? clone}: ${stderr}`;
         if (args[0] === 'fetch') {
@@ -613,10 +614,37 @@ export async function refreshClone(runner: Runner, clone: string, options: { lab
           const copy = origin.code === 0 ? explainGitAccessFailure(origin.stdout.trim(), result.stderr) : null;
           if (copy) throw new RemoteAccessError(message, stripRemoteCredentials(origin.stdout), stderr, copy);
         }
-        throw new Error(message);
+        // git never expires a lock file: one left by a killed git (this CLI's own fetch at its deadline, a crash, a
+        // power loss) blocks every later reset for good while the fetch half keeps landing, so the read verbs would
+        // freeze on a working tree that never moves again. The writer lock held here proves no terum-skills process
+        // is writing this clone, so an abandoned lock inside .git is removed and the step retried exactly once; a
+        // young one, or a path that cannot be verified, is named for the person and never touched.
+        const lock = await abandonedGitLock(clone, stderr);
+        if (lock?.stale && attempt === 1) { await unlink(lock.path); continue; }
+        throw new Error(lock ? `${message}\nThe lock ${lock.path} is ${Math.round(lock.ageMs / 1000)} s old; if no git process is running on this clone, delete it and sync again.` : message);
       }
     }
   }, { lockStale: options.lockStale, label: options.label, lockWaitMs: options.lockWaitMs, onWaiting: options.onWaiting });
+}
+
+/** A git lock file older than this with the writer lock held is abandoned, not in use (git's own advice window). */
+export const GIT_LOCK_STALE_MS = 10 * 60_000;
+/**
+ * The lock file git names in `Unable to create '<path>.lock': File exists`, when it resolves inside this clone's own
+ * .git directory, with its age; null when the failure was something else or the path cannot be verified. Never
+ * throws: a report, not a gate.
+ */
+export async function abandonedGitLock(clone: string, stderr: string, now: () => number = Date.now): Promise<{ path: string; ageMs: number; stale: boolean } | null> {
+  const named = /Unable to create '(.+?\.lock)': File exists/.exec(stderr)?.[1];
+  if (!named) return null;
+  try {
+    const gitDir = await realpath(join(clone, '.git')), path = await realpath(named);
+    if (!path.startsWith(gitDir + sep)) return null;
+    const details = await stat(path);
+    if (!details.isFile()) return null;
+    const ageMs = now() - details.mtimeMs;
+    return { path, ageMs, stale: ageMs > GIT_LOCK_STALE_MS };
+  } catch { return null; }
 }
 
 export function cloneLockPath(root: string): string {

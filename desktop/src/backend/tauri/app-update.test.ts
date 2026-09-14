@@ -4,8 +4,8 @@ import { browserPrefs } from '../prefs';
 import { createRun } from '../mock/run';
 import type { Result } from '../types';
 afterEach(() => { localStorage.clear(); });
-function harness(phase = 'launched') {
- const marker = { schema: 1, version: '0.12.2', phase, at: '2026-09-10T01:30:00Z', error: null, reason: 'on-close' };
+function harness(phase = 'launched', version = '0.12.2') {
+ const marker = { schema: 1, version, phase, at: '2026-09-10T01:30:00Z', error: null, reason: 'on-close' };
  const payload = { mode: 'check', platform: 'win32-x64', supported: true, cliVersion: '0.12.2', latest: '0.12.2', latestAt: null, probe: 'cached', probeError: null, staged: null, installed: ['0.12.2'], lastApply: marker, ppid: 42 };
  const results: Result<unknown>[] = [];
  const deps: AppUpdateDeps = {
@@ -21,8 +21,13 @@ it('shows a successful marker throughout one session and acknowledges it for lat
  expect(await h.update.check({ force: true })).toMatchObject({ ok: true, value: { lastApply: { version: '0.12.2' } } });
  expect(await createAppUpdate(h.deps).check()).toMatchObject({ ok: true, value: { lastApply: null } });
 });
-it('retains failed markers across launches', async () => {
- const h = harness('failed'); await h.update.check(); expect(await createAppUpdate(h.deps).check()).toMatchObject({ ok: true, value: { lastApply: { phase: 'failed' } } });
+it('retains failed markers for another version across launches', async () => {
+ const h = harness('failed', '0.12.3'); await h.update.check(); expect(await createAppUpdate(h.deps).check()).toMatchObject({ ok: true, value: { lastApply: { version: '0.12.3', phase: 'failed' } } });
+});
+it('reads a failed marker for the running version as the launch it evidently was, and acknowledges it like one', async () => {
+ // The binary IS 0.12.2: the installer finished and only the bookkeeping after it failed (the CLI marks 'launched' first now, but an older CLI's marker can still say this).
+ const h = harness('failed'); expect(await h.update.check()).toMatchObject({ ok: true, value: { lastApply: { version: '0.12.2', phase: 'launched', error: null } } });
+ expect(await createAppUpdate(h.deps).check()).toMatchObject({ ok: true, value: { lastApply: null } });
 });
 it('keeps the successful observation and notice when acknowledgement cannot be saved', async () => {
  const h = harness(); const set = vi.fn(() => { throw new Error('read only'); }); h.deps.prefs.set = set;

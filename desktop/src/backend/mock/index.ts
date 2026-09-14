@@ -7,7 +7,8 @@ import { decodeText } from '../../lib/fixture-text';
 import { overviewCopy } from '../../lib/overview-copy';
 import { abbreviateHome } from '../paths';
 import type { Backend } from '../Backend';
-import type { InviteResult, Result, Roster, Run, SearchHit, SetupResult, SkillCard } from '../types';
+import type { EvalManyResult, InviteResult, Result, Roster, Run, SearchHit, SetupResult, SkillCard } from '../types';
+import type { EvalQueueItem } from '../eval-queue';
 import { design, inboxItems, skillByRef, cardOf, detailOf, catalogData, remoteSlugsOf, MOCK_ORIGIN } from './data';
 import { cli, roster_by_adoption, statusLines } from './derive';
 import { onboardingData, replaySetupEvals } from './onboarding';
@@ -69,6 +70,8 @@ export function createMockBackend(opts:{latencyMs?:number}={}):Backend & {readon
   return createRun(async ctx=>{if(scenario==='error')return fail(errors[family]);if(scenario==='loading'){while(true)await ctx.sleep(60_000);}if(scenario==='slow'||latency)await ctx.sleep(scenario==='slow'?2000:latency);return structuredClone(await script(ctx));});
  }
  const fileChanges=new Map<string,{path:string|null;name:string;original:string}>();
+ /** The CLI's `eval` takes a skill, never a URL segment: a by-path ref names the folder, whose name is the skill's unless this session moved or renamed it. */
+ const localName=(ref:string)=>[...fileChanges.values()].find(change=>change.path===ref)?.original??ref.split(/[\\/]/).filter(Boolean).at(-1)??ref;
  function folderOf(root:Root):string{return root.kind==='global'?'~/.claude/skills':root.root+'/.claude/skills';}
  /** The fixture skills natively under a root: Global holds every SKILLS entry, a checkout the ones LIST_OF puts there. */
  function fixtureSkillsAt(root:Root){const scopes:Record<string,readonly string[]>=design.LIST_OF,canonical=root.label;return canonical==='Global'?design.SKILLS:design.SKILLS.filter(skill=>skill.project!=='local'&&scopes[skill.name]?.includes(canonical));}
@@ -130,7 +133,7 @@ export function createMockBackend(opts:{latencyMs?:number}={}):Backend & {readon
   async capabilities(){return {appVersion:design.APP_VERSION,windowChrome:'cosmetic',disablePerMachine:true,inboxEventLog:true,offtargetKind:true,machineRegistry:true,perCaseEvalTables:true,openInEditor:true,clipboard:true};},
   async surfaces(){return {divergence:true,status:true,settings:true,onboarding:true,library:true,skill:true,receipts:true,inbox:true,catalog:true,roster:true,update:true,libraryProjects:false,appUpdate:false};},
   async status(){return structuredClone(ok({machine:{...design.MACHINE,hostname:design.MACHINE.name},me:identity,teams:readScenario()==='no-team'?[]:mockTeams(),tools:{git:true,gh:true},roots:mockRoots(),counts:statusCounts(location.hash,readScenario())}));},
-  settings:async()=>{const result=await read<Settings>('settings',()=>ok({INVITE_TIP:design.INVITE_TIP,JOIN_BLOCK_NOTE:design.JOIN_BLOCK_NOTE,INVITEE:design.INVITEE,K:design.K,MACHINE:{...design.MACHINE,hostname:design.MACHINE.name},ME:identity,TEAMS:mockTeams(),TEAM_POLICY:{...design.TEAM_POLICY,categories:design.CATEGORIES.map(([name])=>name),projects:design.PROJECTS.map(project=>project.name),categoriesNote:'From SKILL.md frontmatter; the list is admin-extendable.'},tools:{git:true,gh:true},syncNote:null,PLACEMENTS:design.PLACEMENTS,PLACEMENTS_N:design.PLACEMENTS_N,PINNED_N:design.PINNED_N,APPROVALS:design.APPROVALS,QUARANTINE:design.QUARANTINE,HOOK:design.HOOK,APP_VERSION:design.APP_VERSION,AGENT_CLI:design.AGENT_CLI,AGENT_CLI_AUTH:'signed-in',COMMUNITY:design.COMMUNITY,STORAGE:design.STORAGE,SETTINGS_NAV:design.SETTINGS_NAV,SHORTCUTS:design.SHORTCUTS,INBOX_KIND_TEXT:design.INBOX_KIND_TEXT,THEME_OPTIONS:design.THEME_OPTIONS,CLI_VERSION:design.CLI_VERSION,CLI_LATEST:design.CLI_LATEST,FOLLOWING:design.FOLLOWING,SHARED_SPECIMEN:design.SHARED_SPECIMEN}));return result.ok?result:{...result,reason:result.error.includes('Invalid')&&result.error.includes('config.json')?'invalid-config':'unreadable'};},
+  settings:async()=>{const result=await read<Settings>('settings',()=>ok({INVITE_TIP:design.INVITE_TIP,JOIN_BLOCK_NOTE:design.JOIN_BLOCK_NOTE,INVITEE:design.INVITEE,K:design.K,MACHINE:{...design.MACHINE,hostname:design.MACHINE.name},ME:identity,TEAMS:mockTeams(),TEAM_POLICY:{...design.TEAM_POLICY,categories:design.CATEGORIES.map(([name])=>name),projects:design.PROJECTS.map(project=>project.name),categoriesNote:'From SKILL.md frontmatter; the list is admin-extendable.'},tools:{git:true,gh:true},syncNote:null,lastAutomatic:null,PLACEMENTS:design.PLACEMENTS,PLACEMENTS_N:design.PLACEMENTS_N,PINNED_N:design.PINNED_N,APPROVALS:design.APPROVALS,QUARANTINE:design.QUARANTINE,HOOK:design.HOOK,APP_VERSION:design.APP_VERSION,AGENT_CLI:design.AGENT_CLI,AGENT_CLI_AUTH:'signed-in',COMMUNITY:design.COMMUNITY,STORAGE:design.STORAGE,SETTINGS_NAV:design.SETTINGS_NAV,SHORTCUTS:design.SHORTCUTS,INBOX_KIND_TEXT:design.INBOX_KIND_TEXT,THEME_OPTIONS:design.THEME_OPTIONS,CLI_VERSION:design.CLI_VERSION,CLI_LATEST:design.CLI_LATEST,FOLLOWING:design.FOLLOWING,SHARED_SPECIMEN:design.SHARED_SPECIMEN}));return result.ok?result:{...result,reason:result.error.includes('Invalid')&&result.error.includes('config.json')?'invalid-config':'unreadable'};},
   onboarding:async()=>{const result=await read('onboarding',()=>ok(onboardingData()));return result.ok?result:{...result,value:onboardingData()};},
   library:({scope})=>read('library',scenario=>{
    const roots=mockRoots(),root=roots.find(r=>scope.kind==='global'?r.kind==='global':r.id===scope.root);
@@ -235,11 +238,44 @@ export function createMockBackend(opts:{latencyMs?:number}={}):Backend & {readon
   invite:args=>long<InviteResult>('share',async ctx=>{if(!args.logins.length||args.logins.some(login=>!login.trim()))return fail('At least one GitHub login is required.');ctx.print(`Inviting ${args.logins.join(', ')}…`);if(readScenario()==='partial'){const [first,...rest]=args.logins;const failed=rest.map(login=>({login,error:`Could not invite @${login} (GitHub status 422). gh: Validation Failed (HTTP 422)`}));return {ok:false,error:failed.map(f=>f.error).join('\n'),value:{invited:first?[first]:[],already:[],failed}};}return ok({invited:[...args.logins],already:[],failed:[]});}),
   team:args=>long<TeamResult>('share',async ctx=>{const name=args.team??args.name??design.TEAMS[0]?.name??'Terum';ctx.print(`${args.kind}: ${name}`);if(args.kind==='leave'&&!await ctx.ask('confirm',`Leave ${name}? This removes ${design.PLACEMENTS_N} placed skill(s) from this machine.`))return cancelled('Leave was declined.');if(args.kind==='move'){const to=(args.remote??'').split('/').at(-1)??'';if(!to)return fail('A target <org>/<repo> is required.');ctx.print(`Moved to ${to}: ${design.PLACEMENTS_N} skill(s) placed again.`);return ok({name:to,kind:'move' as const,restored:design.PLACEMENTS.map(row=>String(row[1])).slice(0,design.PLACEMENTS_N),missing:[],failed:[]});}return ok({name,kind:args.kind});}),
   setup:args=>long('share',async ctx=>{ctx.print('Setting up terum-skills…');const choice=await ctx.ask('select','Create a team or join one?',{choices:['Create a new team','Join an existing team'],descriptions:['Creates a private GitHub repository under your account.','Uses an invitation from the team owner.']});const role=choice==='Create a new team'?'creator' as const:'joiner' as const;const team=args.target??design.TEAM_REPO;const steps:NonNullable<SetupResult['steps']>={role:'done',team:'done'};ctx.print('Looking for skill folders on this machine…');if(await ctx.ask('confirm','Add a project?')){const folder=await ctx.ask('path','Which folder?',{default:'~/code/terum'});ctx.print('Added '+folder+' to your library.');steps.projects='done';}else steps.projects='skipped';steps.evals=await replaySetupEvals(ctx);return ok({team,role,steps});}),
-  eval:args=>long('library',async ctx=>{const detail=skillByRef([...fileChanges.values()].find(change=>change.path===args.ref)?.original??args.ref.split(/[\\/]/).filter(Boolean).at(-1)??args.ref);if(!detail.ok)return fail(detail.error);ctx.print(`Evaluating ${args.ref}…`);ctx.progress(1,1,'Complete');return ok({name:args.ref,runDir:`~/.terum/skills/evals/local/${'0'.repeat(64)}/20260906T120000Z`,executionStatus:'complete' as const,team:detail.value.team??null,id:null,shareHint:true});}),
+  eval:args=>long('library',async ctx=>{const detail=skillByRef(localName(args.ref));if(!detail.ok)return fail(detail.error);ctx.print(`Evaluating ${args.ref}…`);ctx.progress(1,1,'Complete');return ok({name:args.ref,runDir:`~/.terum/skills/evals/local/${'0'.repeat(64)}/20260906T120000Z`,executionStatus:'complete' as const,team:detail.value.team??null,id:null,shareHint:true});}),
+  // Several skills in one run, the CLI's `eval <skill>… [--batch n] [--window w] [--pending]`: every ref is resolved before
+  // any paid work, batches are separated by the CLI's own question, and a declined batch queues the rest for later.
+  // The two requests the CLI refuses on sight throw before a run exists, exactly as the real adapter does.
+  evalMany:args=>{
+   if(args.refs.length===0&&!args.pending)throw new Error('Provide at least one skill, or --pending.');
+   if(args.mode==='batches'&&(!Number.isSafeInteger(args.batch)||(args.batch??0)<1))throw new Error('--batch must be a positive integer.');
+   return long('library',async ctx=>{
+    const team=args.team??(readScenario()==='no-team'?null:design.TEAMS[0]?.key??null);
+    if(args.pending&&team===null)return fail('--pending needs a team; this machine has none.');
+    const skills:{ref:string;name:string}[]=[];
+    const add=(ref:string,name:string)=>{if(!skills.some(skill=>skill.name===name))skills.push({ref,name});};
+    for(const ref of args.refs){const detail=skillByRef(localName(ref));if(!detail.ok)return fail(`No local skill folder named \`${ref}\` in your library; install it from the marketplace first, or pass the folder's path.`);add(ref,detail.value.name);}
+    if(args.pending){const pending=catalogData().skills.filter(skill=>skill.summary===null);for(const skill of pending)add(skill.name,skill.name);if(pending.length===0)ctx.print('Every shared skill already has an eval receipt for its current version.');}
+    const names=skills.map(skill=>skill.name);
+    const queue=(refs:readonly string[],window:'overnight'|'later'):EvalQueueItem[]=>{
+     const items=refs.map(ref=>({skill:ref,path:`~/.claude/skills/${ref}`,contentHash:`sha256:${'0'.repeat(64)}`,requestedAt:new Date().toISOString(),window,...(team===null?{}:{team})}));
+     const count=`${items.length} eval${items.length===1?'':'s'}`,drain='`npx -y terum-skills@latest eval --drain`';
+     ctx.print(window==='overnight'?`Queued ${count} for overnight: the app runs them in parallel between 01:00 and 05:00 while it is open and idle. Run them now with ${drain}.`:`Queued ${count} for later. Run ${items.length===1?'it':'them'} with ${drain}.`);
+     return items;
+    };
+    if(args.mode==='overnight'||args.mode==='later')return ok<EvalManyResult>({mode:'queued',team,skills:names,ok:0,failed:0,queued:queue(names,args.mode)});
+    if(skills.length===0)return ok<EvalManyResult>({mode:'ran',team,skills:[],ok:0,failed:0,queued:[]});
+    const width=args.mode==='batches'?args.batch??skills.length:skills.length,parallel=Math.min(4,width);
+    ctx.print(`Evaluating ${skills.length} skill${skills.length===1?'':'s'}, ${parallel} at a time…`);
+    let done=0,queued:EvalQueueItem[]=[],stoppedAfter:number|undefined;
+    for(let offset=0;offset<skills.length;offset+=width){
+     if(offset>0){const remaining=skills.length-offset;if(!await ctx.ask('confirm',`Continue with the next ${Math.min(width,remaining)}? (${offset} of ${skills.length} done, ${remaining} left)`)){queued=queue(names.slice(offset),'later');stoppedAfter=offset;break;}}
+     for(const skill of skills.slice(offset,offset+width)){ctx.print(`Evaluating ${skill.name}…`);done++;ctx.progress(done,skills.length,'evaluated');}
+    }
+    ctx.print(`Evaluated ${done} of ${skills.length}; 0 failed.`);
+    return ok<EvalManyResult>({mode:'ran',team,skills:names,ok:done,failed:0,queued,...(stoppedAfter===undefined?{}:{stoppedAfter})});
+   });
+  },
   validate:args=>read('library',()=>{const name=args.ref??design.DETAIL.name;const detail=skillByRef(name);return detail.ok?ok({name,findings:0,warnings:0,repairable:0}):fail(detail.error);}),
   update:()=>read('settings',()=>ok({running:design.CLI_VERSION,latest:design.CLI_LATEST,observation:'newer',launch:'npx',description:`${design.CLI_VERSION} installed · ${design.CLI_LATEST} available`,advice:updateAdvice,lines:[`terum-skills ${design.CLI_VERSION}`,`Latest advertised release: ${design.CLI_LATEST}`,...updateAdvice]})),
   appUpdate:{
-   check:()=>read('settings',()=>ok({appVersion:design.APP_VERSION,supported:false,cliVersion:design.CLI_VERSION,latest:design.CLI_LATEST,latestAt:null,probe:'skipped' as const,probeError:null,staged:null,installed:[],lastApply:null,newer:false,ppid:0})),
+   check:()=>read('settings',()=>ok({appVersion:design.APP_VERSION,supported:false,cliVersion:design.CLI_VERSION,latest:design.CLI_LATEST,latestAt:null,probe:'skipped' as const,probeError:null,staged:null,installed:[],lastApply:null,newer:false,ppid:0,platform:'unsupported'})),
    stage:()=>long('settings',async()=>fail('The mock backend does not download or install anything.')),
    apply:async()=>fail('The mock backend does not download or install anything.'),
    armOnClose:async version=>{appUpdateCalls.push(['armOnClose',version]);return ok(undefined);},

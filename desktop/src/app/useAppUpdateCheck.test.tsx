@@ -6,8 +6,8 @@ import { BackendContext } from '../backend';
 import { createMockBackend } from '../backend/mock';
 import { createRun } from '../backend/mock/run';
 import type { AppUpdateStatus, Result } from '../backend/types';
-import { useAppUpdateCheck } from './useAppUpdateCheck';
-const status: AppUpdateStatus = { appVersion: '0.12.1', supported: true, cliVersion: '0.12.1', latest: '0.12.2', latestAt: null, probe: 'cached', probeError: null, staged: null, installed: [], lastApply: null, newer: true, ppid: 42 };
+import { APP_UPDATE_RECHECK_MS, useAppUpdateCheck } from './useAppUpdateCheck';
+const status: AppUpdateStatus = { appVersion: '0.12.1', supported: true, cliVersion: '0.12.1', latest: '0.12.2', latestAt: null, probe: 'cached', probeError: null, staged: null, installed: [], lastApply: null, newer: true, ppid: 42, platform: 'win32-x64' };
 const clients: QueryClient[] = [];
 afterEach(() => { cleanup(); for (const client of clients) client.clear(); clients.length = 0; localStorage.clear(); vi.useRealTimers(); vi.restoreAllMocks(); });
 function Probe() { useAppUpdateCheck(); return null; }
@@ -97,4 +97,22 @@ it('retains overnight failure when a policy change disarms successfully',async()
 it('the mock records close-policy calls without invoking an installer',async()=>{
  const backend=createMockBackend();await backend.appUpdate.armOnClose('0.12.2');await backend.appUpdate.disarmOnClose();
  expect(backend.appUpdateCalls).toEqual([['armOnClose','0.12.2'],['disarmOnClose']]);expect(backend.quitRequested).toBe(false);
+});
+
+it('a focus within the hour asks nothing more; a focus after an hour reads the CLI again', async () => {
+ vi.useFakeTimers({ toFake: ['Date'] });
+ const h = await setup('ask'); h.open(); await waitFor(() => expect(h.check).toHaveBeenCalledTimes(1));
+ vi.setSystemTime(Date.now() + APP_UPDATE_RECHECK_MS - 1); fireEvent(window, new Event('focus')); await act(async () => { await Promise.resolve(); });
+ expect(h.check).toHaveBeenCalledTimes(1);
+ vi.setSystemTime(Date.now() + 2); fireEvent(window, new Event('focus'));
+ await waitFor(() => expect(h.check).toHaveBeenCalledTimes(2));
+ fireEvent(window, new Event('focus')); await act(async () => { await Promise.resolve(); }); expect(h.check).toHaveBeenCalledTimes(2);
+});
+it('a CLI that advertised no update channel at launch is asked again on the next focus, then checked exactly once', async () => {
+ const h = await setup('ask');
+ const base = await h.backend.features(); let advertised = false;
+ vi.spyOn(h.backend, 'features').mockImplementation(async () => ({ ...base, appUpdate: advertised }));
+ h.open(); await act(async () => { for (let i = 0; i < 5; i++) await Promise.resolve(); }); expect(h.check).not.toHaveBeenCalled();
+ advertised = true; fireEvent(window, new Event('focus')); await waitFor(() => expect(h.check).toHaveBeenCalledTimes(1)); await waitFor(() => expect(h.disarm).toHaveBeenCalled());
+ fireEvent(window, new Event('focus')); await act(async () => { await Promise.resolve(); }); expect(h.check).toHaveBeenCalledTimes(1);
 });

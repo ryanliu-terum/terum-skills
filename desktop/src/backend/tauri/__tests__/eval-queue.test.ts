@@ -46,3 +46,10 @@ it('lists and drains an item with team omitted through the real seam',async()=>{
  expect(await queue.list()).toEqual({ok:true,value:{items:[teamless]}});expect(await queue.drain().done).toMatchObject({ok:true,value:{completed:1}});
  expect(fake.spawns.map(s=>s.args)).toEqual([['eval','--queue-list'],['eval','--drain','--parallel','4']]);
 });
+
+it('drains with the Settings ▸ Evals defaults, so the overnight receipt is the one the person configured', async () => {
+  const h = harness({ items: [], attempted: 1, completed: 1 });
+  h.backend.prefs.set('eval:k', '3'); h.backend.prefs.set('eval:model', 'sonnet'); h.backend.prefs.set('eval:judge', '');
+  await h.queue.drain().done;
+  expect(h.spawns.map(spawn => spawn.args)).toEqual([['eval', '--k', '3', '--model', 'sonnet', '--drain', '--parallel', '4']]);
+});

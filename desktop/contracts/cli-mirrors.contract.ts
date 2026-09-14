@@ -36,12 +36,13 @@ import type {
   cliProjectCreated, cliProjectRemoved, cliLs, cliStatusTeams, cliStatus,
 } from '../src/backend/tauri/index';
 import type { cliRefresh } from '../src/backend/tauri/refresh';
+import type { cliEvalMany } from '../src/backend/tauri/eval-many';
 
 import type { LsResult, LsSkill, LocalSection, LsReceipt } from '../../src/commands/ls.js';
 import type { StatusResult } from '../../src/commands/status.js';
 import type { PublishResult } from '../../src/commands/publish.js';
 import type { SearchHit } from '../../src/commands/search.js';
-import type { EvalResult } from '../../src/commands/eval.js';
+import type { EvalManyResult, EvalResult } from '../../src/commands/eval.js';
 import type { SetupResult } from '../../src/commands/setup.js';
 import type { InstalledResult } from '../../src/commands/install.js';
 import type { UninstalledResult } from '../../src/commands/uninstall.js';
@@ -77,6 +78,7 @@ type Assertions = [
   Parses<typeof cliSearch, Mutable<SearchHit[]>>,
   Parses<typeof cliPublish, Mutable<PublishResult>>,
   Parses<typeof cliEval, Mutable<EvalResult>>,
+  Parses<typeof cliEvalMany, Mutable<EvalManyResult>>,
   Parses<typeof cliSetup, Mutable<SetupResult>>,
   Parses<typeof cliInstalled, Mutable<InstalledResult[]>>,
   Parses<typeof cliUninstalled, Mutable<UninstalledResult[]>>,

@@ -91,6 +91,7 @@ it('counts tracked and pinned placements separately when the complete ledger is 
    value.local[0]!.rows.push({...value.local[0]!.rows[0]!,name:'pinned',path:'/Users/teddy/.claude/skills/pinned',tracked:false});
   }
  });
- expect(await screen.findByText(/Re-placed at sync.*1 placement on this machine/)).toBeVisible();
+ // The Tracked row's copy describes the fetch-only sync (a fetch only tells; install places), so the count is read after that sentence.
+ expect(await screen.findByText(/running install again is what places it\. 1 placement on this machine/)).toBeVisible();
  expect(screen.getByText(/Installed at a version.*1 on this machine/)).toBeVisible();
 });

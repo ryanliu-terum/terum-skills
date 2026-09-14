@@ -1209,12 +1209,7 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "policy": "prose",
     "pattern": "| Evals | `validate <path\\|name>` | Deterministic safety and formatting checks, no model |"
   },
-  {
-    "file": "README.md",
-    "line": 378,
-    "policy": "prose",
-    "pattern": "| | `eval <skill>` | Evaluate the local skill, named by skill name or folder path, with your own Claude Code login; generate only missing assets (`--no-gen` disables generation). Publish to share matching receipts. `eval --drain [--parallel n] [--window overnight] [--max n]` runs queued evals; `eval --queue-list` lists them; `eval --dequeue <team>/<skill>` removes matching queued skills |"
-  },
+
   {
     "file": "README.md",
     "line": 379,
@@ -1575,12 +1570,7 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "policy": "prose",
     "pattern": "`project add [path]` · `project remove <path>` · `project list` are the Library's local project registry. `add` asks `Which folder?` as a `path` ask when no argument is given (default: the nearest git repository above the cwd) and returns `{ path, label, added }`; `remove` returns `{ path, placementsRemaining }` and forgets the path only — nothing on disk changes; `list` returns `{ projects: { path, label, rootState, skillFolders }[] }`. A project is added only by an explicit act: no verb registers one as a side effect, and `install --into <path>` refuses a path that is not already a project rather than adding it."
   },
-  {
-    "file": "docs/frame-protocol.md",
-    "line": 278,
-    "policy": "prose",
-    "pattern": "`app-update --check` (the default) reads the cached release advertisement and local staged/installed versions, and keeps that advertisement fresh by itself: when the last probe is missing or a day old it probes release tags under the same GitHub-team policy and 10 s deadline as `update` (`probe: 'ok' | 'failed'`, at most once a day), otherwise it serves the cache (`probe: 'cached'`, or `'failed'` while the day's attempt failed). `--check --force` probes regardless of the cap. A check never touches the app or the CLI; its only write is the CLI's own release state in `run/latest-version.json` (the advertisement, the attempt, and the running observation every `sync` used to record). Checks always succeed, reporting probe failures as data. Until 0.15.0 the check was read-only and the advertisement was filled by the old sync; after the fetch-only sync collapse (§10) nothing on the app's path probed, so the app could never learn about a newer version by itself — the check owns the probe now."
-  },
+
   {
     "file": "docs/frame-protocol.md",
     "line": 280,
@@ -1671,12 +1661,7 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "policy": "prose",
     "pattern": "`sync` fetches each configured team clone and hard-resets it to `origin/main`, one team at a time,"
   },
-  {
-    "file": "docs/frame-protocol.md",
-    "line": 379,
-    "policy": "prose",
-    "pattern": "The result is `{ changed, teams, notices }`. Each attempted team reports `team`, its own `changed`,"
-  },
+
   {
     "file": "docs/frame-protocol.md",
     "line": 392,
@@ -1724,5 +1709,71 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "line": 143,
     "policy": "prose",
     "pattern": "`team migrate` is registered but terminal-only: under `--frames` it fails before doing any work and tells the"
-  }
+  },
+  {
+    "file": ".claude/skills/terum-skills/SKILL.md",
+    "line": 0,
+    "policy": "prose",
+    "pattern": "- Several skills at once: `eval <a> <b>…` runs them as one batch after one preflight (`--parallel <n>`, default"
+  },
+  {
+    "file": ".claude/skills/terum-skills/SKILL.md",
+    "line": 0,
+    "policy": "prose",
+    "pattern": "| `eval <skill> <skill>… [--batch <n>] [--parallel <n>]`, `eval --pending` | confirm the paid runs: several skills run as one batch after one agent probe; `--pending` means every shared skill with no receipt for its current version; `--batch <n>` asks before each further batch | show ✓/✗ per skill and the `Evaluated X of N` line; a declined continuation queues the rest for later |"
+  },
+  {
+    "file": ".claude/skills/terum-skills/SKILL.md",
+    "line": 0,
+    "policy": "prose",
+    "pattern": "| `eval <skill…> --window overnight\\|later`, `eval --pending --window overnight` | confirm queueing; nothing is paid for now | show the queued count; overnight items run in the desktop app between 01:00 and 05:00, later items wait for `eval --drain` |"
+  },
+  {
+    "file": "README.md",
+    "line": 0,
+    "policy": "prose",
+    "pattern": "| | `eval <skill>` | Evaluate the local skill, named by skill name or folder path, with your own Claude Code login; generate only missing assets (`--no-gen` disables generation). A receipt for bytes that are already a published version is published by `eval` itself (`--no-commit` keeps it on this machine). `eval <a> <b>… [--batch n] [--parallel n]` evaluates several skills as one batch (`--batch n` asks before each further batch); `eval <skill…> --window overnight\\|later` queues them instead, and `eval --pending` picks every shared skill without a receipt. `eval --drain [--parallel n] [--window overnight] [--max n]` runs queued evals; `eval --queue-list` lists them; `eval --dequeue <team>/<skill>` removes matching queued skills |"
+  },
+  {
+    "file": "docs/frame-protocol.md",
+    "line": 0,
+    "policy": "prose",
+    "pattern": "The desktop app is an unattended caller: it spawns plain `sync` at the first hello whose `features.refresh` is true and again whenever its window regains focus, at most once a minute, one at a time, and never while a foreground write verb of its own is running. It drives the run read-only and kills it rather than answer, so `sync` must never ask a question; it keeps only `changed`, each team's `state`/`detail`, and `notices`, so anything a person needs to act on has to be in those fields rather than in printed prose. Every completed automatic fetch refreshes the stamp-driven boards (Status, Settings ▸ Sync, Inbox); one that moved a clone also refreshes the Marketplace boards."
+  },
+  {
+    "file": "docs/frame-protocol.md",
+    "line": 0,
+    "policy": "prose",
+    "pattern": "The result is `{ changed, teams, notices }`. `notices` carries run-wide lines already phrased for a person — one concern per entry, no diagnostics — because a frame-driven caller may render them verbatim: the desktop app prints them under Settings ▸ Sync after an automatic fetch that did not refresh every team. Each attempted team reports `team`, its own `changed`,"
+  },
+  {
+    "file": "docs/frame-protocol.md",
+    "line": 0,
+    "policy": "prose",
+    "pattern": "`app-update --check` (the default) reads the cached release advertisement and local staged/installed versions, and keeps that advertisement fresh by itself: when the last probe is missing or a day old it probes release tags under the same GitHub-team policy and 10 s deadline as `update` (`probe: 'ok' | 'failed'`, at most once a day), otherwise it serves the cache (`probe: 'cached'`, or `'failed'` while the day's attempt failed). `--check --force` probes regardless of the cap. A check never touches the app or the CLI; its only write is the CLI's own release state in `run/latest-version.json` (the advertisement, the attempt, and the running observation every `sync` used to record). Checks always succeed, reporting probe failures as data. Until 0.15.0 the check was read-only and the advertisement was filled by the old sync; after the fetch-only sync collapse (§10) nothing on the app's path probed, so the app could never learn about a newer version by itself — the check owns the probe now."
+  },
+  {
+    "file": "docs/frame-protocol.md",
+    "line": 0,
+    "policy": "prose",
+    "pattern": "`eval <skill> <skill>… [--parallel n] [--batch n] [--window overnight|later] [--pending]` (past setup, 2026-09-13) runs the wizard's Now / In batches / Overnight choices as flags over any set of Library skills, or over `--pending`, the wizard's own candidate set (every shared skill with no receipt for its current version; needs a team). Several skills run as one batch after a single agent probe, `--parallel` deep (default four, never more than the batch). `--batch n` runs n at a time and asks `Continue with the next …?` before each further batch; a declined continuation queues the remainder for `later`, and a non-interactive caller runs every batch unasked. `--window` queues instead of running and never probes. The result is `{ mode: \"ran\" | \"queued\", team, skills, ok, failed, queued, stoppedAfter? }`; a run with failures is `ok:false` with that partial value, exactly like a drain. Print and `progress` frames name each skill and `progress.total` is the whole set. One skill with none of those flags is the ordinary single eval; the queue modes refuse skills, `--batch` and `--pending`."
+  },
+  {
+    "file": "docs/frame-protocol.md",
+    "line": 0,
+    "policy": "prose",
+    "pattern": "session-start hook left it alone (§8); a plain `sync` always fetches. Top-level `changed` is true when any team moved; a tracked tree that was"
+  },
+  {
+    "file": "docs/frame-protocol.md",
+    "line": 0,
+    "policy": "prose",
+    "pattern": "terum-skills process is writing the clone; a younger one is named in `detail` and never touched. Every prompt"
+  },
+  {
+    "file": "src/lib/teamRepo.ts",
+    "line": 0,
+    "policy": "prose",
+    "pattern": "// freeze on a working tree that never moves again. The writer lock held here proves no terum-skills process"
+  },
 ];

@@ -21,7 +21,10 @@ export function RunEvalDialog({skill:s,open,onClose}:{skill:SkillDetail;open:boo
  function close(){if(active)evalRun.dismiss();onClose();}
  // The CLI's `eval` verb takes the skill, never the URL segment: on the by-path route that segment
  // is the literal word `local`, which must never be passed to the CLI as the skill name.
- function start(){try{evalRun.start({ref:!s.teamed&&s.path?s.path:s.name,name:s.name,...(s.team?{team:s.team}:{})});onClose();}catch(reason){setError(reason instanceof Error?reason.message:String(reason));}}
+ const ref=!s.teamed&&s.path?s.path:s.name;
+ function start(){try{evalRun.start({ref,name:s.name,...(s.team?{team:s.team}:{})});onClose();}catch(reason){setError(reason instanceof Error?reason.message:String(reason));}}
+ // The wizard's Overnight choice for one skill: queued for the app's 01:00–05:00 window through the same several-skills verb.
+ function queue(){try{if(!evalRun.startMany)throw new Error('This app cannot queue evals.');evalRun.startMany({refs:[ref],mode:'overnight',...(s.team?{team:s.team}:{})});onClose();}catch(reason){setError(reason instanceof Error?reason.message:String(reason));}}
  const title=`Run an eval on ${s.name}?`;
  // Both the pre-run dialog and the running one say the same honest thing when there is no estimate:
  // an eval spends the human's own Claude account.
@@ -33,7 +36,7 @@ export function RunEvalDialog({skill:s,open,onClose}:{skill:SkillDetail;open:boo
  // EvalsEmpty primary and a pasted `?dialog=run-eval` — so B3 is safe standing alone, before B4 and
  // B5 add their disabled menu rows on the surfaces they own.
  const reason=localActionReason(s,'eval'),missing=reason!==null;
- if(!active)return <Dialog open onOpenChange={value=>{if(!value)close();}}><DialogPopup><DialogTitle>{title}</DialogTitle><DialogDescription>{missing?reason:estimate}</DialogDescription>{missing?null:<TerminalHint command={s.evalCommand}/>}{error?<div role="alert">{error}</div>:null}<div className="skill-dialog-actions"><Button onClick={close}>{missing?'Close':'Cancel'}</Button>{missing?null:<Button kind="primary" onClick={start}>Run eval</Button>}</div></DialogPopup></Dialog>;
+ if(!active)return <Dialog open onOpenChange={value=>{if(!value)close();}}><DialogPopup><DialogTitle>{title}</DialogTitle><DialogDescription>{missing?reason:estimate}</DialogDescription>{missing?null:<TerminalHint command={s.evalCommand}/>}{error?<div role="alert">{error}</div>:null}<div className="skill-dialog-actions"><Button onClick={close}>{missing?'Close':'Cancel'}</Button>{missing?null:<Button onClick={queue}>Queue for overnight</Button>}{missing?null:<Button kind="primary" onClick={start}>Run eval</Button>}</div></DialogPopup></Dialog>;
  // `missing` gates this branch too. The run can outlive its folder — the comment below says so —
  // and a retry for an absent folder is the same guaranteed failure the pre-run gate exists to stop.
  const busy=active?.state==='running',finished=active!==null&&!busy,retryable=canRetry(active,missing);

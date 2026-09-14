@@ -115,6 +115,14 @@ it("shows the CLI's waiting line in the run log while it waits",async()=>{
 });
 it('offers no retry and no log region before a run starts',async()=>{
  await open();
- expect(within(screen.getByRole('dialog')).getAllByRole('button').map(button=>button.textContent)).toEqual(['Cancel','Run eval']);
+ expect(within(screen.getByRole('dialog')).getAllByRole('button').map(button=>button.textContent)).toEqual(['Cancel','Queue for overnight','Run eval']);
  expect(screen.queryByRole('log')).toBeNull();
+});
+it('Queue for overnight queues this one skill through the several-skills verb and shows the queued line',async()=>{
+ const {backend,evalSpy}=await open();const many=vi.spyOn(backend,'evalMany');
+ fireEvent.click(within(screen.getByRole('dialog')).getByRole('button',{name:'Queue for overnight'}));
+ expect(many).toHaveBeenCalledWith(expect.objectContaining({refs:['deploy-check'],mode:'overnight'}));expect(evalSpy).not.toHaveBeenCalled();
+ const queued=await screen.findByRole('dialog',{name:'Queueing deploy-check'});
+ await within(queued).findByText('Queued 1 eval for overnight.',{selector:'[role=status]'});
+ expect(location.hash).toBe('#/skill/deploy-check?tab=evals');
 });
