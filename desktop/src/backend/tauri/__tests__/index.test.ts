@@ -397,7 +397,16 @@ function peopleReplay(change?: (frame: Record<string, unknown>, name: string) =>
   });
 }
 it('S7b replays rebuilt CLI roster/catalog with real handles, role, projects and installs', async () => {
-  const f = peopleReplay(), backend = createTauriBackend(f.bridge);
+  // The recording predates §8.5's amendment (2026-09-13) and carries `profile: []` for everyone, which
+  // under the one-list rule would make every member's page empty and prove nothing about the limb. Mira's
+  // profile is projected from her own recorded installs — the shape a machine that accepted install's
+  // profile prompt writes — so the assertion below still tests the join rather than the recording's age.
+  const f = peopleReplay((frame, name) => {
+    if (name !== 'ls' || frame.t !== 'result') return;
+    const value = frame.value as { people?: { handle: string; installed: { id: string }[]; profile: unknown[] }[]; skills?: { id: string; name: string; latest?: string | null }[] };
+    const mira = value.people?.find(person => person.handle === 'mira');
+    if (mira) mira.profile = mira.installed.map(entry => ({ id: entry.id, name: value.skills?.find(row => row.id === entry.id)?.name ?? 'unknown', version: value.skills?.find(row => row.id === entry.id)?.latest ?? 'v1', added: '2026-09-12', via: 'install' }));
+  }), backend = createTauriBackend(f.bridge);
   const roster = await backend.roster();
   expect(roster.ok).toBe(true);
   expect(roster.value?.members.map(member => member.handle)).toEqual(['mira', 'ravi', 'seed']);
@@ -646,7 +655,10 @@ it('reports an unidentifiable same-named folder as unknown rather than absent',a
  const current=await createTauriBackend(installedReplay().bridge).skill({ref:'deploy-check'});
  expect(current.value).toMatchObject({installed:'placed',unidentifiedLocal:null});
 });
-it('copies recorded member installs rather than authored skills',async()=>{
+// §8.5 (amended 2026-09-13): the bulk copy follows the member's PROFILE list, not their authored set —
+// and not their raw `installed[]` either. The fixture projects the recorded installs into a profile,
+// which is what a machine that accepted install's profile prompt records.
+it('copies the member profile list rather than authored skills',async()=>{
  const none=await createTauriBackend(installedReplay('on-disk-only','none').bridge).catalog();
  expect(none.value?.people[0]).toMatchObject({skills:['deploy-check'],installable:[],onDisk:[0,0]});
  const installed=await createTauriBackend(installedReplay('on-disk-only','installed').bridge).catalog();
@@ -1101,7 +1113,7 @@ it.each([['v2','v3'],['v2',null],[null]])('does not invent a single installed ve
 it('reads profile versions separately from automatic installs and gets roster facts from people[]', async () => {
  const result = await createTauriBackend(versionedCatalog().bridge).catalog();
  if (!result.ok) throw new Error(result.error);
- expect(result.value.people[0]).toMatchObject({ name:'Profile reader',role:'Maintainer',projects:['Global'],profileVersions:{'deploy-check':'v2'},buckets:[['On their profile',['deploy-check']],['Installed',['deploy-check','tdd']]] });
+ expect(result.value.people[0]).toMatchObject({ name:'Profile reader',role:'Maintainer',projects:['Global'],profileVersions:{'deploy-check':'v2'},buckets:[['On their profile',['deploy-check']]], installable:['deploy-check'] });
 });
 it('keeps B4 marketplace annotations neutral on Library cards pending B5', async () => {
  const result = await createTauriBackend(versionedCatalog().bridge).library({scope:{kind:'global'}});

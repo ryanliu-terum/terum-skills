@@ -54,9 +54,17 @@ export async function run(args: InstallArgs, io: Prompter): Promise<Result<Insta
     if (operation.kind === 'member') {
       const [team] = selectTeam(config.teams, args.team, args.form);
       const person = await readPerson(store.teamClone(team), operation.member);
+      // §8.5 (amended 2026-09-13): installing a person takes what they *stand behind* — `profile[]`,
+      // the curated list the marketplace person page shows — not `installed[]`, which is an automatic
+      // record of what happens to sit on their machines. The desktop page renders one list and one
+      // count; this verb is what that count promises, so the two must read the same field.
+      // `profile` is optional in the schema (people files written before it shipped have none), and an
+      // empty curated list is refused by name rather than silently installing nothing.
+      const profile = person.profile ?? [];
+      if (!profile.length) throw new Error(`${operation.member} has nothing on their profile yet, so there is nothing to install. A teammate adds a skill to their profile when they publish it or when install asks.`);
       const destination = await destinationFor(team);
       const results: InstalledResult[] = [];
-      for (const item of person.installed) {
+      for (const item of profile) {
         const result = await installOne({ team, destination, id: item.id, yesProfile: args.yesProfile, store, runner, cwd: args.cwd, home: args.home, safeWrite: args.safeWrite }, io);
         results.push(result);
       }

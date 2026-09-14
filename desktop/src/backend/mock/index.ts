@@ -203,7 +203,7 @@ export function createMockBackend(opts:{latencyMs?:number}={}):Backend & {readon
     const person=catalog.people.find(p=>p.handle===args.member);
     if(!person)return fail(`Unknown member ${args.member}.`);
     names=person.installable.filter(name=>!removed.has(name));
-    question=args.member===design.ME.handle?`Remove everything you installed (${names.length} skills)?`:`Remove ${args.member}'s ${names.length} skills from this machine?`;
+    question=args.member===design.ME.handle?`Remove the ${names.length} skills on your profile from this machine?`:`Remove ${args.member}'s ${names.length} skills from this machine?`;
    }else{
     const skill=skillByRef(args.ref);
     if(!skill.ok)return fail(skill.error);
@@ -214,7 +214,7 @@ export function createMockBackend(opts:{latencyMs?:number}={}):Backend & {readon
    const detail=[`Folders removed (${paths.length}):`,...paths.map(([path,scope])=>`  ${path}  ·  ${scope==='global'?'Global':`project ${scope}`}`),
     'Local changes are moved to ~/.terum/skills/quarantine, never deleted.',
     `Install records dropped from your people file (${names.length}): ${names.join(', ')}`,
-    ...(args.kind==='member'?[`Targets are ${args.member}'s current installed list, not what you installed from them.`]:args.kind==='project'?['Copies installed to Global stay.']:[])];
+    ...(args.kind==='member'?[`Targets are ${args.member}'s current profile list, not what you installed from them.`]:args.kind==='project'?['Copies installed to Global stay.']:[])];
    if(!await ctx.ask('confirm',question,{detail}))return cancelled('Remove was declined.');
    for(const name of names)removed.add(name);
    for(const listener of listeners){listener('placed');listener('config');}
