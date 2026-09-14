@@ -397,10 +397,14 @@ says so and offers no Publish, the check wraps with the words, and card strings 
    shown receipt's `mine === false` (an absent flag on an own-store receipt keeps D11's "seeded copy names its
    runner" reading, §4.1); `inventoryCard` derives `installedVersion` in §3.2's order (byte match first). `library()`
    `overview.evaluated` unchanged in code (counts `localEval !== null`, which includes overlay evals — ledger D2).
-4. `desktop/src/components/domain/presentation.ts` — **M1.1:** a card-scoped formatter `cardVersion(n) = 'v' + n`
-   used by `marketplaceVersionLabel`, `libraryVersionLabel`, `evalVersionLabel`, `profileVersionLabel` and the
-   eval line's version; `versionLabel`/`recordedVersionLabel` stay for prose callers (`SkillScreen.tsx`, the
-   adapter's detail and dialog strings) — split, do not rename. `marketplaceVersionLabel` gains state 3b **before**
+4. `desktop/src/components/domain/presentation.ts` — **M1.1:** the card form lives in the vocabulary leaf as
+   `cardVersionLabel(n)` (`src/lib/versions.ts`, beside `versionLabel`; it imports nothing, so the cross-tree
+   import rule holds), used by `marketplaceVersionLabel`, `libraryVersionLabel`, `evalVersionLabel`,
+   `profileVersionLabel` and the eval line's version (`cardRecordedVersion` for a recorded folder; a legacy tree
+   hash keeps the prose rendering); `versionLabel`/`recordedVersionLabel` stay for prose callers
+   (`SkillScreen.tsx`, the adapter's detail and dialog strings) — split, do not rename. One predicate
+   `editedInstall(card)` (`installedVersion !== null && localMatch === 'differs'`) drives both the state-3b
+   label and the Publish button's exclusion. `marketplaceVersionLabel` gains state 3b **before**
    the installed-equals-latest check: `installed !== null && localMatch === 'differs'` →
    `${cardVersion(latest)} · you have ${cardVersion(installed)} (edited)`. `libraryVersionLabel`'s state-2 string
    becomes `${cardVersion(version)} (edited)`; states 3–5 unchanged.
@@ -421,8 +425,9 @@ says so and offers no Publish, the check wraps with the words, and card strings 
    them; the existing `stale-eval` and `on-disk-only` scenarios are unchanged. Marketplace under `overlays`: every
    placed card is state 3 (`latestVersion:'v5'`, `installedVersion:'v2'`, `localMatch:'identical'`), except the
    first placed card in fixture order, which is state 3b (`localMatch:'differs'`), and the second, which is state 2
-   (`installedVersion:'v5'`); unplaced cards are state 1. `?__mock=on-disk-only` (unchanged): `deploy-check` is
-   state 4 (`installedVersion:null`, `localMatch:'differs'`, `onDiskOnly:true`). `default` (unchanged): states 1
+   (`installedVersion:'v5'`); unplaced cards are state 1. `?__mock=on-disk-only`: the Marketplace's `deploy-check`
+   gains `latestVersion:'v5'`, `localMatch:'differs'` and its `path`, so it is state 4 (`installedVersion:null`,
+   `onDiskOnly:true`, `v5 · your copy differs` + Publish) rather than a bare card; the Library side is unchanged. `default` (unchanged): states 1
    and 6 (`installed:'recorded'`, one card) as today; state 5 needs no fixture (old CLI). Library under `overlays`:
    the first five Library cards in fixture order become §3.1 states 1–5 in order — `{installedVersion:'v3',localMatch:'identical',placed:true}`,
    `{installedVersion:'v3',localMatch:'differs',placed:true,edited:true}`,
@@ -563,6 +568,11 @@ Desktop (`desktop/src/**`):
   (correction 9); **M1.1:** a seeded twin (same `run_id` in both stores, team `mine:false`) names the runner; the
   same twin with team `mine:true` names nobody; `libraryVersion` prefers the byte match over the placement.
 - `installed-state.test.tsx` — any assertion on the old Library words moves to `v{M} (edited)` / `vN`.
+- `desktop/src/backend/__tests__/mock.test.ts` — **M1.1:** `?__mock=overlays` yields §3.1 states 1–5 on the first
+  five Library cards and §3.2 states 3b/2/3 on the first three placed Marketplace cards; `?__mock=on-disk-only`
+  yields state 4 on `deploy-check`.
+- `e2e/routes/chip-icon.spec.ts` — **M1.1 retires it:** it asserted the `Installed · on this machine` card chip M1
+  removed; `Chip.test.tsx` keeps the icon-in-label layout check.
 - `SkillCard.test.tsx` (new) — `Installed · on this machine` text is gone; the check renders for states 2–5;
   Publish renders only for state 4; the bottom row wraps as a unit at 260 px card width (jsdom layout assertion
   on class presence plus an e2e screenshot gate below).
