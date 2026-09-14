@@ -24,6 +24,8 @@ export interface Bridge {
   readAppState(): Promise<AppState | null>;
   quit(): Promise<void>;
   hostPlatform(): Promise<string>;
+  /** The OS release (`26.6.2`), or null where it is not readable; only consulted under `mac-overlay`. */
+  hostOsVersion(): Promise<string | null>;
   homeDirectory(): Promise<string>;
 }
 
@@ -57,6 +59,7 @@ export function tauriBridge(): Bridge {
       }
     },
     hostPlatform: () => invoke<string>('host_platform'),
+    hostOsVersion: () => invoke<string | null>('host_os_version'),
     quit: () => invoke('quit'),
     homeDirectory: homeDir,
   };

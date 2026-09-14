@@ -378,6 +378,27 @@ fn host_platform() -> &'static str {
   std::env::consts::OS
 }
 
+/// The OS release, for the seam's `capabilities().windowControlsEnd`: macOS 26 draws 14pt window controls at a 23pt
+/// pitch where earlier releases drew 12pt at 20pt, and the overlay top bar reserves room for whichever this window has.
+/// `None` off macOS or when the release file is unreadable; the adapter then assumes the older geometry.
+#[tauri::command(async)]
+fn host_os_version() -> Option<String> {
+  if cfg!(target_os = "macos") {
+    std::fs::read_to_string("/System/Library/CoreServices/SystemVersion.plist").ok().and_then(|text| plist_product_version(&text))
+  } else {
+    None
+  }
+}
+
+/// `ProductVersion` out of a SystemVersion.plist without a plist parser: Apple's file is small and flat.
+fn plist_product_version(text: &str) -> Option<String> {
+  let rest = &text[text.find("<key>ProductVersion</key>")?..];
+  let start = rest.find("<string>")? + "<string>".len();
+  let end = rest[start..].find("</string>")? + start;
+  let version = rest[start..end].trim();
+  if version.is_empty() { None } else { Some(version.to_string()) }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
   let builder = tauri::Builder::default()
@@ -387,7 +408,7 @@ pub fn run() {
     .plugin(tauri_plugin_store::Builder::default().build())
     .plugin(tauri_plugin_clipboard_manager::init())
     .plugin(tauri_plugin_dialog::init())
-    .invoke_handler(tauri::generate_handler![cli_spawn, cli_write, cli_kill, read_app_state, host_platform, quit, app_update::app_update_on_close]);
+    .invoke_handler(tauri::generate_handler![cli_spawn, cli_write, cli_kill, read_app_state, host_platform, host_os_version, quit, app_update::app_update_on_close]);
 
   #[cfg(not(any(target_os = "android", target_os = "ios")))]
   let builder = builder.plugin(tauri_plugin_window_state::Builder::default().build());
@@ -428,6 +449,15 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
+  #[test]
+  fn host_os_version_reads_product_version_out_of_the_system_plist() {
+    let plist = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<plist version=\"1.0\">\n<dict>\n\t<key>ProductBuildVersion</key>\n\t<string>25G83</string>\n\t<key>ProductName</key>\n\t<string>macOS</string>\n\t<key>ProductVersion</key>\n\t<string>26.6.2</string>\n</dict>\n</plist>\n";
+    assert_eq!(super::plist_product_version(plist).as_deref(), Some("26.6.2"));
+    assert_eq!(super::plist_product_version("<dict><key>ProductName</key><string>macOS</string></dict>"), None);
+    assert_eq!(super::plist_product_version("<key>ProductVersion</key><string> </string>"), None);
+    assert_eq!(super::plist_product_version("<key>ProductVersion</key><string>15.6"), None);
+  }
+
   use super::*;
 
   #[test]
@@ -544,7 +574,7 @@ mod tests {
   #[test]
   fn blocking_commands_are_dispatched_off_the_ui_thread_and_kill_waits_yield() {
     let source = include_str!("lib.rs");
-    for name in ["cli_spawn", "cli_write", "cli_kill", "read_app_state", "host_platform"] {
+    for name in ["cli_spawn", "cli_write", "cli_kill", "read_app_state", "host_platform", "host_os_version"] {
       let start = source.find(&format!("fn {name}(")).unwrap();
       let attribute = source[..start].rfind("#[tauri::command").unwrap();
       assert!(source[attribute..start].starts_with("#[tauri::command(async)]"), "{name} must run off the UI thread");
