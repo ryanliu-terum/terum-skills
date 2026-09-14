@@ -447,6 +447,27 @@ describe('eval (§6 / IE2)', () => {
     await writeFile(join(outside, 'sample', 'SKILL.md'), skill());
     expect(await run(args(store, home, { ref: join(outside, 'sample') }), new ScriptedPrompter())).toMatchObject({ ok: false, error: `\`${join(outside, 'sample')}\` is not a skill folder in your library (~/.claude/skills or an added project's .claude/skills); add the project holding it with \`project add\`, or install it from the marketplace first.` });
   });
+
+  it('a bare eval inside a Library skill folder evaluates that folder and says so (rung 0); the result carries the report and the receipt path', async () => {
+    const { store, home, folder } = await evalFixture({ assets: { 'evals/cases/happy.yaml': CASE } });
+    const io = new ScriptedPrompter();
+    const result = await run(args(store, home, { ref: undefined, cwd: join(folder, 'evals'), agent: armAgent, k: 1, noGen: true }), io);
+    if (!result.ok) throw new Error(result.error);
+    expect(io.lines[0]).toBe('Resolved: sample from the working directory');
+    expect(result.value.receiptPath).toBe(join(result.value.runDir, 'receipt.json'));
+    expect(result.value.report?.aggregate.verdict).toBe(result.value.report?.aggregate.verdict);
+    expect(result.value.report?.aggregate.execution_status).toBe(result.value.executionStatus);
+    expect(result.value.report?.triggers).toBeNull();
+  });
+
+  it('a bare eval outside any Library skill folder is the rung-0 sentence, and a prefix never picks the bill (rungs 0–2 only)', async () => {
+    const { store, home } = await evalFixture();
+    expect(await run(args(store, home, { ref: undefined, cwd: home }), new ScriptedPrompter())).toEqual({ ok: false, error: 'Name a skill; the working directory is not inside a library skill folder.' });
+    expect(await run(args(store, home, { ref: 'samp' }), new ScriptedPrompter())).toMatchObject({ ok: false, error: 'No local skill folder named `samp` in your library; install it from the marketplace first, or pass the folder\'s path.' });
+    const io = new ScriptedPrompter();
+    expect(await run(args(store, home, { ref: 'SAMPLE', case: 'missing' }), io)).toMatchObject({ ok: false, error: 'No eval case named missing for sample.' });
+    expect(io.lines[0]).toBe('Resolved: "SAMPLE" → sample (case-insensitive match)');
+  });
 });
 
 it.each([false, true])('size warning reaches eval preflight unless accompanied by an error (mixed: %s)', async (mixed) => {

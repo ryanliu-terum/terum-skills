@@ -19,12 +19,12 @@ async function library(names: string[]) {
   return { home, config };
 }
 const outcome = (name: string): EvalResult => ({ team: null, id: null, name, runDir: `/runs/${name}`, ccVersion: 'test', executionStatus: 'complete' });
-const evaluator = () => vi.fn(async (args: EvalArgs) => { await Promise.resolve(); return success(outcome(args.ref)); });
+const evaluator = () => vi.fn(async (args: EvalArgs) => { await Promise.resolve(); return success(outcome(args.ref!)); });
 const probe = () => vi.fn(async () => success({ ccVersion: 'test' }));
 
 it('runs several skills as one batch: one shared probe, the eval flags passed through, counts reported', async () => {
   const { home, config } = await library(['alpha', 'beta']); const io = new ScriptedPrompter(); const preflight = probe();
-  const evaluate = vi.fn(async (args: EvalArgs) => { expect(args).toMatchObject({ k: 3, model: 'sonnet', lockWaitMs: 300_000, home }); expect(args.team).toBeUndefined(); expect(await args.preflight?.()).toEqual(success({ ccVersion: 'test' })); return success(outcome(args.ref)); });
+  const evaluate = vi.fn(async (args: EvalArgs) => { expect(args).toMatchObject({ k: 3, model: 'sonnet', lockWaitMs: 300_000, home }); expect(args.team).toBeUndefined(); expect(await args.preflight?.()).toEqual(success({ ccVersion: 'test' })); return success(outcome(args.ref!)); });
   const result = await runMany({ refs: ['alpha', 'beta'], k: 3, model: 'sonnet', home, config, preflight, evaluate }, io);
   expect(result).toEqual(success({ mode: 'ran', team: null, skills: ['alpha', 'beta'], ok: 2, failed: 0, queued: [] }));
   expect(evaluate).toHaveBeenCalledTimes(2); expect(preflight).toHaveBeenCalledTimes(1);
@@ -34,7 +34,7 @@ it('runs several skills as one batch: one shared probe, the eval flags passed th
 });
 it('a failed eval is reported, the batch continues, and the result carries the failure without hiding the successes', async () => {
   const { home, config } = await library(['alpha', 'beta']); const io = new ScriptedPrompter();
-  const evaluate = vi.fn(async (args: EvalArgs) => args.ref === 'alpha' ? failure('claude is not signed in') : success(outcome(args.ref)));
+  const evaluate = vi.fn(async (args: EvalArgs) => args.ref === 'alpha' ? failure('claude is not signed in') : success(outcome(args.ref!)));
   const result = await runMany({ refs: ['alpha', 'beta'], home, config, preflight: probe(), evaluate }, io);
   expect(result).toMatchObject({ ok: false, error: '1 of 2 evals failed.', value: { mode: 'ran', ok: 1, failed: 1 } });
   expect(io.lines).toContain('✗ alpha: claude is not signed in'); expect(io.lines).toContain('Evaluated 1 of 2; 1 failed.');

@@ -185,15 +185,16 @@ export function buildProgram(execute: Execute, verbs: CliVerbs = { login, team: 
     // commander models `--no-X` as a default of `true`, so `commit` is dropped unless it was actually
     // typed: publishing a matching receipt is the default, and only an explicit `--no-commit` opts out.
     const { gen, commit, ...rest } = options;
-    const args = { form: context.form, ...rest, ...(gen === false ? { noGen: true } : {}), ...(commit === false ? { commit: false } : {}) };
-    // Three shapes share the verb: the queue modes (no skills), one skill (the ordinary run), and several skills
-    // or the wizard's batch/window/pending choices as flags (runMany). Queue-mode validation stays in runQueue.
+    const args = { form: context.form, cwd: process.cwd(), ...rest, ...(gen === false ? { noGen: true } : {}), ...(commit === false ? { commit: false } : {}) };
+    // Three shapes share the verb: the queue modes (no skills), one skill or none (the ordinary run — a bare `eval`
+    // inside a Library skill folder resolves the folder, rung 0), and several skills or the wizard's
+    // batch/window/pending choices as flags (runMany). Queue-mode validation stays in runQueue.
     const queueMode = options.queueList || options.drain || options.dequeue !== undefined || options.max !== undefined;
-    if (queueMode || (refs.length === 0 && !options.pending)) {
+    if (queueMode) {
       const { runQueue } = await import('./commands/eval.js');
       return execute(io => runQueue({ ...args, ...(refs[0] === undefined ? {} : { ref: refs[0] }) }, io), { verb: 'eval', notices: true });
     }
-    if (refs.length === 1 && !options.pending && options.batch === undefined && options.window === undefined && options.parallel === undefined) return execute(io => active.eval({ ...args, ref: refs[0]! }, io), { verb: 'eval', notices: true });
+    if (refs.length <= 1 && !options.pending && options.batch === undefined && options.window === undefined && options.parallel === undefined) return execute(io => active.eval({ ...args, ...(refs[0] === undefined ? {} : { ref: refs[0] }) }, io), { verb: 'eval', notices: true });
     const { runMany } = await import('./commands/eval.js');
     return execute(io => runMany({ ...args, refs }, io), { verb: 'eval', notices: true });
   });
