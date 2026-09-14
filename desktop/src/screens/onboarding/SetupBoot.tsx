@@ -1,10 +1,13 @@
 import { useContext, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { useNavigate } from 'react-router';
+import { useQuery } from '@tanstack/react-query';
 import { PromptContext, setupSession, useBackend, SETUP_STEP_TO_BOARD } from '../../backend';
 import { SETUP_STEP_KEYS } from '../../backend/types';
 import type { LaunchContext, Onboarding, SetupStep } from '../../backend/types';
 import { ScreenFrame } from '../../components/domain/ScreenFrame';
 import { OnboardingActions, OnboardingColumn, OnboardingFrame, OnboardingPara, OnboardingTile, OnboardingTitle, ProgressCard } from './OnboardingParts';
+import { ReconcileDialog } from '../../components/domain/ReconcileDialog';
+import { reconcileHasRows } from '../../components/domain/reconcile';
 
 const rows: readonly [SetupStep, string][] = [
  ['github','Checking GitHub access'], ['team','Configuring the team'],
@@ -29,6 +32,10 @@ export function SetupBoot({launch,restart=false}:{launch:LaunchContext;restart?:
  useEffect(()=>{if(!restart&&state.outcome==='cancelled'&&!navigated.current){navigated.current=true;navigate('/library/global');}},[restart,state.outcome,navigate]);
  const result=state.result, failed=result?.ok===false&&!result.cancelled&&!result.refused, refused=result?.ok===false&&result.refused===true;
  const steps=result?.value?.steps;
+ const [reconcileDismissed,setReconcileDismissed]=useState(false);
+ const reconcileQuery=useQuery({queryKey:['setup-reconcile',launch.writtenAt],enabled:state.outcome==='finished'&&steps?.existing==='printed'&&!reconcileDismissed,queryFn:()=>backend.reconcile.list(),retry:false});
+ // Disabling the query keeps its cached data, so the dismissed flag must gate the render too or Done/Cancel/Escape leave the modal open.
+ const reconcile=!reconcileDismissed&&reconcileQuery.data?.ok&&reconcileHasRows(reconcileQuery.data.value)?reconcileQuery.data.value:null;
  const progress=state.progress, progressRow=progress?rows.find(([key])=>key===progress.label):undefined;
  const cardRows:Onboarding['bootRows']=rows.map(([key,label])=>{
   const outcome=steps?.[key];
@@ -51,5 +58,5 @@ export function SetupBoot({launch,restart=false}:{launch:LaunchContext;restart?:
   {failed&&<div role="alert" className="onboarding-error-line">{result.error}</div>}
   {state.persistenceError&&<div role="alert">{state.persistenceError}</div>}
   {refused?<OnboardingActions primary="Open Settings ▸ Team" onPrimary={()=>navigate('/settings/teams')}/>:state.outcome==='running'?<OnboardingActions primary="Stop" onPrimary={()=>void session.stop()}/>:state.outcome==='failed'||state.outcome==='cancelled'?<OnboardingActions primary="Retry" onPrimary={()=>void session.retry()} secondary="Back" onSecondary={()=>navigate('/library/global')}/>:<OnboardingActions primary={state.outcome==='handoff'?'Back to the Library':'Open the Library'} onPrimary={()=>navigate('/library/global')}/>}
- </OnboardingColumn></OnboardingFrame></ScreenFrame>;
+ </OnboardingColumn></OnboardingFrame>{reconcile?<ReconcileDialog result={reconcile} title="Your skills" onClose={()=>setReconcileDismissed(true)}/>:null}</ScreenFrame>;
 }

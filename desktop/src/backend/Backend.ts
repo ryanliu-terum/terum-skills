@@ -1,5 +1,5 @@
 import type { SkillFileResult } from './types';
-import type { AppUpdateStaged, AppUpdateStatus, LaunchContext, IdentityArgs, IdentityWrite, Settings, Onboarding, Features, Capabilities, Surfaces, ReadOptions, Catalog, ChangeSource, EvalArgs, EvalManyArgs, EvalManyResult, EvalResult, EvalReportModel, InboxItem, InstallArgs, InstalledResult, InviteArgs, InviteResult, MachineUninstallResult, PrefStore, PublishArgs, PublishResult, Receipt, Result, Roster, Run, LibraryScope, ProjectAdded, ProjectRemoved, ProjectCreated, SearchArgs, SearchHit, SetupArgs, SetupResult, Library, SkillDetail, StatusResult, Subscription, SyncArgs, SyncResult, TeamArgs, TeamResult, UninstallArgs, UninstalledResult, UpdateAdvice, ValidateArgs, ValidateResult } from './types';
+import type { AppUpdateStaged, AppUpdateStatus, LaunchContext, IdentityArgs, IdentityWrite, Settings, Onboarding, Features, Capabilities, Surfaces, ReadOptions, Catalog, ChangeSource, EvalArgs, EvalManyArgs, EvalManyResult, EvalResult, EvalReportModel, InboxItem, InstallArgs, InstalledResult, InviteArgs, InviteResult, MachineUninstallResult, PrefStore, PublishArgs, PublishResult, Receipt, ReconcileResult, Result, Roster, Run, LibraryScope, ProjectAdded, ProjectRemoved, ProjectCreated, SearchArgs, SearchHit, SetupArgs, SetupResult, Library, SkillDetail, StatusResult, Subscription, SyncArgs, SyncResult, TeamArgs, TeamResult, UninstallArgs, UninstalledResult, UpdateAdvice, ValidateArgs, ValidateResult } from './types';
 export interface Backend {
   setWindowBackground(color: string): Promise<Result<void>>;
   quit(): Promise<void>;
@@ -22,6 +22,7 @@ export interface Backend {
   localSkill(q: { path: string }, options?: ReadOptions): Promise<Result<SkillDetail>>;
   /** §7.1 L-PROJ: the folders this machine reads local skills from. Nothing else adds one. */
   projects: { add(path:string):Run<ProjectAdded>; remove(path:string):Run<ProjectRemoved> };
+  reconcile: { list():Promise<Result<ReconcileResult>> };
   /** Team projects (team.json), not the local folders above: `create` names one and commits it to the team's main. */
   teamProjects: { create(args:{name:string;remote?:string}):Run<ProjectCreated> };
   /** `at` restricts the answer to one Library root: presence, path, scope and version describe the

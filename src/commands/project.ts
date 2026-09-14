@@ -6,15 +6,17 @@ import { canonicalLedger, localSkillCounts, localSkills, nearestRepoRoot, type L
 import type { WithForm } from '../lib/invocation.js';
 import type { Prompter } from '../lib/prompt.js';
 import { fromError, success, type Result } from '../lib/result.js';
+import { systemRunner, type Runner } from '../lib/runner.js';
+import { run as reconcile, type ReconcileResult } from './reconcile.js';
 
 /**
  * §7.1 L-PROJ — the Library's local project registry. Renamed from `checkout`: the sidebar's button
  * already said "Add project", and the word the user reads is the word the verb should use. The team
  * project creator this file's name used to belong to is now `team project create`.
  */
-export interface ProjectArgs extends WithForm { kind: 'add' | 'remove' | 'list'; path?: string; config?: ConfigStore; home?: string; cwd?: string; }
+export interface ProjectArgs extends WithForm { kind: 'add' | 'remove' | 'list'; path?: string; config?: ConfigStore; home?: string; cwd?: string; runner?: Runner; reconcile?: typeof reconcile; }
 export interface ProjectRow { path: string; label: string; rootState: LocalInventory['rootState']; skillFolders: number; }
-export type ProjectResult = { path: string; label: string; added: boolean } | { path: string; placementsRemaining: number } | { projects: ProjectRow[] };
+export type ProjectResult = { path: string; label: string; added: boolean; reconcile?: ReconcileResult } | { path: string; placementsRemaining: number } | { projects: ProjectRow[] };
 
 export async function run(args: ProjectArgs, io: Prompter): Promise<Result<ProjectResult>> {
   try {
@@ -22,7 +24,14 @@ export async function run(args: ProjectArgs, io: Prompter): Promise<Result<Proje
     if (args.kind === 'add') {
       const cwd = args.cwd ?? process.cwd();
       const input = args.path ?? await io.text('Which folder?', await nearestRepoRoot(cwd) ?? cwd, { path: true });
-      return success(await addLibraryProject(store, resolve(cwd, input), io, { home: args.home ?? homedir() }));
+      const added = await addLibraryProject(store, resolve(cwd, input), io, { home: args.home ?? homedir() });
+      if (!added.added || Object.keys((await store.read()).teams).length === 0) return success(added);
+      const checked = await (args.reconcile ?? reconcile)({ form: args.form, root: added.path, list: io.channel === 'frames' || !io.interactive, config: store, home: args.home, runner: args.runner ?? systemRunner }, io);
+      if (!checked.ok) {
+        io.print(`Could not check that project against the team: ${checked.error}`);
+        return success(added);
+      }
+      return success(io.channel === 'frames' ? { ...added, reconcile: checked.value } : added);
     }
     if (args.kind === 'remove') {
       if (args.path === undefined) throw new Error('Specify a project path.');

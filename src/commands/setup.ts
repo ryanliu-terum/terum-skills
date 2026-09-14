@@ -26,6 +26,7 @@ import { join, resolve } from 'node:path';
 import type { Launch } from '../lib/launch.js';
 import { assetSuffix, detectPlatform, type PlatformEvidence } from '../lib/platform.js';
 import { run as runApp } from './app.js';
+import { reconcileHasRows, run as runReconcile } from './reconcile.js';
 import { run as evalRun, queueItemsFor, skillsWithoutReceipt, type EvalArgs } from './eval.js';
 import { FIXABLE_INVITE_REASONS, joinCommand, run as invite } from './invite.js';
 import { ensureClone, parseJoinTarget, requireGitConfig, run as team } from './team.js';
@@ -37,6 +38,7 @@ export interface SetupVerbs {
   offerHook: typeof defaultOfferHook;
   offerWrapper: typeof defaultOfferWrapper;
   eval: typeof evalRun;
+  reconcile: typeof runReconcile;
   /**
    * The paid agent probe the eval batch runs once. It sits on the verb table, not only on the free-standing
    * `args.preflight` knob, so a test that stubs `verbs` at all can never spawn the real `claude` by accident.
@@ -49,6 +51,8 @@ export interface SetupArgs extends WithForm {
   app?: boolean;
   /** `false` (--no-projects) skips the offer to add a project to your library. */
   projects?: boolean;
+  /** `false` (--no-existing) skips reconciling existing Library folders with the team. */
+  existing?: boolean;
   /** `false` (--no-evals) skips the offer to evaluate every shared skill that has no receipt. */
   evals?: boolean;
   /** Test knob for the agent probe; defaults to the real one. Mirrors EvalArgs.preflight. */
@@ -71,7 +75,7 @@ export interface SetupArgs extends WithForm {
   verbs?: Partial<SetupVerbs>;
 }
 export type StepOutcome = 'done' | 'skipped' | 'printed' | 'queued' | 'batched';
-type Step = 'welcome' | 'app' | 'role' | 'github' | 'team' | 'invite' | 'projects' | 'evals' | 'community' | 'hook' | 'wrapper' | 'done';
+type Step = 'welcome' | 'app' | 'role' | 'github' | 'team' | 'invite' | 'projects' | 'existing' | 'evals' | 'community' | 'hook' | 'wrapper' | 'done';
 export interface SetupResult {
   role: 'creator' | 'joiner';
   team: string;
@@ -147,13 +151,13 @@ export async function run(args: SetupArgs, io: Prompter): Promise<Result<SetupRe
   const role: SetupResult['role'] = args.target === undefined ? 'creator' : 'joiner';
   const store = args.config ?? createConfigStore();
   const runner = args.runner ?? systemRunner;
-  const verbs: SetupVerbs = { team, app: runApp, invite, offerHook: defaultOfferHook, offerWrapper: defaultOfferWrapper, eval: evalRun, preflight: systemPreflight, ...args.verbs };
+  const verbs: SetupVerbs = { team, app: runApp, invite, offerHook: defaultOfferHook, offerWrapper: defaultOfferWrapper, eval: evalRun, reconcile: runReconcile, preflight: systemPreflight, ...args.verbs };
   const steps: SetupResult['steps'] = {};
   let teamName = '';
   let remote = '';
 
   const decorated = decorate(io, args);
-  const titles: Record<Step, string> = { welcome: 'Welcome', app: 'App', role: 'Role', github: 'GitHub', team: 'Team', invite: 'Invite', projects: 'Projects', evals: 'Evals', community: 'Community', hook: 'Session hook', wrapper: 'Wrapper', done: 'Done' };
+  const titles: Record<Step, string> = { welcome: 'Welcome', app: 'App', role: 'Role', github: 'GitHub', team: 'Team', invite: 'Invite', projects: 'Projects', existing: 'Your skills', evals: 'Evals', community: 'Community', hook: 'Session hook', wrapper: 'Wrapper', done: 'Done' };
   const output = io;
   let pendingSection: Step | undefined;
   const section = (step: Step): void => { pendingSection = step; };
@@ -362,12 +366,41 @@ export async function run(args: SetupArgs, io: Prompter): Promise<Result<SetupRe
       }
     }
 
+    // Reconcile cannot change the team binding, so one post-project snapshot is also the eval step's
+    // handle evidence. Keep its read failure inside the two optional, non-fatal steps: setup has
+    // already completed its durable team work by here.
+    let libraryBinding: { handle?: string } | undefined;
+    let libraryBindingError: unknown;
+    if (teamName !== '') {
+      try { libraryBinding = (await store.read()).teams[teamName]; }
+      catch (error) { libraryBindingError = error; }
+    }
+    if (args.quiet || args.existing === false || !io.interactive || teamName === '') steps.existing = 'skipped';
+    else {
+      section('existing');
+      try {
+        const reconciled = await verbs.reconcile({ form: args.form, team: teamName, list: io.channel === 'frames', config: store, runner, home: args.home }, io);
+        if (!reconciled.ok) {
+          io.print(`Could not check your library against the team: ${reconciled.error}`);
+          steps.existing = 'skipped';
+        } else if (!reconcileHasRows(reconciled.value)) {
+          steps.existing = 'skipped';
+        } else {
+          steps.existing = io.channel === 'frames' ? 'printed' : 'done';
+        }
+      } catch (error) {
+        io.print(`Could not check your library against the team: ${error instanceof Error ? error.message : String(error)}`);
+        steps.existing = 'skipped';
+      }
+    }
+
     // The default remains Skip. Queuing never probes the paid agent.
     if (args.quiet || args.evals === false || !io.interactive || teamName === '') steps.evals = 'skipped';
     else {
       section('evals');
       try {
-        const handle = (await store.read()).teams[teamName]?.handle;
+        if (libraryBindingError !== undefined) throw libraryBindingError;
+        const handle = libraryBinding?.handle;
         if (!handle) {
           io.print('Skipping the eval offer: this machine has no joined handle for the team yet.');
           steps.evals = 'skipped';

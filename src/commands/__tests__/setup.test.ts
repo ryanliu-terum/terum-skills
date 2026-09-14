@@ -480,7 +480,7 @@ describe('setup (§6.1)', () => {
     const home = join(root, 'home');
     const result = await run({ app: false, target: remote, quiet: true, config: store, runner, home, hook: hookFor(root), wrapper: wrapperFor(home), communityUrl: 'https://example.test/community' }, io);
     if (!result.ok) throw new Error(result.error);
-    expect(result.value.steps).toEqual({ welcome: 'skipped', app: 'skipped', github: 'done', team: 'done', invite: 'skipped', projects: 'skipped', evals: 'skipped', community: 'skipped', hook: 'done', wrapper: 'done', done: 'skipped' });
+    expect(result.value.steps).toEqual({ welcome: 'skipped', app: 'skipped', github: 'done', team: 'done', invite: 'skipped', projects: 'skipped', existing: 'skipped', evals: 'skipped', community: 'skipped', hook: 'done', wrapper: 'done', done: 'skipped' });
     expect(io.countAsked('Install the Claude Code session-start hook')).toBe(1);
     expect(io.countAsked('Install the /terum-skills Claude Code skill')).toBe(1);
     expect(await exists(join(home, '.claude', 'skills', 'terum-skills', 'SKILL.md'))).toBe(true);
@@ -901,6 +901,68 @@ describe('setup projects', () => {
     expect(notFolder.events).toContainEqual(expect.stringMatching(/^print:Could not add that project: /));
   });
 });
+
+describe('setup existing Library reconciliation', () => {
+  const rows = {
+    identical: [{ path: '/library/a', name: 'a', team: 'team', skillId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', version: 'v1' }],
+    differing: [],
+    renamed: [],
+    adopted: [],
+    published: [],
+  };
+
+  function reconciler(result = rows) {
+    return vi.fn(async (_args: unknown, io: Prompter) => {
+      io.print('Checking your library against the team…');
+      io.print(result.identical.length === 0
+        ? 'Nothing to reconcile: none of your skills match a team skill by bytes or by name.'
+        : `${result.identical.length} of your skills match the team's exactly; ${result.differing.length} share a name with a team skill but differ.`);
+      return success(result);
+    });
+  }
+
+  it('orders projects, existing, then evals and marks an interactive check done', async () => {
+    const args = await optionalSetup(); const reconcile = reconciler(); const io = optionalAnswers();
+    const result = await run({ ...args, verbs: { ...args.verbs, reconcile: reconcile as never } }, io);
+    expect(result).toMatchObject({ ok: true, value: { steps: { projects: 'skipped', existing: 'done', evals: 'skipped' } } });
+    expect(reconcile).toHaveBeenCalledWith(expect.objectContaining({ team: 'team', list: false, config: args.config }), expect.anything());
+    const projects = io.events.indexOf(`ask:${PROJECTS_QUESTION}`);
+    const existing = io.events.indexOf('print:Checking your library against the team…');
+    const evals = io.events.indexOf('print:The team has no shared skills yet; nothing to evaluate.');
+    expect(projects).toBeGreaterThan(-1);
+    expect(existing).toBeGreaterThan(projects);
+    expect(evals).toBeGreaterThan(existing);
+  });
+
+  it('uses list behavior over frames and marks the shell-owned step printed', async () => {
+    const args = await optionalSetup(); const reconcile = reconciler();
+    const io = Object.assign(optionalAnswers(), { channel: 'frames' as const });
+    expect(await run({ ...args, verbs: { ...args.verbs, reconcile: reconcile as never } }, io))
+      .toMatchObject({ ok: true, value: { steps: { existing: 'printed' } } });
+    expect(reconcile).toHaveBeenCalledWith(expect.objectContaining({ list: true }), expect.anything());
+  });
+
+  it.each([{ existing: false }, { quiet: true }])('skips without invoking reconcile for %j', async options => {
+    const args = await optionalSetup(); const reconcile = reconciler();
+    expect(await run({ ...args, ...options, verbs: { ...args.verbs, reconcile: reconcile as never } }, optionalAnswers()))
+      .toMatchObject({ ok: true, value: { steps: { existing: 'skipped' } } });
+    expect(reconcile).not.toHaveBeenCalled();
+  });
+
+  it('skips an empty check and treats a failed check as non-fatal', async () => {
+    const emptyArgs = await optionalSetup(); const empty = reconciler({ ...rows, identical: [] });
+    expect(await run({ ...emptyArgs, verbs: { ...emptyArgs.verbs, reconcile: empty as never } }, optionalAnswers()))
+      .toMatchObject({ ok: true, value: { steps: { existing: 'skipped' } } });
+
+    const failedArgs = await optionalSetup();
+    const failed = vi.fn(async () => failure('clone unreadable'));
+    const io = optionalAnswers();
+    expect(await run({ ...failedArgs, verbs: { ...failedArgs.verbs, reconcile: failed as never } }, io))
+      .toMatchObject({ ok: true, value: { steps: { existing: 'skipped' } } });
+    expect(io.events).toContain('print:Could not check your library against the team: clone unreadable');
+  });
+});
+
 const successfulEval = async () => success({ team: 'team', id: 'test', name: 'sample', runDir: '/test/run', ccVersion: 'test', executionStatus: 'complete' as const });
 describe('setup batch evals', () => {
   it('setup offers the eval batch only for shared skills with no receipt at the current version', async () => {
@@ -1085,7 +1147,11 @@ describe('f-wizard cost and run choices', () => {
     expect(io.events.filter(line => line === 'print:Enter a whole number of at least 1.')).toHaveLength(1); expect(evaluate).toHaveBeenCalledTimes(2);
   });
   it('frames preserve the undecorated print transcript byte for byte', async () => {
-    const fixture = await optionalSetup(2); const args = {...fixture,preflight:async()=>success({ccVersion:'test'}),verbs:{...fixture.verbs,eval:async(arg:EvalArgs,io:Prompter)=>{io.print(`Context for ${arg.ref}`);return arg.ref==='alpha'?successfulEval():failure('Could not evaluate beta\nTry again later');}}};
+    // `existing` is the one step whose two channels differ BY DESIGN (cross-mirror overlays spec §4.6, §5 M2.3):
+    // the terminal asks per matching folder, frames lists and hands the choice to the shell. It is switched off
+    // here so the parity assertion stays about the print transcript; its own channel split is asserted in
+    // 'uses list behavior over frames and marks the shell-owned step printed'.
+    const fixture = await optionalSetup(2); const args = {...fixture,existing:false,preflight:async()=>success({ccVersion:'test'}),verbs:{...fixture.verbs,eval:async(arg:EvalArgs,io:Prompter)=>{io.print(`Context for ${arg.ref}`);return arg.ref==='alpha'?successfulEval():failure('Could not evaluate beta\nTry again later');}}};
     const frames = Object.assign(optionalAnswers({}, {'Evaluate the ':'Now'}), { channel: 'frames' as const });
     const plain = optionalAnswers({}, {'Evaluate the ':'Now'});
     vi.stubEnv('NO_COLOR', undefined); vi.stubEnv('TERM', 'xterm');
@@ -1149,7 +1215,7 @@ it('snapshots a decorated creator Overnight transcript and emits only headers fo
  };
   try {expect(await run(args,io)).toMatchObject({ok:true,value:{steps:{evals:'queued'}}});expect(transcript).toContain('>_ terum-skills (v9.9.9)');
   const titles=transcript.split('\n').filter(line=>line.startsWith('> \x1b[1m')).map(line=>line.replace(/\x1b\[[0-9]+m/g,''));
-  expect(titles).toEqual(['> Role','> GitHub','> Team','> Invite','> Projects','> Evals','> Done']);expect(transcript).not.toMatch(/Step \d|of 12/);expect(transcript.replace(/\x1b\[[0-9]+m/g,'')).not.toContain('> Welcome');
+  expect(titles).toEqual(['> Role','> GitHub','> Team','> Invite','> Projects','> Your skills','> Evals','> Done']);expect(transcript).not.toMatch(/Step \d|of 12/);expect(transcript.replace(/\x1b\[[0-9]+m/g,'')).not.toContain('> Welcome');
  }finally{vi.restoreAllMocks();vi.unstubAllEnvs();}
 });
 it('omits the Invite header on a decorated joiner without numbering or empty sections',async()=>{

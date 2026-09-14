@@ -1117,7 +1117,7 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "file": "README.md",
     "line": 362,
     "policy": "prose",
-    "pattern": "| Team | `setup [<org>/<repo>]` | Create-or-join wizard; sequences the verbs below, then offers the session hook and the `/terum-skills` Claude Code skill |"
+    "pattern": "| Team | `setup [<org>/<repo>] [--no-existing]` | Create-or-join wizard; sequences the verbs below, checks existing Library folders against the team, then offers the session hook and the `/terum-skills` Claude Code skill; `--no-existing` skips that check |"
   },
   {
     "file": "README.md",
@@ -1171,7 +1171,7 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "file": "README.md",
     "line": 371,
     "policy": "prose",
-    "pattern": "| Skills | `install <ref> [--into global\\|<project root>] [--yes-profile]` / `uninstall-skill <ref> [--from global\\|<project root>]` | Install the highest numbered version in the clone. Interactive use always offers Global and added projects; `--into` selects explicitly and refuses unregistered project roots. A replace prompt keeps the existing folder in the targeted root’s `.claude/old-skills/<name>`; an existing backup there must be moved elsewhere first; uninstall leaves your profile unchanged (`member <handle>` and `project <name>` install whole lists); `uninstall-skill` asks once, listing every folder it will remove |"
+    "pattern": "| Skills | `install <ref> [--into global\\|<project root>] [--yes-profile]` / `install --adopt <path>` / `uninstall-skill <ref> [--from global\\|<project root>]` | Install the highest numbered version in the clone, or adopt an identical Library folder in place without copying it. Interactive installs offer Global and added projects; `--into` selects explicitly and refuses unregistered project roots. A replace prompt keeps the existing folder in the targeted root’s `.claude/old-skills/<name>`; an existing backup there must be moved elsewhere first; uninstall leaves your profile unchanged (`member <handle>` and `project <name>` install whole lists); `uninstall-skill` asks once, listing every folder it will remove |"
   },
   {
     "file": "README.md",
@@ -1412,13 +1412,13 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "file": "docs/frame-protocol.md",
     "line": 146,
     "policy": "prose",
-    "pattern": "`hello.features` names `libraryProjects`, `projects`, `memberRole`, `localIdentity`, `roles`, `favorites`, `follow`, `lastSeen`, `installScope`, `inviteScoping`, `disablePerMachine`, `projectMembers`, `liftOnCards`, `runEvalInApp`, `perCase`, `progress`, `refresh`, `appUpdate`, and `serve`."
+    "pattern": "`hello.features` names `libraryProjects`, `projects`, `memberRole`, `localIdentity`, `roles`, `favorites`, `follow`, `lastSeen`, `installScope`, `inviteScoping`, `disablePerMachine`, `projectMembers`, `liftOnCards`, `runEvalInApp`, `perCase`, `progress`, `refresh`, `appUpdate`, `reconcile`, and `serve`."
   },
   {
     "file": "docs/frame-protocol.md",
     "line": 149,
     "policy": "prose",
-    "pattern": "`liftOnCards`, `runEvalInApp`, `progress`, `refresh`, `appUpdate`, `serve`."
+    "pattern": "`liftOnCards`, `runEvalInApp`, `progress`, `refresh`, `appUpdate`, `reconcile`, `serve`."
   },
   {
     "file": "docs/frame-protocol.md",
@@ -1568,7 +1568,7 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "file": "docs/frame-protocol.md",
     "line": 274,
     "policy": "prose",
-    "pattern": "`project add [path]` · `project remove <path>` · `project list` are the Library's local project registry. `add` asks `Which folder?` as a `path` ask when no argument is given (default: the nearest git repository above the cwd) and returns `{ path, label, added }`; `remove` returns `{ path, placementsRemaining }` and forgets the path only — nothing on disk changes; `list` returns `{ projects: { path, label, rootState, skillFolders }[] }`. A project is added only by an explicit act: no verb registers one as a side effect, and `install --into <path>` refuses a path that is not already a project rather than adding it."
+    "pattern": "`project add [path]` · `project remove <path>` · `project list` are the Library's local project registry. `add` asks `Which folder?` as a `path` ask when no argument is given (default: the nearest git repository above the cwd) and returns `{ path, label, added, reconcile? }`; after a newly added project it scans only that project, and frame mode carries the non-writing reconcile result so the shell can open a dialog only when it is non-empty. `remove` returns `{ path, placementsRemaining }` and forgets the path only — nothing on disk changes; `list` returns `{ projects: { path, label, rootState, skillFolders }[] }`. A project is added only by an explicit act: no verb registers one as a side effect, and `install --into <path>` refuses a path that is not already a project rather than adding it."
   },
 
   {
@@ -1775,5 +1775,53 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "line": 0,
     "policy": "prose",
     "pattern": "// freeze on a working tree that never moves again. The writer lock held here proves no terum-skills process"
+  },
+  {
+    "file": "README.md",
+    "line": 0,
+    "policy": "prose",
+    "pattern": "| | `reconcile [--list]` | Compare unrecorded Library folders with published team skills; list the byte-identical, differing, and renamed matches, or ask which identical folders to adopt and which differing same-name folders to publish |"
+  },
+  {
+    "file": "docs/frame-protocol.md",
+    "line": 0,
+    "policy": "prose",
+    "pattern": "advertise their respective verbs. `reconcile` gates the Library's Check against the team action."
+  },
+  {
+    "file": "docs/frame-protocol.md",
+    "line": 0,
+    "policy": "prose",
+    "pattern": "`install --adopt <path> [--team <team>]` records a direct child of the Global Library or a registered"
+  },
+  {
+    "file": "docs/frame-protocol.md",
+    "line": 0,
+    "policy": "prose",
+    "pattern": "`reconcile --list [--team <team>]` scans unrecorded Library folders once and returns"
+  },
+  {
+    "file": "docs/frame-protocol.md",
+    "line": 0,
+    "policy": "prose",
+    "pattern": "project as installed when its bytes equal exactly one published version in the selected team and its folder"
+  },
+  {
+    "file": "docs/frame-protocol.md",
+    "line": 0,
+    "policy": "prose",
+    "pattern": "renamed rows carry `version` and `teamName` and are reported only. Running `reconcile` without `--list` asks"
+  },
+  {
+    "file": "docs/frame-protocol.md",
+    "line": 0,
+    "policy": "prose",
+    "pattern": "summary and marks the step `printed`; the shell owns the choices by calling `reconcile --list` and then"
+  },
+  {
+    "file": "docs/frame-protocol.md",
+    "line": 0,
+    "policy": "prose",
+    "pattern": "`install --adopt` or `publish`. `--no-existing`, quiet and non-interactive setup mark it `skipped`."
   },
 ];

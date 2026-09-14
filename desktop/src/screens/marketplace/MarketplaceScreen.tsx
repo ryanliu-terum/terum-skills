@@ -6,6 +6,7 @@ import { driveRun, PrintContext, PromptContext, useBackend, useFeatures } from '
 import type { Catalog, Person, Project, Run, SkillCard, Scope } from '../../backend/types';
 import { useUrlState } from '../../app/url-state';
 import { useSyncAction } from '../../components/domain/useSyncAction';
+import { useAddLibraryProject } from '../../components/domain/useAddLibraryProject';
 import { useWorkflow } from '../../components/domain/useWorkflow';
 import { useUiStore } from '../../app/store';
 import { Shell } from '../../components/domain/Shell';
@@ -75,7 +76,7 @@ function NewProjectDialog({ catalog, onClose, onCreated }: { catalog: Catalog; o
   </DialogPopup></Dialog>;
 }
 function InstallDialog({ project, catalog, busy, onClose, onInstall }: { project: Project; catalog: Catalog; busy: boolean; onClose: () => void; onInstall: (scope: Scope) => void }) {
-  const backend = useBackend(), features = useFeatures(), action = useWorkflow(), state = useUrlState();
+  const backend = useBackend(), features = useFeatures(), projectAdd = useAddLibraryProject(), state = useUrlState();
   const status = useQuery({ queryKey: ['status', state.mock], queryFn: ({ signal }) => backend.status(undefined, { signal }) });
   const roots = status.data?.ok ? status.data.value.roots : [];
   const model = destinationsFor(roots, project.remoteSlugs, { libraryProjects: features?.libraryProjects ?? false });
@@ -83,21 +84,13 @@ function InstallDialog({ project, catalog, busy, onClose, onInstall }: { project
   const scope = chosen ?? model.preselected;
   const counts = catalog.bulkInstall[project.key];
   const asking = counts ? project.skillsIn.map(name => [...catalog.skills, ...catalog.extras].find(s => s.name === name)).filter(s => s !== undefined).filter(s => rawGrants(s).length > 0) : [];
-  async function addProject() {
-    try {
-      const picked = await backend.pickFolder();
-      if (!picked.ok) { action.fail(picked.error); return; }
-      if (picked.value === null) return;
-      await action.run(() => backend.projects.add(picked.value!), {}, added => { setChosen(added.label); void status.refetch(); });
-    } catch (error) { action.fail(error instanceof Error ? error.message : String(error)); }
-  }
-  const error = action.error ?? (status.data?.ok === false ? status.data.error : status.error?.message);
-  return <Dialog open onOpenChange={open => { if (!open && !busy) onClose(); }}><DialogPopup><DialogTitle>Install project {project.name}</DialogTitle><DialogDescription>Copies the latest version of the project's {project.skills} {pluralWord(project.skills, 'skill')} to the destination you choose and records your installs. Replacing an existing copy asks first and keeps it in that destination's .claude/old-skills folder. Adding a skill to your profile is optional.</DialogDescription>
+  const error = projectAdd.error ?? (status.data?.ok === false ? status.data.error : status.error?.message);
+  return <><Dialog open onOpenChange={open => { if (!open && !busy) onClose(); }}><DialogPopup><DialogTitle>Install project {project.name}</DialogTitle><DialogDescription>Copies the latest version of the project's {project.skills} {pluralWord(project.skills, 'skill')} to the destination you choose and records your installs. Replacing an existing copy asks first and keeps it in that destination's .claude/old-skills folder. Adding a skill to your profile is optional.</DialogDescription>
     <SectionLabel>Install to</SectionLabel>
     <RadioGroup value={scope ?? ''} onValueChange={value => setChosen(String(value))}>{model.rows.map(([label, caption]) => <RadioRow key={label} value={label} label={label} caption={caption}/>)}</RadioGroup>
-    {model.addRow ? <Button icon="plus" disabled={busy || action.busy} onClick={() => void addProject()}>Add project…</Button> : null}
+    {model.addRow ? <Button icon="plus" disabled={busy || projectAdd.busy} onClick={() => void projectAdd.add(undefined, added => { setChosen(added.label); void status.refetch(); })}>Add project…</Button> : null}
     {error ? <ErrorLine>{error}</ErrorLine> : null}
-    {counts && <div className="market-install-grants"><SectionLabel>Tool grants to approve · {counts.asking} of {counts.total} ask</SectionLabel><div>{asking.map(s => <div className="market-install-grant-row" key={s.name}><span>{s.name}</span><div>{rawGrants(s).map(g => <Chip key={g}>{g}</Chip>)}</div></div>)}</div><Small>Approved once per machine; changed grants ask again.</Small></div>}<TerminalHint command={`npx -y terum-skills@latest install project ${project.key}`}/><div className="market-dialog-actions"><Button disabled={busy} onClick={onClose}>Cancel</Button><Button kind="primary" disabled={busy || status.isPending || !status.data?.ok || scope === null} onClick={() => { if (scope !== null) onInstall(scope); }}><span>{`Install ${plural(project.skills, 'skill')}`}</span></Button></div></DialogPopup></Dialog>;
+    {counts && <div className="market-install-grants"><SectionLabel>Tool grants to approve · {counts.asking} of {counts.total} ask</SectionLabel><div>{asking.map(s => <div className="market-install-grant-row" key={s.name}><span>{s.name}</span><div>{rawGrants(s).map(g => <Chip key={g}>{g}</Chip>)}</div></div>)}</div><Small>Approved once per machine; changed grants ask again.</Small></div>}<TerminalHint command={`npx -y terum-skills@latest install project ${project.key}`}/><div className="market-dialog-actions"><Button disabled={busy} onClick={onClose}>Cancel</Button><Button kind="primary" disabled={busy || status.isPending || !status.data?.ok || scope === null} onClick={() => { if (scope !== null) onInstall(scope); }}><span>{`Install ${plural(project.skills, 'skill')}`}</span></Button></div></DialogPopup></Dialog>{projectAdd.dialog}</>;
 }
 function DetailPage({ catalog: c, project, person, busy, onRun, onError }: { catalog: Catalog; project?: Project; person?: Person; busy: boolean; onRun: (start: () => Run<unknown>, answers?: Record<string, string | boolean>, done?: () => void) => Promise<boolean>; onError: (message: string) => void }) {
   const state = useUrlState(), [params, setParams] = useSearchParams(), backend = useBackend(), features=useFeatures(), [favoriteOverride, setFavorite] = useState<boolean|null>(null);

@@ -1,11 +1,10 @@
-import { useBackend, useFeatures, usePreference } from '../../backend';
-import { useState } from 'react';
+import { useFeatures, usePreference } from '../../backend';
 import type { ReactNode } from 'react';
 import type { Root, StatusResult, Surfaces, TeamStatus } from '../../backend/types';
 import type { IconName } from '../ui/icon-paths';
 import { Icon } from '../ui/Icon';
 import { Footer } from './Footer';
-import { useWorkflow } from './useWorkflow';
+import { useAddLibraryProject } from './useAddLibraryProject';
 import './Sidebar.css';
 function SectionHeader({label,trailing}:{label:string;trailing?:ReactNode}){return <div className="section-header"><div><span>{label}</span><Icon name="chevron-down" size={12} color="var(--tk-text4)" stroke="2"/></div>{trailing}</div>;}
 function NavRow({label,icon,href,selected=false,nested=false,expandable=false,collapsed=false,onToggle,count,trailing}:{label:string;icon:IconName;href:string;selected?:boolean;nested?:boolean;expandable?:boolean;collapsed?:boolean;onToggle?:()=>void;count?:string|undefined;trailing?:ReactNode}){
@@ -16,21 +15,12 @@ export function Sidebar({selected,counts,machine,me,surfaces,team,roots,collapse
  // One workflow instance for the whole sidebar (the app's per-surface convention): the next action
  // anywhere in the sidebar replaces a shown error instead of pinning it to its row forever, and a
  // route change remounts the Shell, dropping it. `errorAt` routes the one error to the row that owns it.
- const backend=useBackend(),action=useWorkflow(),[errorAt,setErrorAt]=useState<string|null>(null);
- async function addProject(){
-  setErrorAt('add-project');
-  action.clear();
-  const picked=await backend.pickFolder();
-  if(!picked.ok){action.fail(picked.error);return;}
-  const path=picked.value;
-  if(path===null)return;
-  await action.run(()=>backend.projects.add(path));
- }
+ const projectAdd=useAddLibraryProject();
  return <aside className="sidebar"><nav className="sidebar-inner" aria-label="Main navigation"><div className="nav-group"><SectionHeader label="Library" trailing={<button type="button" className="icon-button" aria-label="Hide sidebar" aria-expanded={true} onClick={onHide} style={{width:20,height:20,color:'var(--tk-text4)'}}><Icon name="panel-left" size={14}/></button>}/>
  <NavRow label="Global" icon="globe" href="#/library/global" selected={selected==='Global'} count={displayedCounts?.Global}/>{surfaces?.library!==false?<><NavRow label="Projects" icon="folder" href="#/marketplace/projects" expandable collapsed={collapsedSections.includes('projects')} onToggle={()=>onToggleSection?.('projects')}/>
- {!collapsedSections.includes('projects')&&<>{projectRoots.length?projectRoots.map(root=><ProjectRow key={root.id} root={root} selected={selected===root.id} showCount={displayedCounts!==null}/>):<div className="nav-row nav-empty" style={{paddingLeft:32}}><div className="nav-label"><span style={{color:'var(--tk-text4)'}}>0 projects</span></div></div>}<AddProjectRow busy={action.busy} error={errorAt==='add-project'?action.error:null} onChoose={()=>{void addProject();}}/></>}</>:null}
+ {!collapsedSections.includes('projects')&&<>{projectRoots.length?projectRoots.map(root=><ProjectRow key={root.id} root={root} selected={selected===root.id} showCount={displayedCounts!==null}/>):<div className="nav-row nav-empty" style={{paddingLeft:32}}><div className="nav-label"><span style={{color:'var(--tk-text4)'}}>0 projects</span></div></div>}<AddProjectRow busy={projectAdd.busy} error={projectAdd.error} onChoose={()=>{void projectAdd.add();}}/></>}</>:null}
  {surfaces?.inbox===true?<><NavRow label="Inbox" icon="inbox" href="#/inbox" expandable collapsed={collapsedSections.includes('inbox')} onToggle={()=>onToggleSection?.('inbox')} selected={selected==='Inbox'}/>{!collapsedSections.includes('inbox')&&<><NavRow label="Pushes" icon="arrow-down-to-line" href="#/inbox?tab=pushes" nested count={displayedCounts?.Pushes}/><NavRow label="Updates" icon="refresh" href="#/inbox?tab=updates" nested count={displayedCounts?.Updates}/><NavRow label="Alerts" icon="alert" href="#/inbox?tab=alerts" nested count={displayedCounts?.Alerts}/></>}</>:null}
- </div>{surfaces?.catalog!==false||surfaces?.roster!==false?<div className="nav-group"><SectionHeader label="Team"/>{surfaces?.catalog!==false?<NavRow label="Marketplace" icon="store" href="#/marketplace" selected={selected==='Marketplace'}/>:null}{surfaces?.roster!==false?<NavRow label="Members" icon="users" href="#/share" selected={selected==='Members'}/>:null}</div>:null}</nav><Footer team={team} machine={machine} me={me} settings={selected==='Settings'}/></aside>;
+ </div>{surfaces?.catalog!==false||surfaces?.roster!==false?<div className="nav-group"><SectionHeader label="Team"/>{surfaces?.catalog!==false?<NavRow label="Marketplace" icon="store" href="#/marketplace" selected={selected==='Marketplace'}/>:null}{surfaces?.roster!==false?<NavRow label="Members" icon="users" href="#/share" selected={selected==='Members'}/>:null}</div>:null}</nav><Footer team={team} machine={machine} me={me} settings={selected==='Settings'}/>{projectAdd.dialog}</aside>;
 }
 
 /**

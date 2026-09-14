@@ -74,6 +74,37 @@ it.each(teamCases)('orders %s as verb, flags, separator, positionals', async (_n
   expect(f.spawns.map(s => s.args)).toEqual([...reads, argv]);
 });
 
+it('runs reconcile --list once and preserves every result group', async () => {
+  const value = {
+    identical: [{ path: '/home/.claude/skills/a', name: 'a', team: 'acme', skillId: 'id-a', version: 'v2' }],
+    differing: [{ path: '/home/.claude/skills/b', name: 'b', team: 'acme', skillId: null, teamVersion: 'v3', nextVersion: 'v4', sameId: false, teamAuthor: 'mira' }],
+    renamed: [{ path: '/home/.claude/skills/old-a', name: 'old-a', team: 'acme', skillId: 'id-a', version: 'v2', teamName: 'a' }],
+    adopted: [], published: [],
+  };
+  const f = replay(value);
+  expect(await createTauriBackend(f.bridge).reconcile.list()).toEqual({ ok: true, value });
+  expect(f.spawns.map(spawn => spawn.args)).toEqual([['reconcile', '--list']]);
+});
+
+it('preserves an optional project-add reconcile result', async () => {
+  const reconcile = { identical: [{ path: '/work/.claude/skills/a', name: 'a', team: 'acme', skillId: 'id-a', version: 'v1' }], differing: [], renamed: [], adopted: [], published: [] };
+  const f = replay({ path: '/work', label: 'work', added: true, reconcile });
+  expect(await createTauriBackend(f.bridge).projects.add('/work').done).toEqual({ ok: true, value: { path: '/work', label: 'work', added: true, reconcile } });
+  expect(f.spawns.map(spawn => spawn.args)).toEqual([['project', 'add', '--', '/work']]);
+});
+
+it('adopts through the install flag and derives the returned scope and name from ls --local', async () => {
+  const path = '/home/.claude/skills/a';
+  const f = fakeBridge((args, emit) => {
+    const value = args[0] === 'ls'
+      ? { roster: [], skills: [], problems: [], local: [{ root: '/home/.claude/skills', scope: 'global', rows: [], problems: [] }] }
+      : { id: 'id-a', team: 'acme', path, version: 'v2', profiled: false, adopted: true };
+    emit({ kind: 'stdout', line: JSON.stringify({ t: 'result', verb: args[0], ok: true, exitCode: 0, value }) });
+  });
+  expect(await createTauriBackend(f.bridge).install({ team: 'acme', adopt: path }).done).toEqual({ ok: true, value: [{ id: 'id-a', name: 'a', scope: 'Global', path, version: 'v2', profiled: false }] });
+  expect(f.spawns.map(spawn => spawn.args)).toEqual([['ls', '--local'], ['install', '--team', 'acme', '--adopt', path]]);
+});
+
 it('passes the stored eval defaults as flags and omits the unset or sentinel ones', async () => {
   const f = replay(undefined, false);
   const b = createTauriBackend(f.bridge);
