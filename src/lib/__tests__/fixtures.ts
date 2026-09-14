@@ -1,4 +1,4 @@
-import { access, mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { access, mkdtemp, mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -57,8 +57,15 @@ export class NonInteractivePrompter extends ScriptedPrompter {
   override async select(question: string): Promise<string> { this.asked.push(question); throw new PromptClosedError(question, 'not-interactive'); }
 }
 
+/**
+ * Canonical, never the raw `mkdtemp` path. On macOS `tmpdir()` sits under `/var`, a symlink to
+ * `/private/var`, so a fixture path and anything the code under test resolved (`realpath` in
+ * lib/projects.ts, `process.cwd()` after a chdir) name one folder in two spellings and compare
+ * unequal. Resolving here keeps every such assertion comparing like with like; on Linux, where
+ * `/tmp` is real, this is a no-op, which is why CI never saw it.
+ */
 export async function temporaryDirectory(prefix = 'terum-test-'): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), prefix));
+  const dir = await realpath(await mkdtemp(join(tmpdir(), prefix)));
   TEMP_DIRS.push(dir);
   return dir;
 }
