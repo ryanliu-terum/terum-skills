@@ -37,6 +37,17 @@ export interface EfficiencySummary {
   cost_usd: number | null;
 }
 
+/**
+ * Check-quality diagnostics. A check that failed in every arm on every rep (dead) or passed in
+ * every arm on every rep (vacuous) could not tell the versions apart, so a tie over it is not
+ * evidence the skill made no difference. Entries are `<case> › <check name>`. Report-only: they
+ * never enter the receipt and never change a score (§5.1 scoring is untouched).
+ */
+export interface CheckDiagnostics {
+  dead: string[];
+  vacuous: string[];
+}
+
 export interface Aggregate {
   verdict: Verdict;
   attribution: string;
@@ -48,6 +59,7 @@ export interface Aggregate {
   efficiency: Record<string, EfficiencySummary>;
   /** Rev 8: cases skipped for missing host tools, case → missing requirements. Never scored, always visible. */
   environment_skips: Record<string, string[]>;
+  check_diagnostics: CheckDiagnostics;
 }
 
 /**
@@ -93,6 +105,7 @@ export function aggregate(rows: readonly ComparisonRow[], arms: readonly ArmSamp
     arm_scores: armScores,
     efficiency,
     environment_skips: environmentSkips,
+    check_diagnostics: diagnoseChecks(rows),
   };
 }
 
@@ -101,12 +114,69 @@ function mean(values: readonly (number | null)[]): number | null {
   return present.length ? present.reduce((sum, value) => sum + value, 0) / present.length : null;
 }
 
-/** §5.3 one-line why, from what actually decided the baseline rows. Deterministic, no LLM. */
+/**
+ * Tally every check's outcome across all arms and reps. An arm that failed to run was scored
+ * against the empty transcript (§7.1), which says nothing about the check, so those results are
+ * left out; a check seen fewer than twice is not classified either way.
+ */
+export function diagnoseChecks(rows: readonly ComparisonRow[]): CheckDiagnostics {
+  const tally = new Map<string, { passed: number; total: number }>();
+  for (const row of rows) {
+    if (row.decided_by === 'both-arms-failed') continue;
+    const observed = [
+      ...(row.decided_by === 'candidate-run-failed' ? [] : row.checks_candidate),
+      ...(row.decided_by === 'opponent-run-failed' ? [] : row.checks_opponent),
+    ];
+    for (const result of observed) {
+      const key = `${row.case} › ${result.name}`;
+      const entry = tally.get(key) ?? { passed: 0, total: 0 };
+      entry.total += 1;
+      if (result.passed) entry.passed += 1;
+      tally.set(key, entry);
+    }
+  }
+  const dead: string[] = [];
+  const vacuous: string[] = [];
+  for (const [key, { passed, total }] of tally) {
+    if (total < 2) continue;
+    if (passed === 0) dead.push(key);
+    else if (passed === total) vacuous.push(key);
+  }
+  return { dead, vacuous };
+}
+
+/** Plain-language reason for each tie label in §7.1's `decided_by` vocabulary. */
+const TIE_REASONS: Record<string, string> = {
+  'checks-equal-no-judge': 'the checks named no winner and, with no rubric, no judge ran',
+  'judge': 'the judge called it even',
+  'judge-split': 'the judge split across the two orderings',
+  'judge-unparseable': 'the judge returned no usable verdict',
+  'judge-refused': 'the judge refused to compare',
+  'judge-network-error': 'the judge could not be reached',
+  'both-arms-failed': 'both versions failed to run',
+};
+
+/** `<reason>` when every tie shares a label, else `N where <reason>; M where <reason>`. */
+function tieReasons(ties: readonly ComparisonRow[]): string {
+  const counts = new Map<string, number>();
+  for (const row of ties) counts.set(row.decided_by, (counts.get(row.decided_by) ?? 0) + 1);
+  const reason = (label: string): string => TIE_REASONS[label] ?? `decided by ${label}`;
+  if (counts.size === 1) return reason([...counts.keys()][0]!);
+  return [...counts].map(([label, n]) => `${n} where ${reason(label)}`).join('; ');
+}
+
+/**
+ * §5.3 one-line why, from what actually decided the baseline rows. Deterministic, no LLM. Ties say
+ * why they tied: a `checks-equal-no-judge` round is not "the checks came out level" — one version
+ * may have passed more checks than the other — it is a round where neither version passed every
+ * check (§5.1: a partial lead does not win) and no rubric existed to send it to the judge.
+ */
 function attributionLine(rows: readonly ComparisonRow[]): string {
   const baseline = rows.filter((row) => row.comparison === 'candidate-vs-baseline');
   if (baseline.length === 0) return 'no execution comparisons ran';
   const wins = baseline.filter((row) => row.outcome === 'win');
   const losses = baseline.filter((row) => row.outcome === 'loss');
+  const ties = baseline.filter((row) => row.outcome === 'tie');
   const part = (label: string, subset: readonly ComparisonRow[]): string | null => {
     if (subset.length === 0) return null;
     const byChecks = subset.filter((row) => row.decided_by === 'checks').length;
@@ -114,9 +184,14 @@ function attributionLine(rows: readonly ComparisonRow[]): string {
     return `${label} on ${via}`;
   };
   const pieces = [part('wins', wins), part('loses', losses)].filter((piece): piece is string => piece !== null);
-  if (pieces.length === 0) return 'all comparisons tied';
-  const ties = baseline.length - wins.length - losses.length;
-  return pieces.join('; ') + (ties > 0 ? `; ${ties} tie${ties === 1 ? '' : 's'}` : '');
+  if (pieces.length === 0) {
+    const rounds = ties.length === 1 ? 'the only round drew' : `all ${ties.length} rounds drew`;
+    if (ties.every((row) => row.decided_by === 'checks-equal-no-judge')) {
+      return `${rounds} — neither version passed every check in any case, and a partial lead doesn't win a round; with no rubric, no judge ran`;
+    }
+    return `${rounds} — ${tieReasons(ties)}`;
+  }
+  return pieces.join('; ') + (ties.length > 0 ? `; ${ties.length} tie${ties.length === 1 ? '' : 's'} (${tieReasons(ties)})` : '');
 }
 
 /** §6: the printed report — verdict, per-comparison record, arm scores, trigger failures, efficiency. */
@@ -133,6 +208,12 @@ export function renderReport(aggregateResult: Aggregate, triggers: TriggerSummar
   }
   const scores = Object.entries(aggregateResult.arm_scores).map(([arm, score]) => `${arm} ${score === null ? 'n/a' : score.toFixed(2)}`);
   if (scores.length) lines.push(`arm scores: ${scores.join(' · ')}`);
+  const { dead, vacuous } = aggregateResult.check_diagnostics;
+  if (dead.length || vacuous.length) {
+    lines.push(`check quality: ${dead.length} dead (failed in every version) · ${vacuous.length} vacuous (passed in every version) — these checks could not tell the versions apart, so a tie over them is not evidence the skill made no difference`);
+    for (const name of dead) lines.push(`  dead: ${name}`);
+    for (const name of vacuous) lines.push(`  vacuous: ${name}`);
+  }
   if (triggers) {
     const format = (value: number | null): string => (value === null ? 'n/a' : value.toFixed(2));
     lines.push(`triggers: recall=${format(triggers.recall)} precision=${format(triggers.precision)} (tp=${triggers.tp} fn=${triggers.fn} fp=${triggers.fp} tn=${triggers.tn})`);

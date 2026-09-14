@@ -2,11 +2,18 @@ import { mkdtemp, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import type { CheckResult } from '../checks.js';
 import type { ArmSample, ComparisonRow } from '../execution.js';
-import { aggregate, renderReport, runIdFrom, writeRunTree } from '../results.js';
+import { aggregate, diagnoseChecks, renderReport, runIdFrom, writeRunTree } from '../results.js';
 
 const row = (outcome: 'win' | 'loss' | 'tie', decidedBy = 'checks', comparison = 'candidate-vs-baseline'): ComparisonRow => ({
   skill: 's', kind: 'execution', case: 'c', rep: 0, comparison, outcome, decided_by: decidedBy, reason: '', checks_candidate: [], checks_opponent: [],
+});
+
+const check = (name: string, passed: boolean): CheckResult => ({ name, passed, detail: '' });
+/** A checks-equal-no-judge tie carrying each arm's per-check results, for the check-quality diagnostics. */
+const tieWithChecks = (caseName: string, candidate: CheckResult[], opponent: CheckResult[], decidedBy = 'checks-equal-no-judge', rep = 0): ComparisonRow => ({
+  ...row('tie', decidedBy), case: caseName, rep, checks_candidate: candidate, checks_opponent: opponent,
 });
 
 const sample = (arm: ArmSample['arm'], fraction: number | null, extra: Partial<ArmSample> = {}): ArmSample => ({
@@ -53,6 +60,76 @@ describe('aggregation (§5.3)', () => {
     const text = renderReport(out, null);
     expect(text).toContain('skipped (environment): xlsx — missing python3:openpyxl');
     expect(text).toContain('[partial — 1/3 scored]');
+  });
+});
+
+describe('tie attribution (§7.1 rev 20)', () => {
+  it('an all-tie run with no rubric says neither version swept and no judge ran — never that the checks were level', () => {
+    // The 2026-09-14 `parallel-fix` receipt: candidate 1/2 vs baseline 0/2 in one round still tied under §5.1.
+    const rows = [
+      tieWithChecks('bug-logs', [check('transcript_mentions:triage', true), check('command_matching:git', false)], [check('transcript_mentions:triage', false), check('command_matching:git', false)]),
+      row('tie', 'checks-equal-no-judge'),
+      row('tie', 'checks-equal-no-judge'),
+    ];
+    const out = aggregate(rows, [], 3);
+    expect(out.attribution).toBe("all 3 rounds drew — neither version passed every check in any case, and a partial lead doesn't win a round; with no rubric, no judge ran");
+    expect(out.attribution).not.toContain('level');
+    expect(out.attribution).not.toContain('unscored');
+    expect(out).toMatchObject({ verdict: 'NEUTRAL', scored_rows: 3 }); // display only: the arithmetic is untouched
+    expect(out.comparisons['candidate-vs-baseline']).toMatchObject({ win: 0, loss: 0, tie: 3, net_lift: 0, sign_p: 1 });
+  });
+
+  it('names each tie reason with counts when the labels are mixed, and singularises one round', () => {
+    expect(aggregate([row('tie', 'judge-split')], [], 1).attribution).toBe('the only round drew — the judge split across the two orderings');
+    const mixed = aggregate([row('tie', 'judge'), row('tie', 'judge'), row('tie', 'checks-equal-no-judge'), row('tie', 'judge-network-error')], [], 4).attribution;
+    expect(mixed).toBe('all 4 rounds drew — 2 where the judge called it even; 1 where the checks named no winner and, with no rubric, no judge ran; 1 where the judge could not be reached');
+  });
+
+  it('a mixed win/loss record still says why its ties tied', () => {
+    const out = aggregate([row('win'), row('loss', 'judge'), row('tie', 'checks-equal-no-judge'), row('tie', 'checks-equal-no-judge')], [], 4);
+    expect(out.attribution).toBe('wins on execution checks; loses on judge calls; 2 ties (the checks named no winner and, with no rubric, no judge ran)');
+  });
+
+  it('only candidate-vs-baseline rows drive the line; the both-arms-failed hole keeps its own wording', () => {
+    expect(aggregate([row('tie', 'both-arms-failed'), row('tie', 'judge-refused', 'candidate-vs-incumbent')], [], 2).attribution).toBe('the only round drew — both versions failed to run');
+  });
+});
+
+describe('check-quality diagnostics (§6 rev 20, report only)', () => {
+  const dead = check('transcript_mentions:never-said', false);
+  const vacuous = check('file_exists:README.md', true);
+  it('classifies checks that fail or pass in every arm on every rep, and leaves informative checks alone', () => {
+    const rows = [
+      tieWithChecks('c1', [dead, vacuous, check('command_matching:git', true)], [dead, vacuous, check('command_matching:git', false)], 'checks-equal-no-judge', 0),
+      tieWithChecks('c1', [dead, vacuous, check('command_matching:git', false)], [dead, vacuous, check('command_matching:git', true)], 'checks-equal-no-judge', 1),
+    ];
+    expect(diagnoseChecks(rows)).toEqual({ dead: ['c1 › transcript_mentions:never-said'], vacuous: ['c1 › file_exists:README.md'] });
+  });
+
+  it('a check is keyed per case, so the same check name in two cases is judged separately', () => {
+    const rows = [
+      tieWithChecks('c1', [dead], [dead]),
+      tieWithChecks('c2', [check('transcript_mentions:never-said', true)], [check('transcript_mentions:never-said', false)]),
+    ];
+    expect(diagnoseChecks(rows)).toEqual({ dead: ['c1 › transcript_mentions:never-said'], vacuous: [] });
+  });
+
+  it('results scored against a failed arm are not evidence about the check', () => {
+    // Candidate crashed: its checks failed against the empty transcript. Only the opponent's pass counts.
+    const oneArm = tieWithChecks('c1', [check('file_exists:out.txt', false)], [check('file_exists:out.txt', true)], 'candidate-run-failed');
+    expect(diagnoseChecks([oneArm])).toEqual({ dead: [], vacuous: [] }); // seen once → unclassified
+    expect(diagnoseChecks([oneArm, { ...oneArm, rep: 1 }])).toEqual({ dead: [], vacuous: ['c1 › file_exists:out.txt'] });
+    expect(diagnoseChecks([tieWithChecks('c1', [dead], [dead], 'both-arms-failed')])).toEqual({ dead: [], vacuous: [] });
+  });
+
+  it('prints a check quality block only when something is dead or vacuous, and keeps it out of scoring', () => {
+    const rows = [tieWithChecks('c1', [dead, check('command_matching:git', true)], [dead, check('command_matching:git', false)])];
+    const out = aggregate(rows, [sample('candidate', 0.5), sample('baseline', 0)], 1);
+    const text = renderReport(out, null);
+    expect(text).toContain('check quality: 1 dead (failed in every version) · 0 vacuous (passed in every version)');
+    expect(text).toContain('  dead: c1 › transcript_mentions:never-said');
+    expect(out.arm_scores).toEqual({ candidate: 0.5, baseline: 0 }); // the dead check still counts toward the §16.4 fraction
+    expect(renderReport(aggregate([row('win')], [], 1), null)).not.toContain('check quality');
   });
 });
 
