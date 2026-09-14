@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { MARK, bad, body, box, decorate, header, ok, sessionBox, style, welcome } from '../banner.js';
+import { MARK, bad, body, box, colorCapable, decorate, header, ok, paint, sessionBox, style, welcome } from '../banner.js';
 import * as tty from '../tty.js';
 import { ScriptedPrompter } from './fixtures.js';
 beforeEach(() => { vi.stubEnv('TERM', 'xterm'); vi.stubEnv('NO_COLOR', undefined); vi.spyOn(tty, 'terminalOutputIsTTY').mockReturnValue(true); });
@@ -23,10 +23,12 @@ it('never decorates frames, pipes, quiet mode, NO_COLOR, dumb terminals, or non-
  vi.stubEnv('NO_COLOR','');expect(decorate(io,{})).toBe(false);vi.stubEnv('NO_COLOR',undefined);
  vi.mocked(tty.terminalOutputIsTTY).mockReturnValue(false);expect(decorate(io,{})).toBe(false);
 });
-it('uses only the five specified styles and reset', () => {
- for(const [kind,code] of [['bold',1],['dim',2],['cyan',36],['green',32],['red',31]] as const)expect(style(kind,'line')).toBe(`\x1b[${code}mline\x1b[0m`);
- expect(ok('Connected a')).toBe('\x1b[32m✓ Connected a\x1b[0m');expect(bad('Oops')).toBe('\x1b[31m✗ Oops\x1b[0m');
- expect(body('✓ alpha')).toBe('  \x1b[32m✓ alpha\x1b[0m');expect(body('  command')).toBe('    command');expect(body('  • item')).toBe('  • item');expect(body('  • Could not look in /gone')).toBe('  • \x1b[31m✗ Could not look in /gone\x1b[0m');
+it('uses only the six specified styles and reset, and paint() is the pure form', () => {
+  for (const [kind, code] of [['bold', 1], ['dim', 2], ['cyan', 36], ['green', 32], ['red', 31], ['yellow', 33]] as const) {
+    expect(paint(kind, 'line', true)).toBe(`\x1b[${code}mline\x1b[0m`);
+    expect(paint(kind, 'line', false)).toBe('line');
+  }
+  expect(style('yellow', 'line')).toBe(colorCapable() ? '\x1b[33mline\x1b[0m' : 'line');
 });
 it.each(['NO_COLOR','notTTY'])('keeps style helpers plain for %s', mode => {
  if(mode==='NO_COLOR')vi.stubEnv('NO_COLOR','1');else vi.mocked(tty.terminalOutputIsTTY).mockReturnValue(false);
