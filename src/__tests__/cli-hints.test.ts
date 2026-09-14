@@ -36,6 +36,7 @@ it.each([undefined, 'bare'] as const)('routes help and refusal text with form=%s
   program.outputHelp();
   expect(help).toContain('Usage: terum-skills');
   expect(help).toContain(`  Create a team: ${prefix} setup`);
+  expect(help).toContain('Output:');
   expect(program.commands.find((command) => command.name() === 'team')?.description()).toContain(`run \`${prefix} team\``);
   await program.parseAsync(['uninstall', 'sample'], { from: 'user' });
   await program.parseAsync(['share'], { from: 'user' });

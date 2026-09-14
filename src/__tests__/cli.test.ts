@@ -429,6 +429,26 @@ it('hides team and local-name overrides from help while keeping their parsers', 
   expect(team.commands.find(command => command.name() === 'join')!.helpInformation()).not.toContain('--as');
 });
 
+it('documents board output flags in root and rendered-verb help, with a blank line before Output: at every joint (R3)', () => {
+  const program = buildProgram(async () => {});
+  let rootHelp = '';
+  program.configureOutput({ writeOut: (text) => { rootHelp += text; } });
+  program.outputHelp();
+  expect(rootHelp).toContain('--format <plain|md|pretty|json|auto>');
+  expect(rootHelp).toContain('\n\nOutput:');
+  for (const name of ['status', 'ls', 'search', 'eval-report', 'eval', 'update', 'sync', 'validate', 'install', 'uninstall-skill']) {
+    let help = '';
+    const command = program.commands.find((candidate) => candidate.name() === name)!;
+    command.configureOutput({ writeOut: (text) => { help += text; } });
+    command.outputHelp();
+    expect(help, name).toContain('Output:');
+    // R3: root and validate build their help text by string concatenation, so OUTPUT_HELP's own leading blank
+    // line does not automatically survive — every joint (concatenated or addHelpText('after', OUTPUT_HELP) alone)
+    // must still land on a real blank line before the paragraph starts.
+    expect(help, name).toContain('\n\nOutput:');
+  }
+});
+
 describe('app-update commander registration', () => {
   it('drives app-update through buildProgram and forwards --release, never colliding with the program version option', async () => {
     for (const [argv, expected] of [

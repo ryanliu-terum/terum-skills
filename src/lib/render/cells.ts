@@ -2,7 +2,7 @@
  * One cell → its text, for both text backends (§4.1's wording is the contract; `pretty` adds colour
  * and truncation on top). `nextCommand` is the one place a Next step is phrased for a host (§6.2).
  */
-import { invocation } from '../invocation.js';
+import { invocation, type RawFragment } from '../invocation.js';
 import type { Cell, NextItem, RenderContext, Tone } from './board.js';
 import { liftText, roundHalfEven } from './policies.js';
 import { relativeDate, singleLine, tildePath } from './text.js';
@@ -45,11 +45,13 @@ export function barText(fraction: number | null, label: string): string {
 const SAFE_ARG = /^[A-Za-z0-9_./~:@+=-]+$/;
 /** A chat-host argument: bare when it is plain, JSON-quoted otherwise (a slash command is not a shell). */
 export function quoteArg(arg: string): string { return SAFE_ARG.test(arg) ? arg : JSON.stringify(arg); }
+/** A terminal argument: bare when it is plain (a RawFragment `invocation()` leaves unquoted), single-quoted otherwise (a plain string `invocation()` shell-quotes). Shared by `nextCommand` and the bin's `--rows all` footer command. */
+export function shellArg(arg: string): string | RawFragment { return SAFE_ARG.test(arg) ? { raw: arg } : arg; }
 
 export function nextCommand(item: NextItem, ctx: RenderContext): string {
   if ('raw' in item) return item.raw;
   // Terminal: `invocation()` owns shell quoting — plain arguments stay bare (RawFragment), the rest are POSIX-quoted by it.
-  if (ctx.host === 'terminal') return invocation(ctx.form, item.verb, ...item.args.map((arg) => (SAFE_ARG.test(arg) ? { raw: arg } : arg)));
+  if (ctx.host === 'terminal') return invocation(ctx.form, item.verb, ...item.args.map(shellArg));
   const sigil = ctx.host === 'claude' ? '/' : '$';
   const tail = item.args.length === 0 ? '' : ` ${item.args.map(quoteArg).join(' ')}`;
   return item.skill === undefined ? `${sigil}terum-skills ${item.verb}${tail}` : `${sigil}${item.skill}${tail}`;

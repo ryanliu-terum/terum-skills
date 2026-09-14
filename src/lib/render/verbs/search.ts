@@ -4,7 +4,8 @@ import { asArray, asRecord, nextInstall, nextSkillInfo, skillsTable, str } from 
 
 /** The term and the active filters, read from the verb's own argv (`search <term> [--category x] [--author y] [--project z]`). */
 function describe(argv: readonly string[]): string {
-  const term = argv[1] ?? '';
+  const args = argv[1] === '--' ? argv.slice(2) : argv.slice(1);
+  const term = args[0] ?? '';
   const filters: string[] = [];
   for (const flag of ['category', 'author', 'project']) {
     const at = argv.indexOf(`--${flag}`);

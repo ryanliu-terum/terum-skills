@@ -10,7 +10,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createConfigStore } from '../lib/config.js';
 import { systemRunner } from '../lib/runner.js';
 import { installPushGuard } from '../lib/teamRepo.js';
-import { bareTeam, cloneWithIdentity, exists, git, pushFromSeed } from '../lib/__tests__/fixtures.js';
+import { bareTeam, cloneWithIdentity, dashboardTeam, exists, git, pushFromSeed } from '../lib/__tests__/fixtures.js';
 
 const run = promisify(execFile);
 const MINE = '11111111-1111-4111-8111-111111111111';
@@ -72,6 +72,56 @@ describe('the built bin (dist/index.js)', () => {
     expect(plain.stdout).not.toContain('"t":');
     const hook = await run(process.execPath, [bin, 'sync', '--hook'], { cwd: out, env });
     expect(hook.stdout).not.toContain('"t":');
+  });
+
+  it.each([
+    [['--format', 'yaml', 'status'], '--format must be one of plain, md, pretty, json, auto.'],
+    [['--rows', '5', 'status'], '--rows, --width, --host and --no-color need --format.'],
+    [['serve', '--format', 'md'], 'serve answers over --frames; drop --format.'],
+    [['sync', '--hook', '--format', 'md'], "sync --hook's stdout is the reload directive; drop --format."],
+  ])('refuses %j with one stderr line and exit 1, writing nothing to stdout', async (args, line) => {
+    const failed = await run(process.execPath, [bin, ...args], { cwd: out, env }).then(() => { throw new Error('expected failure'); }, (error: { code: number; stdout: string; stderr: string }) => error);
+    expect(failed.code).toBe(1); expect(failed.stdout).toBe(''); expect(failed.stderr.trim()).toBe(line);
+  });
+  it('--frames with --format is one framed refusal', async () => {
+    const failed = await framedRun(['--frames', '--format', 'md', 'status']).then(() => { throw new Error('expected failure'); }, (error: { code: number; stdout: string }) => error);
+    const frames = failed.stdout.trim().split('\n').map((l) => JSON.parse(l));
+    expect(frames[0].t).toBe('hello');
+    expect(frames.at(-1)).toMatchObject({ t: 'result', verb: 'status', ok: false, error: '--frames is already a machine format; drop --format.', exitCode: 1 });
+  });
+  it('renders md and json boards for the read verbs against dashboardTeam()', async () => {
+    const f = await dashboardTeam({ storeUnderHome: true, localRemote: true });
+    const child = { ...env, HOME: f.home, USERPROFILE: f.home, GH_CONFIG_DIR: resolve(f.home, '.config', 'gh') };
+    for (const [argv, heading] of [[['status'], '## terum-skills '], [['ls', '--local'], '## Library'], [['ls'], '## Marketplace — acme'], [['ls', 'skill', 'deploy-check'], '## deploy-check — Version 2 (2 versions)'], [['search', 'deploy'], '## Search "deploy"'], [['eval-report', 'tdd'], '## Eval report — tdd'], [['update'], '## terum-skills ']] as const) {
+      const md = await run(process.execPath, [bin, ...argv, '--format', 'md'], { cwd: f.home, env: child });
+      expect(md.stdout.startsWith(heading), argv.join(' ')).toBe(true);
+      expect(md.stdout).not.toMatch(/\x1b/);
+      const json = await run(process.execPath, [bin, '--format', 'json', ...argv], { cwd: f.home, env: child });
+      expect(JSON.parse(json.stdout)).toMatchObject({ verb: argv[0], ok: true, exitCode: 0 });
+    }
+    // plain is untouched: the same status bytes as without any flag.
+    const plain = await run(process.execPath, [bin, 'status'], { cwd: f.home, env: child });
+    const explicit = await run(process.execPath, [bin, 'status', '--format', 'plain'], { cwd: f.home, env: child });
+    expect(explicit.stdout).toBe(plain.stdout);
+  });
+
+  // R1 (fix round 1): a verb flag that survives argv stripping must reach BOTH commander (else this would be an
+  // "unknown option" usage error) AND ctx.argv (else the board heading would not name the filter). format-cli.test.ts's
+  // harness cannot prove this — its sink is built with a fixed `argv: []` regardless of what is run through it — so
+  // this runs the real built bin end to end instead.
+  it('threads a surviving verb flag through both commander and ctx.argv (R1)', async () => {
+    const f = await dashboardTeam({ storeUnderHome: true, localRemote: true });
+    const child = { ...env, HOME: f.home, USERPROFILE: f.home, GH_CONFIG_DIR: resolve(f.home, '.config', 'gh') };
+    const result = await run(process.execPath, [bin, 'search', 'tdd', '--category', 'testing', '--format', 'md'], { cwd: f.home, env: child });
+    expect(result.stdout).toContain('## Search "tdd" · category testing');
+  });
+  // R6: a term that itself looks like a flag survives via a literal `--`; describe() must skip that marker, not treat
+  // it as the term, and the render-option prefix scan (which stops at the first `--`) means --format has to precede it.
+  it("a search term that looks like a flag survives a literal -- separator (R1, R6)", async () => {
+    const f = await dashboardTeam({ storeUnderHome: true, localRemote: true });
+    const child = { ...env, HOME: f.home, USERPROFILE: f.home, GH_CONFIG_DIR: resolve(f.home, '.config', 'gh') };
+    const result = await run(process.execPath, [bin, 'search', '--format', 'md', '--', '--rows'], { cwd: f.home, env: child });
+    expect(result.stdout).toContain('## Search "--rows"');
   });
 
   it('keeps successful framed version and help requests as commander text without a result', async () => {
