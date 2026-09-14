@@ -9,7 +9,7 @@ import { installHook } from '../../lib/hook.js';
 import { placementHome, run } from '../install.js';
 import type { ProgressUpdate } from '../../lib/prompt.js';
 import { createConfigStore } from '../../lib/config.js';
-import { bareTeam, cloneWithIdentity, fakeGh, git, mappedRunner, person, pushFromSeed, ScriptedPrompter, NonInteractivePrompter, temporaryDirectory, wrapRunner, wrapperFor } from '../../lib/__tests__/fixtures.js';
+import { bareTeam, cloneWithIdentity, fakeGh, git, mappedRunner, person, pushFromSeed, ScriptedPrompter, NonInteractivePrompter, temporaryDirectory, wrapRunner, wrapperFor, editHookFor } from '../../lib/__tests__/fixtures.js';
 import { systemRunner } from '../../lib/runner.js';
 import { allowedTools } from '../../lib/schema.js';
 
@@ -37,7 +37,9 @@ describe('install (§6 refs)', () => {
       // The bundled wrapper is resolved from the package root (W-02), so whether it exists depends on whether this
       // checkout was built; an unavailable bundle keeps the wrapper step from asking and makes the case build-independent.
       const wrapper = { skillsRoot: join(home, '.claude', 'skills'), source: join(fixture.root, 'no-bundle', 'SKILL.md') };
-      expect(await run({ ref: 'acme/team/sample', config: store, home, runner, hook, wrapper }, io)).toMatchObject({ ok: true, value: [{ id }] });
+      // Same trick for the edit hook, for the same reason: an unavailable bundle reports and asks nothing.
+      const editHook = { storeRoot: join(fixture.root, 'state'), source: join(fixture.root, 'no-bundle', 'terum-skills-edit.mjs'), settingsFile: hook.settingsFile, backupDir: hook.backupDir };
+      expect(await run({ ref: 'acme/team/sample', config: store, home, runner, hook, wrapper, editHook }, io)).toMatchObject({ ok: true, value: [{ id }] });
       expect(spy).toHaveBeenCalledTimes(1);
       expect(spy.mock.calls[0]![0]).toMatchObject({ quiet: true });
       expect(io.asked).toEqual([]);
@@ -65,9 +67,9 @@ describe('install (§6 refs)', () => {
     const root = join(fixture.root, 'fresh'); const store = createConfigStore(join(root, 'state')); const home = join(root, 'home');
     const remote = 'https://github.com/acme/team.git';
     const runner = mappedRunner(remote, fixture.bare, fakeGh('bob', { 'api user/repository_invitations': { code: 0, stdout: '[]\n', stderr: '' } }));
-    // Identity: GitHub login and handle default to gh's login, then name and email; the §8 hook offer and the /terum-skills skill offer are declined.
-    const io = new ScriptedPrompter(['', '', 'Bob', 'bob@example.com'], [false, false]);
-    const result = await run({ ref: 'acme/team/sample', config: store, home, runner, hook: { settingsFile: join(root, 'settings.json'), backupDir: join(root, 'backups') }, wrapper: wrapperFor(home) }, io);
+    // Identity: GitHub login and handle default to gh's login, then name and email; the §8 hook offer, the /terum-skills skill offer and the edit-hook offer are declined.
+    const io = new ScriptedPrompter(['', '', 'Bob', 'bob@example.com'], [false, false, false]);
+    const result = await run({ ref: 'acme/team/sample', config: store, home, runner, hook: { settingsFile: join(root, 'settings.json'), backupDir: join(root, 'backups') }, wrapper: wrapperFor(home), editHook: editHookFor(join(root, 'state'), join(root, 'settings.json')) }, io);
     expect(result).toMatchObject({ ok: true, value: [{ id, team: 'team', path: join(home, '.claude', 'skills', 'sample') }] });
     expect((await store.read()).teams.team).toMatchObject({ handle: 'bob' });
     expect(await readFile(join(home, '.claude', 'skills', 'sample', 'SKILL.md'), 'utf8')).toContain('name: sample');

@@ -14,6 +14,12 @@ This file ships inside the `terum-skills` npm package and is placed at
 Terum's copy. Setup can refresh it; `sync --hook` also refreshes an outdated managed copy and
 announces `Updated your /terum-skills manual for this CLI.` A foreign copy is left alone.
 
+Setup also offers a Write/Edit hook, separately and with its own y/N. Where the user accepted it, a
+note beginning *"You edited <name>, a skill in this machine's terum-skills Library"* appears after an
+edit inside a `.claude/skills/` folder, once per skill per session. It is this tool talking, not the
+user: treat it as the reminder it is, finish what you were asked to do first, and then offer the
+publish hand-off it names. A skill edited and never published is a skill only that machine has.
+
 ## The one rule that shapes everything
 
 Claude Code's Bash tool has no TTY. The terminal Prompter refuses a question with
@@ -161,6 +167,11 @@ Rules:
   bill their account. Explain cases × k × arms, and suggest `--triggers-only` or `--case <stem>` for
   a first look. Missing assets can add generation calls.
 - Use `run_in_background`; a full matrix takes minutes.
+- **The report's last line may be the next step; act on it.** When the evaluated bytes are not a
+  published version, the run ends with either *To share these results, publish the skill again:*
+  and the command, or — on a FAIL verdict — the same command with the reason not to use it yet.
+  Publishing is Table B: prepare that command for the user's terminal and say why it goes there.
+  Offer it after a PASS or NEUTRAL; after the FAIL line, report the verdict and stop.
 - `--no-gen` uses only existing assets. To regenerate cases, the user deletes `evals/cases/` and
   re-runs eval. Generating assets changes content identity and can mint a version on the next publish.
 - Editing bytes changes the digest used for the Library's score. Installed receipts keep their

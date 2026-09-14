@@ -13,6 +13,7 @@ import { ConfigStore, createConfigStore } from '../lib/config.js';
 import { preflight as systemPreflight } from '../lib/evals/agent.js';
 import { defaultHookOptions, HookOptions, offerHook as defaultOfferHook } from '../lib/hook.js';
 import { defaultWrapperOptions, offerWrapper as defaultOfferWrapper, WrapperOptions } from '../lib/wrapper.js';
+import { defaultEditHookOptions, type EditHookOptions, offerEditHook as defaultOfferEditHook } from '../lib/editHook.js';
 import { MAX_SELECT_ATTEMPTS, Prompter } from '../lib/prompt.js';
 import { readRoster } from '../lib/skills.js';
 import { repositoryUrl, githubOwnerRepo, isGitHubRemote, normalizeRemote, stripRemoteCredentials } from '../lib/remote.js';
@@ -36,6 +37,7 @@ export interface SetupVerbs {
   invite: typeof invite;
   offerHook: typeof defaultOfferHook;
   offerWrapper: typeof defaultOfferWrapper;
+  offerEditHook: typeof defaultOfferEditHook;
   eval: typeof evalRun;
   /**
    * The paid agent probe the eval batch runs once. It sits on the verb table, not only on the free-standing
@@ -65,13 +67,14 @@ export interface SetupArgs extends WithForm {
   hook?: HookOptions;
   /** Where the bundled /terum-skills Claude Code skill is offered from and placed (test knob). */
   wrapper?: WrapperOptions;
+  editHook?: Partial<EditHookOptions>;
   communityUrl?: string;
   /** Test knob: whether the configured team's repository answers "not found"; defaults to lib/successor's git probe. */
   gone?: (runner: Runner, remote: string) => Promise<boolean>;
   verbs?: Partial<SetupVerbs>;
 }
 export type StepOutcome = 'done' | 'skipped' | 'printed' | 'queued' | 'batched';
-type Step = 'welcome' | 'app' | 'role' | 'github' | 'team' | 'invite' | 'projects' | 'evals' | 'community' | 'hook' | 'wrapper' | 'done';
+type Step = 'welcome' | 'app' | 'role' | 'github' | 'team' | 'invite' | 'projects' | 'evals' | 'community' | 'hook' | 'wrapper' | 'editHook' | 'done';
 export interface SetupResult {
   role: 'creator' | 'joiner';
   team: string;
@@ -83,7 +86,7 @@ export interface SetupResult {
 const WELCOME = [
   'Welcome to terum-skills.',
   "Your team's skills live in one private git repository the team controls; each member installs what they want and publishes local skills explicitly.",
-  'This wizard helps you create a team, join one, invite teammates, and offer the session hook and the /terum-skills Claude Code skill; re-run it any time to continue, and leave the invitation question blank to skip it.',
+  'This wizard helps you create a team, join one, invite teammates, and offer the session hook, the /terum-skills Claude Code skill and a reminder to publish a skill after Claude edits one; re-run it any time to continue, and leave the invitation question blank to skip it.',
 ];
 
 export const PROJECTS_QUESTION = 'Add a project?';
@@ -135,7 +138,7 @@ function unfinishedAtInvite(teamName: string, invited: readonly string[], form: 
     invited.length === 0
       ? `Team ${teamName} is set up; no invitation was sent.`
       : `Team ${teamName} is set up and ${invited.length} invitation${invited.length === 1 ? '' : 's'} ${invited.length === 1 ? 'was' : 'were'} sent; that stands.`,
-    `Setup stopped here, so the project, eval, session hook and /terum-skills steps were not offered — run \`${invocation(form, 'setup')}\` again to finish.`,
+    `Setup stopped here, so the project, eval, session hook, /terum-skills and edit-hook steps were not offered — run \`${invocation(form, 'setup')}\` again to finish.`,
   ];
 }
 
@@ -147,13 +150,13 @@ export async function run(args: SetupArgs, io: Prompter): Promise<Result<SetupRe
   const role: SetupResult['role'] = args.target === undefined ? 'creator' : 'joiner';
   const store = args.config ?? createConfigStore();
   const runner = args.runner ?? systemRunner;
-  const verbs: SetupVerbs = { team, app: runApp, invite, offerHook: defaultOfferHook, offerWrapper: defaultOfferWrapper, eval: evalRun, preflight: systemPreflight, ...args.verbs };
+  const verbs: SetupVerbs = { team, app: runApp, invite, offerHook: defaultOfferHook, offerWrapper: defaultOfferWrapper, offerEditHook: defaultOfferEditHook, eval: evalRun, preflight: systemPreflight, ...args.verbs };
   const steps: SetupResult['steps'] = {};
   let teamName = '';
   let remote = '';
 
   const decorated = decorate(io, args);
-  const titles: Record<Step, string> = { welcome: 'Welcome', app: 'App', role: 'Role', github: 'GitHub', team: 'Team', invite: 'Invite', projects: 'Projects', evals: 'Evals', community: 'Community', hook: 'Session hook', wrapper: 'Wrapper', done: 'Done' };
+  const titles: Record<Step, string> = { welcome: 'Welcome', app: 'App', role: 'Role', github: 'GitHub', team: 'Team', invite: 'Invite', projects: 'Projects', evals: 'Evals', community: 'Community', hook: 'Session hook', wrapper: 'Wrapper', editHook: 'Edit hook', done: 'Done' };
   const output = io;
   let pendingSection: Step | undefined;
   const section = (step: Step): void => { pendingSection = step; };
@@ -477,6 +480,13 @@ export async function run(args: SetupArgs, io: Prompter): Promise<Result<SetupRe
     section('wrapper');
     const wrapperOutcome = await verbs.offerWrapper(io, { ...defaultWrapperOptions(args.home), ...args.wrapper });
     steps.wrapper = wrapperOutcome === 'installed' || wrapperOutcome === 'replaced' ? 'done' : 'skipped';
+
+    // The edit hook gets its OWN y/N, deliberately, instead of riding the session hook's. That one
+    // fetches on a schedule; this one runs after every Write and Edit the agent makes and reads the
+    // path it touched. Folding it into a yes already given would install something else entirely.
+    section('editHook');
+    const editHookOutcome = await verbs.offerEditHook(io, { ...defaultEditHookOptions(store.root, args.home), ...args.editHook });
+    steps.editHook = editHookOutcome === 'installed' || editHookOutcome === 'replaced' ? 'done' : 'skipped';
 
     if (args.quiet) steps.done = 'skipped';
     else {

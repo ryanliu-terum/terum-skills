@@ -103,13 +103,13 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "file": "src/commands/setup.ts",
     "line": 83,
     "policy": "prose",
-    "pattern": "'This wizard helps you create a team, join one, invite teammates, and offer the session hook and the /terum-skills Claude Code skill; re-run it any time to continue, and leave the invitation question blank to skip it.',"
+    "pattern": "'This wizard helps you create a team, join one, invite teammates, and offer the session hook, the /terum-skills Claude Code skill and a reminder to publish a skill after Claude edits one; re-run it any time to continue, and leave the invitation question blank to skip it.',"
   },
   {
     "file": "src/commands/setup.ts",
     "line": 138,
     "policy": "prose",
-    "pattern": "`Setup stopped here, so the project, eval, session hook and /terum-skills steps were not offered \u2014 run \\`${invocation(form, 'setup')}\\` again to finish.`,"
+    "pattern": "`Setup stopped here, so the project, eval, session hook, /terum-skills and edit-hook steps were not offered \u2014 run \\`${invocation(form, 'setup')}\\` again to finish.`,"
   },
   {
     "file": "src/commands/setup.ts",
@@ -1775,5 +1775,107 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "line": 0,
     "policy": "prose",
     "pattern": "// freeze on a working tree that never moves again. The writer lock held here proves no terum-skills process"
+  },
+  {
+    file: 'src/commands/refresh.ts',
+    line: 171,
+    policy: 'not-a-hint',
+    pattern: 'notices.push(\'Updated your terum-skills edit hook for this CLI.\');'
+  },
+  {
+    file: 'src/commands/uninstallMachine.ts',
+    line: 75,
+    policy: 'not-a-hint',
+    pattern: 'if (editHookPresence.kind === \'foreign\') detail.push(`  ${editHookPath} is not the bundled terum-skills edit hook (${editHookPresence.why}); left alone`);'
+  },
+  {
+    file: 'src/commands/uninstallMachine.ts',
+    line: 111,
+    policy: 'not-a-hint',
+    pattern: 'try { if (await removeEditHook(editHook) === \'removed\') io.print(`Removed the terum-skills edit hook from ${editHookPath} and ${editHook.settingsFile}.`); }'
+  },
+  {
+    file: 'src/lib/editHook.ts',
+    line: 13,
+    policy: 'prose',
+    pattern: '* dist/claude/hooks/ from assets/claude/hooks/terum-skills-edit.mjs) and is placed under the state'
+  },
+  {
+    file: 'src/lib/editHook.ts',
+    line: 14,
+    policy: 'prose',
+    pattern: '* root by `setup`, on the same contract as the session hook and the `/terum-skills` manual: one'
+  },
+  {
+    file: 'src/lib/editHook.ts',
+    line: 22,
+    policy: 'prose',
+    pattern: '* the author\'s machine, the `terum-skills` skill had 0 model-initiated invocations across 7,158'
+  },
+  {
+    file: 'src/lib/editHook.ts',
+    line: 26,
+    policy: 'not-a-hint',
+    pattern: 'export const EDIT_HOOK_FILE = \'terum-skills-edit.mjs\';'
+  },
+  {
+    file: 'src/lib/editHook.ts',
+    line: 28,
+    policy: 'not-a-hint',
+    pattern: 'export const EDIT_HOOK_MARKER = \'// terum-skills managed hook\';'
+  },
+  {
+    file: 'src/lib/editHook.ts',
+    line: 87,
+    policy: 'not-a-hint',
+    pattern: 'if (bundled === null) throw new Error(`The terum-skills edit hook is not bundled in this copy of terum-skills (expected at ${options.source}).`);'
+  },
+  {
+    file: 'src/lib/editHook.ts',
+    line: 90,
+    policy: 'not-a-hint',
+    pattern: 'if (presence.kind === \'foreign\') throw new Error(`${target} exists and is not the bundled terum-skills edit hook (${presence.why}); move it aside and re-run.`);'
+  },
+  {
+    file: 'src/lib/editHook.ts',
+    line: 146,
+    policy: 'not-a-hint',
+    pattern: 'if (state === \'unavailable\') { io.print(`The terum-skills edit hook is not bundled in this copy of terum-skills (expected at ${options.source}); skipped.`); return \'unavailable\'; }'
+  },
+  {
+    file: 'src/lib/editHook.ts',
+    line: 147,
+    policy: 'not-a-hint',
+    pattern: 'if (state === \'foreign\') { io.print(`${target} exists and is not the bundled terum-skills edit hook; left alone. Move it aside and re-run setup to install it.`); return \'foreign\'; }'
+  },
+  {
+    file: 'src/lib/editHook.ts',
+    line: 150,
+    policy: 'not-a-hint',
+    pattern: 'if (state === \'current\' && await eventHookInstalled(options.settingsFile, \'PostToolUse\')) { io.print(`The terum-skills edit hook at ${target} is current.`); return \'present\'; }'
+  },
+  {
+    file: 'src/lib/editHook.ts',
+    line: 151,
+    policy: 'not-a-hint',
+    pattern: 'if (state === \'outdated\' || state === \'current\') { await installEditHook(options); io.print(`Updated the terum-skills edit hook at ${target}.`); return \'replaced\'; }'
+  },
+  {
+    file: 'src/lib/editHook.ts',
+    line: 157,
+    policy: 'not-a-hint',
+    pattern: 'io.print(`Installed the terum-skills edit hook at ${target} and a Write/Edit hook in ${options.settingsFile}.`);'
+  },
+  {
+    file: '.claude/skills/terum-skills/SKILL.md',
+    line: 0,
+    policy: 'prose',
+    pattern: 'note beginning *"You edited <name>, a skill in this machine\'s terum-skills Library"* appears after an'
+  },
+  {
+    file: '.claude/skills/terum-skills/SKILL.md',
+    line: 0,
+    policy: 'prose',
+    pattern: 'publish hand-off it names. A skill edited and never published is a skill only that machine has.'
   },
 ];
