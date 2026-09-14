@@ -33,7 +33,7 @@ function generationAgent(prompts: string[]): AgentApi {
     runAgent: async (_task, cwd) => transcript(existsSync(join(cwd, '.claude', 'skills', 'sample')) ? ['sample'] : []),
     askJson: async (prompt) => {
       prompts.push(prompt);
-      if (prompt.includes('Generate exactly three')) return generatedCases;
+      if (prompt.includes('Generate headlessly answerable execution')) return generatedCases;
       if (prompt.includes('Generate trigger evaluation')) return generatedTriggers;
       return { selected: ['sample'] };
     },

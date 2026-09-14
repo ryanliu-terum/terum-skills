@@ -39,6 +39,25 @@ describe('eval generation (IE5)', () => {
     expect(prompts[1]).toContain('Every case needs a judge rubric');
   });
 
+  it('accepts a generator-chosen count anywhere in the 3-7 band and tells the model to size it', async () => {
+    const prompts: string[] = [];
+    const seven = { cases: Array.from({ length: 7 }, (_value, index) => ({ ...validCases.cases[0]!, name: `case-${index}`, ...(index === 0 ? { bucket: 'adversarial' } : {}) })) };
+    const result = await generate({ agent: agent([seven], prompts), skill, files: ['SKILL.md'], catalog: '', model: 'sonnet', engineVersion: 'test', now: new Date('2026-09-14T00:00:00Z'), cases: true });
+    expect(result).toMatchObject({ ok: true });
+    if (!result.ok) return;
+    expect(result.value.cases!.names).toHaveLength(7);
+    expect(prompts[0]).toContain('between 3 and 7 inclusive');
+  });
+
+  it.each([
+    ['two cases', 2],
+    ['eight cases', 8],
+  ])('rejects a generated set outside the band: %s', async (_label, count) => {
+    const wrong = { cases: Array.from({ length: count }, (_value, index) => ({ ...validCases.cases[2]!, name: `case-${index}` })) };
+    const result = await generate({ agent: agent([wrong, wrong, wrong]), skill, files: ['SKILL.md'], catalog: '', model: 'sonnet', engineVersion: 'test', now: new Date('2026-09-14T00:00:00Z'), cases: true });
+    expect(result).toMatchObject({ ok: false, error: expect.stringContaining(`between 3 and 7 cases (got ${count})`) });
+  });
+
   it.each([
     ['command_succeeds', { ...validCases, cases: [{ ...validCases.cases[0], checks: [{ command_succeeds: 'verify.sh' }] }, validCases.cases[1], validCases.cases[2]] }],
     ['fixture', { ...validCases, cases: [{ ...validCases.cases[0], fixture: '../fixtures/nope' }, validCases.cases[1], validCases.cases[2]] }],
