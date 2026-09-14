@@ -327,11 +327,11 @@ describe('createTauriBackend — argv and result mapping per verb', () => {
       ['sync'], ['prune'],
     ]);
   });
-  it('search maps CLI hits to seam hits; read models the CLI lacks fail naming GAPS.md; a read that asks is refused', async () => {
+  it('search maps CLI hits to seam hits; read models the CLI lacks fail honestly; a read that asks is refused', async () => {
     const hits = [{ description: 'Deploy safely', grants: null, grantsHash: null, updated: '—', team: 't', id: 'i', name: 'deploy-check', author: 'ryan', category: 'ops', installs: 3, latest: 'abc' }];
     const backend = createTauriBackend(fakeBridge(ok('search', hits)).bridge);
     expect(await backend.search({ q: 'deploy' })).toEqual({ ok: true, value: [{ kind: 'skill', ref: 't/deploy-check', name: 'deploy-check', description: 'Deploy safely', team: 't', category: 'ops', author: 'ryan', installs: 3, latest: 'abc' }] });
-    expect(await backend.onboarding()).toEqual({ ok: false, error: expect.stringContaining('GAPS.md') });
+    expect(await backend.onboarding()).toEqual({ ok: false, error: expect.stringContaining('the CLI has no verb that returns it') });
     const asking = createTauriBackend(fakeBridge((_a, emit) => { emit({ kind: 'stdout', line: line({ t: 'ask', id: 'q1', kind: 'confirm', question: 'Really?' }) }); }).bridge);
     expect(await asking.search({ q: 'x' })).toEqual({ ok: false, error: expect.stringContaining('asked "Really?" during a read-only call') });
   });

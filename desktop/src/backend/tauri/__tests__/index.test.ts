@@ -170,7 +170,7 @@ it('serves status, settings, library, skill, update, roster and catalog while th
   const b = createTauriBackend(f.bridge);
   expect(await b.surfaces()).toEqual({ divergence: false, status: true, settings: true, onboarding: false, library: true, skill: true, receipts: true, inbox: false, catalog: true, roster: true, update: true, libraryProjects: true, appUpdate: true });
   for (const result of await Promise.all([b.onboarding(), b.inbox()])) {
-    expect(result).toEqual({ ok: false, error: expect.stringContaining('(desktop/GAPS.md)') });
+    expect(result).toEqual({ ok: false, error: expect.stringContaining('the CLI has no verb that returns it') });
   }
   expect(f.spawns).toHaveLength(0);
 });
