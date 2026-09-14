@@ -1,4 +1,12 @@
-.library-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;padding:0 20px 16px;flex-grow:1;min-height:0;align-content:start;overflow:auto;scrollbar-width:none}
+/* `grid-auto-rows:min-content` (2026-09-14): a card grows to hold its content instead of spilling out of it.
+   The card IS the grid item here (the Marketplace puts its cards inside `.market-card-wrap`, which is why that
+   grid never showed this), and for an `auto` row Chromium resolves a flex-column item of wrap-dependent height
+   to the item's `min-height` — 148px — then stretches the card to that row and lays its inside out at the real
+   column width, where the footer wraps and the last chip paints below the border. Measured on #/library/global:
+   at a 960px window every card overflowed its row by 26-74px; `min-content` ends it. `minmax(148px,min-content)`
+   does NOT work (the 148px base wins), and `align-self:start` only moves the spill onto the row below.
+   Pixel cost at the 1440 board width: none — every row still computes to exactly 148px there. */
+.library-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));grid-auto-rows:min-content;gap:12px;padding:0 20px 16px;flex-grow:1;min-height:0;align-content:start;overflow:auto;scrollbar-width:none}
 /* Selection mode (batch E, 2026-09-13): the bar sits between the search row and the grid, on the grid's own
    20px gutters, and only renders while `?select=1`, so no board draws it. The notice under the header is the
    Library's one status line (`role="status"`), the shape SkillScreen's own notice uses. */
