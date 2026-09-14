@@ -69,7 +69,7 @@ Setup also offers the `/terum-skills` Claude Code skill, placed at `~/.claude/sk
 
 ## How it works
 
-**Your library are your local folders.** Kind of just like a file explorer but just explicitly for your own skills. This is a direct mirror of your own local system. 
+**Your library are your local folders.** Kind of just like a file explorer but just explicitly for your own skills. This is a direct mirror of your own local system. When a folder's bytes are identical to a version the team has published, its card also shows that version and the team's eval for those exact bytes, named after whoever ran it; a folder you have edited shows neither, because the score described the old bytes. 
 
 **Local-first, with shared skills in a team Github, created on setup** The team repo holds every skill and their unique versions in GitHub along with each skill's associated eval. Each individual has their own .json detailing their personal profile along with the skills they have published or have installed. 
 
@@ -136,7 +136,7 @@ Hygiene checks are deterministic and free. Use `validate` for a free check. `pub
 | `HYG7` | At publish, a category outside the team list produces a warning. Eval and validate do not supply that list. |
 
 #### Execution
-`eval` runs the skill through your logged-in Claude Code CLI. Each arm gets a fresh throwaway sandbox. The candidate is the folder on this machine. The command stores local run artifacts and writes missing generated eval assets into that folder, announcing the path and content change first. Only publish shares skill bytes and matching receipts.
+`eval` runs the skill through your logged-in Claude Code CLI. Each arm gets a fresh throwaway sandbox. The candidate is the folder on this machine. The command stores local run artifacts and writes missing generated eval assets into that folder, announcing the path first. Only publish shares skill bytes; a receipt for bytes that are already a published version is shared by `eval` itself.
 
 ### Writing evals
 Eval files live inside the skill folder and travel with the skill.
@@ -305,15 +305,21 @@ The report also includes:
 
 ### Receipts
 `eval` writes a local receipt under `~/.terum/skills/evals/local/<digest>/<run-id>/`.
-Its content digest identifies the evaluated bytes; its version is null until publish attaches a copy.
-`publish` shares matching receipts alongside the immutable version at:
+Its content digest identifies the evaluated bytes; its version is null until it is attached to one.
+When the evaluated bytes are already a published version, `eval` publishes the receipt itself — that is
+how a teammate's skill you installed and evaluated gets a score the team can see, with no second
+command. `--no-commit` keeps the run to yourself. Otherwise `publish` attaches matching receipts at:
 
 ```text
 evals/<skill-id>/v<N>/<run-id>.json
 ```
 
 Identical bytes reuse the existing version and can receive additional matching receipts.
-Eval cases are part of the skill's content: generating or editing them changes the digest.
+Eval cases travel with the skill but are **not** part of its version identity: they live beside the
+version folders at `skills/<name>/evals/`, so generating or editing a case never mints a version and
+never blanks an existing score. A publish whose only change is an eval asset mints nothing — it
+updates the dataset and attaches any matching receipts to the version that already holds those bytes.
+Installed copies carry the skill, not its dataset.
 
 Anyone can evaluate a local skill, including a copy installed from a teammate. A receipt records:
 
@@ -382,7 +388,7 @@ Release notices appear last on stderr, at most once per release per day, and are
 | | `serve` | Answer read requests on one long-lived process instead of starting a new one per call (`--frames` only; the desktop app drives it). Reads only: `status`, `ls`, `eval-report`, `search`, `validate`, `update` |
 | | `publish <ref> [--project <name>] [--category <name>]` | Publish a local folder — named by its skill name or its folder path (`~/…` accepted) — as an immutable version directly to main, or reuse identical bytes and attach matching evals. Select a team project (Global by default). Category precedence: declared frontmatter, flag, model suggestion, misc fallback; undeclared categories get a source disclosure. Managed frontmatter is written back locally; a profile offer follows publication |
 | Evals | `validate <path\|name>` | Deterministic safety and formatting checks, no model |
-| | `eval <skill>` | Evaluate the local skill, named by skill name or folder path, with your own Claude Code login; generate only missing assets (`--no-gen` disables generation). Publish to share matching receipts. `eval <a> <b>… [--batch n] [--parallel n]` evaluates several skills as one batch (`--batch n` asks before each further batch); `eval <skill…> --window overnight\|later` queues them instead, and `eval --pending` picks every shared skill without a receipt. `eval --drain [--parallel n] [--window overnight] [--max n]` runs queued evals; `eval --queue-list` lists them; `eval --dequeue <team>/<skill>` removes matching queued skills |
+| | `eval <skill>` | Evaluate the local skill, named by skill name or folder path, with your own Claude Code login; generate only missing assets (`--no-gen` disables generation). A receipt for bytes that are already a published version is published by `eval` itself (`--no-commit` keeps it on this machine). `eval <a> <b>… [--batch n] [--parallel n]` evaluates several skills as one batch (`--batch n` asks before each further batch); `eval <skill…> --window overnight\|later` queues them instead, and `eval --pending` picks every shared skill without a receipt. `eval --drain [--parallel n] [--window overnight] [--max n]` runs queued evals; `eval --queue-list` lists them; `eval --dequeue <team>/<skill>` removes matching queued skills |
 | | `eval-report <skill>` | Show a skill's committed eval receipts and this machine's local runs (read-only, no fetch); the desktop app's Evals tab reads it |
 | Machine | `update` / `uninstall` | Show the update command for this copy / confirm machine teardown, preserve recovery data, and print the package-manager removal step |
 | | `app` | Install and open the desktop app for this CLI version |

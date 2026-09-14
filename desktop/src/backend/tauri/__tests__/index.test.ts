@@ -88,11 +88,11 @@ it('passes the stored eval defaults as flags and omits the unset or sentinel one
 });
 
 
-const publishFrame = (over: Record<string, unknown> = {}) => ({ team: 't', id: 'id-a', name: 'a', project: 'Global', version: 'v3', created: true, identicalTo: null, attachedEvals: 0, profileAdded: false, projectAdded: true, ...over });
+const publishFrame = (over: Record<string, unknown> = {}) => ({ team: 't', id: 'id-a', name: 'a', project: 'Global', version: 'v3', created: true, identicalTo: null, attachedEvals: 0, evalAssets: 0, profileAdded: false, projectAdded: true, ...over });
 
 it('maps a minted version, never inventing one', async () => {
   const f = replay(publishFrame());
-  expect(await createTauriBackend(f.bridge).publish({ ref: 'a' }).done).toEqual({ ok: true, value: { name: 'a', project: 'Global', version: 'v3', created: true, identicalTo: null, attachedEvals: 2 - 2, profileAdded: false, projectAdded: true } });
+  expect(await createTauriBackend(f.bridge).publish({ ref: 'a' }).done).toEqual({ ok: true, value: { name: 'a', project: 'Global', version: 'v3', created: true, identicalTo: null, attachedEvals: 2 - 2, evalAssets: 0, profileAdded: false, projectAdded: true } });
 });
 
 it('§5.3: an identical republish carries version NULL through — the match is `identicalTo`', async () => {
@@ -103,7 +103,7 @@ it('§5.3: an identical republish carries version NULL through — the match is 
   // `version` names what was MINTED and `identicalTo` what was MATCHED — leaving `created` as the
   // sole way to tell a fresh v2 from a republish of it.
   const f = replay(publishFrame({ version: null, created: false, identicalTo: 'v2', projectAdded: false }));
-  expect(await createTauriBackend(f.bridge).publish({ ref: 'a' }).done).toEqual({ ok: true, value: { name: 'a', project: 'Global', version: null, created: false, identicalTo: 'v2', attachedEvals: 0, profileAdded: false, projectAdded: false } });
+  expect(await createTauriBackend(f.bridge).publish({ ref: 'a' }).done).toEqual({ ok: true, value: { name: 'a', project: 'Global', version: null, created: false, identicalTo: 'v2', attachedEvals: 0, evalAssets: 0, profileAdded: false, projectAdded: false } });
 });
 
 it('carries the attached-eval count and the profile answer through', async () => {
@@ -1154,4 +1154,66 @@ it('populates project remoteSlugs from every remote and drops null-normalized en
   const catalog = await createTauriBackend(f.bridge).catalog();
   expect(catalog.ok).toBe(true);
   expect(catalog.value?.projects[0]).toMatchObject({ remote: 'https://github.com/team/first.git', remoteSlugs: ['team/first', 'team/second'] });
+});
+
+// Cross-mirror overlays spec §3.1/§3.3/§4.3 — the Library joins the team by CONTENT DIGEST: a row's byte match
+// fills the version slot, and the newer of its own run and the team's committed run is the card's score,
+// attributed to its runner unless this machine ran it. None of it reorders or filters; `evaluated` counts it.
+const teamReceipt = { ...cardReceipt, path: '/clone/evals/id-a/v3/20260102T000000Z.json', version: 'v3', run_id: '20260102T000000Z', attribution: 'team', efficiency: {}, triggers: null, provenance: { ...cardReceipt.provenance, judge_model: 'sonnet', engine_version: '1', engine_commit: 'abc', cases: [] } };
+function overlayLocal(row: Record<string, unknown>) {
+  return { roster: [], skills: [], problems: [], local: [{ root: '/home/.claude/skills', scope: 'global', rows: [{ name: 'a', path: '/home/.claude/skills/a', state: 'untracked locally', tracked: false, placement: null, health: 'unknown', skillId: 'id-a', placed: false, ...row }], notOffered: [], problems: [] }] };
+}
+async function overlayCard(row: Record<string, unknown>) {
+  const result = await createTauriBackend(inventoryBridge({ local: overlayLocal(row) }).bridge).library({ scope: { kind: 'global' }, team: 'acme' });
+  if (!result.ok) throw new Error(result.error);
+  return { card: result.value.skills[0]!, evaluated: result.value.overview.evaluated };
+}
+it('a byte-matched Library folder carries the team version and the team receipt, attributed to its runner', async () => {
+  const { card, evaluated } = await overlayCard({ matchedVersion: 'v3', matchedName: 'a', matchedTeam: 'acme', knownToTeam: true, teamEval: { ...teamReceipt, team: 'acme', mine: false }, localEval: null, localEvalStale: false });
+  expect(card).toMatchObject({ installedVersion: 'v3', localMatch: 'identical', knownToTeam: true, latestVersion: null, teamed: false, placed: false, onDiskOnly: true });
+  expect(card.localEval).toMatchObject({ lift: 42, verdict: 'PASS', runnerHandle: 'mira', version: 'v3' });
+  expect(card.summary).toEqual({ w: 7, l: 2, t: 3, n: 12, lift: 42, verdict: 'PASS', partial: null, signP: '0.090' });
+  expect(card.provenance).toMatchObject({ runner: 'mira', when: '2026-09-01' });
+  expect(evaluated).toBe('1');
+});
+it('a team receipt this machine ran carries no attribution, and the newer of own and team runs wins', async () => {
+  const mine = await overlayCard({ matchedVersion: 'v3', matchedName: 'a', matchedTeam: 'acme', knownToTeam: true, teamEval: { ...teamReceipt, team: 'acme', mine: true } });
+  expect(mine.card.localEval).toMatchObject({ runnerHandle: null, version: 'v3' });
+  const own = { ...teamReceipt, path: '/state/evals/local/abc/20260109T000000Z/receipt.json', run_id: '20260109T000000Z', version: null, comparisons: { 'candidate-vs-baseline': { win: 9, loss: 1, tie: 2, net_lift: 0.3, sign_p: 0.05 } } };
+  const newer = await overlayCard({ matchedVersion: 'v3', matchedName: 'a', matchedTeam: 'acme', knownToTeam: true, teamEval: { ...teamReceipt, team: 'acme', mine: false }, localEval: own });
+  expect(newer.card.localEval).toMatchObject({ w: 9, runnerHandle: null, version: null });
+  const older = await overlayCard({ matchedVersion: 'v3', matchedName: 'a', matchedTeam: 'acme', knownToTeam: true, teamEval: { ...teamReceipt, team: 'acme', mine: false }, localEval: { ...own, run_id: '20250101T000000Z' } });
+  expect(older.card.localEval).toMatchObject({ w: 7, runnerHandle: 'mira' });
+});
+it.each([
+  [{ matchedVersion: null, knownToTeam: true }, 'differs', null],
+  [{ matchedVersion: null, knownToTeam: true, placement: { id: 'id-a', team: 'acme', version: 'v2' }, tracked: true, placed: true }, 'differs', 'v2'],
+  [{ matchedVersion: null, knownToTeam: false, skillId: null }, 'none', null],
+  [{}, null, null],
+] as [Record<string, unknown>, 'identical' | 'differs' | 'none' | null, string | null][])('classifies a Library folder by its byte match %j', async (row, localMatch, installedVersion) => {
+  const { card } = await overlayCard({ teamEval: null, localEval: null, ...row });
+  expect(card).toMatchObject({ localMatch, installedVersion });
+});
+// §3.2 — a Marketplace card sees a folder whose BYTES equal one of its versions even with no ledger row and no
+// uuid; a uuid match with no byte match is this skill, edited; a match belonging to another team is nothing.
+// The recorded people file says this viewer installed deploy-check, so "not on this machine" reads `recorded`.
+function byteMatchedCatalog(row: Record<string, unknown>) {
+  return detailReplay((name, value) => {
+    if (name === 'ls') Object.assign((value.skills as Record<string, unknown>[])[0]!, { latest: 'v10', latestVersion: 'v10', versionCount: 10 });
+    if (name === 'ls-local') {
+      const section = (value.local as { rows: Record<string, unknown>[] }[])[0]!;
+      Object.assign(section.rows[0]!, { placement: null, tracked: false, placed: false, teamEval: null, ...row });
+    }
+    if (name === 'status') (value.ledger as { placements: unknown[] }).placements = [];
+  });
+}
+it.each([
+  [{ skillId: null, matchedTeam: 'acme', matchedName: 'deploy-check', matchedVersion: 'v2' }, { installed: 'placed', placed: false, onDiskOnly: true, installedVersion: 'v2', localMatch: 'identical' }],
+  [{ matchedTeam: null, matchedName: null, matchedVersion: null }, { installed: 'placed', placed: false, onDiskOnly: true, installedVersion: null, localMatch: 'differs' }],
+  [{ skillId: null, matchedTeam: 'other', matchedName: 'deploy-check', matchedVersion: 'v2' }, { installed: 'recorded', placed: false, onDiskOnly: false, installedVersion: null, localMatch: null }],
+  [{ skillId: null }, { installed: 'recorded', placed: false, onDiskOnly: false, installedVersion: null, localMatch: null }],
+] as [Record<string, unknown>, Record<string, unknown>][])('overlays a byte-matched on-disk copy onto the Marketplace card %j', async (row, expected) => {
+  const catalog = await createTauriBackend(byteMatchedCatalog(row).bridge).catalog();
+  if (!catalog.ok) throw new Error(catalog.error);
+  expect(catalog.value.skills.find(skill => skill.name === 'deploy-check')).toMatchObject(expected);
 });

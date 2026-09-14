@@ -119,6 +119,37 @@ it.each([false,true])('manual Start setup works regardless of consumption (file=
  expect(setup).toHaveBeenCalledExactlyOnceWith({...hasFile?{target:launch.target}:{}});
  if(!hasFile)expect(set.mock.calls.filter(([key])=>key==='launch:consumedWrittenAt')).toEqual([]);
 });
+// The case the test above never reached: it opens on a fresh backend, so no PRIOR session exists. With a
+// cancelled one for the same writtenAt, the navigate-on-cancelled effect used to fire with the outcome read
+// before retry() flipped it back to running, and the whole wizard then ran unseen behind the Library.
+it('restarting a cancelled session shows the run instead of bouncing to the Library',async()=>{
+ const b=backend();let attempt=0;
+ vi.spyOn(b,'setup').mockImplementation(()=>{attempt++;return attempt===1?createRun<import('../../backend/types').SetupResult>(async()=>new Promise(()=>{})):createRun(async()=>({ok:true,value:{role:'creator',team:'team',steps:{github:'done'}}}));});
+ const first=open(b);
+ fireEvent.click(await screen.findByRole('button',{name:'Stop'}));
+ await waitFor(()=>expect(location.hash).toBe('#/library/global'));
+ expect(existingSetupSession(b,launch)?.snapshot().outcome).toBe('cancelled');
+ first.unmount();
+ open(b,'#/onboarding/boot?start=1');
+ await screen.findByRole('heading',{name:'Setup finished'});
+ expect(location.hash).toBe('#/onboarding/boot?start=1');
+ expect(attempt).toBe(2);
+});
+// Stop on a restarted screen is a live state, not the dead branch it looked like: it stays put and offers
+// Retry, because the guard above is what keeps the screen mounted.
+it('Stop on a restarted screen stays put and offers Retry',async()=>{
+ const b=backend();
+ vi.spyOn(b,'setup').mockImplementation(()=>createRun<import('../../backend/types').SetupResult>(async()=>new Promise(()=>{})));
+ const first=open(b);
+ fireEvent.click(await screen.findByRole('button',{name:'Stop'}));
+ await waitFor(()=>expect(location.hash).toBe('#/library/global'));
+ first.unmount();
+ open(b,'#/onboarding/boot?start=1');
+ fireEvent.click(await screen.findByRole('button',{name:'Stop'}));
+ expect(await screen.findByRole('heading',{name:'Setup cancelled'})).toBeInTheDocument();
+ expect(screen.getByRole('button',{name:'Retry'})).toBeInTheDocument();
+ expect(location.hash).toBe('#/onboarding/boot?start=1');
+});
 it('Back leaves an unconsumed failure on Library until an explicit retry or new request',async()=>{
  const b=backend(),setup=vi.spyOn(b,'setup').mockImplementation(()=>createRun(async()=>({ok:false,error:'Not ready.'})));
  open(b);await screen.findByRole('heading',{name:"Couldn't finish setup"});

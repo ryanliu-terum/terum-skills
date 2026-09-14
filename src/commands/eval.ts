@@ -14,7 +14,7 @@ import { type ArmSample, type ComparisonRow, loadCase, runCase } from '../lib/ev
 import { generate, type GeneratedAssets } from '../lib/evals/generate.js';
 import { assessHygiene, HygieneRefused, reportHygieneWarnings } from '../lib/evals/hygiene.js';
 import { makeRng } from '../lib/evals/judge.js';
-import { buildReceipt } from '../lib/evals/receipt.js';
+import { receiptPath, buildReceipt } from '../lib/evals/receipt.js';
 import { aggregate, renderReport, runIdFrom, writeRunTree } from '../lib/evals/results.js';
 import { packageVersion } from '../lib/package.js';
 import { parseTriggers, runTriggerEvals, type TriggerSummary } from '../lib/evals/triggers.js';
@@ -25,8 +25,8 @@ import { inspectSkillSource, sourceFiles } from '../lib/skill-source.js';
 import { findSkill, readTeam, skillContentDigest, skillRecords } from '../lib/skills.js';
 import { parseSkillFrontmatter } from '../lib/schema.js';
 import { refIsPath, resolveLibrarySkill, unusableSkillFolder } from '../lib/local-skills.js';
-import { parseVersionFolder, type SkillVersion } from '../lib/versions.js';
-import { refreshClone, lockWait, listVersions, skillVersions } from '../lib/teamRepo.js';
+import { parseVersionFolder, versionLabel, type SkillVersion } from '../lib/versions.js';
+import { openTeamRepo, refreshClone, lockWait, listVersions, skillVersions } from '../lib/teamRepo.js';
 
 export interface EvalArgs extends WithForm {
   ref: string;
@@ -43,6 +43,11 @@ export interface EvalArgs extends WithForm {
   model?: string;
   judgeModel?: string;
   noGen?: boolean;
+  /**
+   * `false` keeps a finished receipt on this machine. Absent publishes it to the team when — and only
+   * when — these exact bytes are already a published version (`shareReceipt`).
+   */
+  commit?: boolean;
   team?: string;
   config?: ConfigStore;
   runner?: Runner;
@@ -59,6 +64,8 @@ export interface EvalResult {
   team: string | null;
   /** §6.1: the folder's declared `metadata.id` when it has one; null before its first publish. */
   id: string | null;
+  /** The version this run's receipt was published to, when it was. */
+  publishedTo?: string;
   /** §6.3: the caller's cue for "To share these results, publish the skill again." */
   shareHint?: true;
   name: string;
@@ -327,7 +334,23 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
     if (generated.cases !== undefined || generated.triggers !== undefined) announceGeneratedAssets(io, wantsCases, wantsTriggers, generated, join(runDir, 'generated'));
     io.print(renderReport(summary, triggers));
 
-    return success({ team: teamName, id: skillId, name: local.name, runDir, ccVersion: preflight.value.ccVersion, executionStatus: summary.execution_status, shareHint: true });
+    // Running the eval is the sharing step (Ajay, 2026-09-13). When these exact bytes are ALREADY a
+    // published version, the receipt has a version to name and nothing else has to move — so it goes
+    // to the team now instead of waiting for a `publish` the runner would otherwise have to know to
+    // type. This is the case the request was about: you install a teammate's skill, evaluate it, and
+    // they see the result. Publish stays the only path that mints a version or moves skill bytes; a
+    // folder you have edited is not a published version, so it falls through to the share hint.
+    const shared = args.commit === false || clone === null || teamName === null || skillId === null || handle === null
+      ? null
+      : await shareReceipt({ clone, team: teamName, remote: selected![1].remote, handle, runner, name: local.name, skillId, digest: evaluatedDigest, runId, source, lockWaitMs: args.lockWaitMs }, io);
+    if (shared?.ok === false) io.print(`The eval is complete and saved locally, but publishing its receipt failed: ${shared.error}`);
+    if (shared?.ok === true) io.print(`Published this receipt to ${teamName} for ${versionLabel(Number(shared.version.slice(1)))} of ${local.name}.`);
+
+    return success({
+      team: teamName, id: skillId, name: local.name, runDir, ccVersion: preflight.value.ccVersion,
+      executionStatus: summary.execution_status,
+      ...(shared?.ok === true ? { publishedTo: shared.version } : { shareHint: true }),
+    });
   } catch (error) { return fromError(error); }
 }
 
@@ -547,6 +570,44 @@ async function latestReceiptedVersion(clone: string, skillId: string, versions: 
     }
   }
   return latest?.folder;
+}
+
+/**
+ * Attach one finished receipt to the published version that has exactly these bytes.
+ *
+ * Deliberately narrow. It writes ONE path — `evals/<id>/<vN>/<runId>.json`, guard row g, append-only
+ * — and only when a committed version already digests equal to the evaluated folder. It never mints
+ * a version, never writes skill bytes, never asks a question, and when no version matches it does
+ * nothing at all and the run falls back to the share hint. That keeps §6.3's "publish is the only
+ * writer" true where it matters: publish remains the only thing that can change what a skill IS.
+ *
+ * Failure is reported, never fatal: the eval ran and its local receipt is already on disk, so a
+ * lock timeout or an offline remote must not turn a completed run into a failed one.
+ */
+async function shareReceipt(
+  input: { clone: string; team: string; remote: string; handle: string; runner: Runner; name: string; skillId: string; digest: string; runId: string; source: string; lockWaitMs?: number },
+  io: Prompter,
+): Promise<{ ok: true; version: string } | { ok: false; error: string } | null> {
+  try {
+    const versions = await listVersions(input.clone, input.name);
+    let match: string | undefined;
+    for (const version of versions) {
+      const committed = await sourceFiles(join(input.clone, 'skills', input.name, version.folder)).catch(() => undefined);
+      if (committed && skillContentDigest(committed.files) === input.digest) { match = version.folder; break; }
+    }
+    if (match === undefined) return null;
+    const path = receiptPath(input.skillId, match, input.runId);
+    // The receipt on disk is a LOCAL one: §6.1 leaves `version` null until something resolves it to a
+    // version folder. Stamp the copy that goes to the team, exactly as publish's attach step does.
+    const stamped = `${JSON.stringify({ ...JSON.parse(input.source), skill_id: input.skillId, version: match }, null, 2)}\n`;
+    await openTeamRepo(input.clone, input.remote, input.runner).safeWrite(
+      (tree) => { if (tree.before(path) === undefined) tree.set(path, stamped); },
+      { action: 'publish', handle: input.handle, message: `${input.handle}: eval ${input.name}`, label: input.team, ...lockWait(io, input.lockWaitMs) },
+    );
+    return { ok: true, version: match };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+  }
 }
 
 export interface PendingEval { id: string; name: string; version: string }

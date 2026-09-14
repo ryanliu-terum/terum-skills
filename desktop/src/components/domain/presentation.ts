@@ -30,14 +30,29 @@ export function installedVersionBehind(card: Pick<SkillCard, 'installedVersion' 
  const latest = card.latestVersion === null ? null : parseVersionFolder(card.latestVersion);
  return installed !== null && latest !== null && installed < latest;
 }
-/** §8.3's two states, both about a copy on this machine. A card the viewer has not installed says
- *  nothing here — the spec names no third state — and the identity line is never what this replaces. */
-export function marketplaceVersionLabel(card: Pick<SkillCard, 'installedVersion' | 'latestVersion'>): string | null {
+/** Cross-mirror overlays spec §3.2 — the Marketplace version slot, always filled once the team's latest is known:
+ *  installed at latest, installed behind (Reinstall), a copy on disk whose bytes match no version (Publish), or
+ *  plainly "Version N" for a skill the viewer has not installed (§8.3's third state). The identity line is never
+ *  what this replaces. */
+export function marketplaceVersionLabel(card: Pick<SkillCard, 'installedVersion' | 'latestVersion' | 'localMatch'>): string | null {
  const latest = card.latestVersion === null ? null : parseVersionFolder(card.latestVersion);
  if (latest === null) return null;
  const installed = card.installedVersion === null ? null : parseVersionFolder(card.installedVersion);
  return installed === latest ? `${versionLabel(latest)} · installed`
-  : installed !== null && installed < latest ? `${versionLabel(latest)} · you have ${versionLabel(installed)}` : null;
+  : installed !== null && installed < latest ? `${versionLabel(latest)} · you have ${versionLabel(installed)}`
+  : card.localMatch === 'differs' ? `${versionLabel(latest)} · your copy differs`
+  : versionLabel(latest);
+}
+/** Cross-mirror overlays spec §3.1 — the Library version slot, top to bottom, first match wins: the version the
+ *  folder's bytes ARE (ledger or byte match); a placed copy that has drifted from the version the ledger recorded;
+ *  a drifted copy with no recorded version, or one the team knows only by uuid; a folder no team has seen. A row
+ *  from a CLI that predates the byte match (localMatch null) says nothing rather than guessing "Unpublished". */
+export function libraryVersionLabel(card: Pick<SkillCard, 'installedVersion' | 'localMatch' | 'placed' | 'knownToTeam'>): string | null {
+ const version = card.installedVersion === null ? null : parseVersionFolder(card.installedVersion);
+ if (card.localMatch === 'identical') return version === null ? null : versionLabel(version);
+ if (card.localMatch === 'differs') return card.placed && version !== null ? `Edited from ${versionLabel(version)}` : 'Edited';
+ if (card.localMatch === 'none') return 'Unpublished';
+ return null;
 }
 export function profileVersionLabel(card: Pick<SkillCard, 'profileVersion'>): string | null {
  const n = card.profileVersion === null ? null : parseVersionFolder(card.profileVersion);

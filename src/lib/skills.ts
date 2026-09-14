@@ -130,7 +130,7 @@ export async function readRoster(clone: string, options: { adminLogins?: readonl
   return { roster, problems };
 }
 
-/** Canonical §5.3 digest: all bytes count except the three Terum-managed YAML fields. */
+/** Canonical §5.3 digest: all bytes count except the three Terum-managed YAML fields and `evals/`. */
 export async function canonicalDigest(root: string): Promise<string> {
   const files = new Map<string, Buffer>();
   for (const relative of await walk(root)) files.set(relative, await readFile(join(root, relative)));
@@ -154,6 +154,10 @@ export async function canonicalDigest(root: string): Promise<string> {
 export function skillContentDigest(files: Map<string, Buffer>): string {
   const aggregate = createHash('sha256');
   for (const relative of [...files.keys()].sort()) {
+    // Eval assets travel with the skill but do not identify it (`isEvalAsset`). Skipping them HERE,
+    // in the one shared implementation, is what keeps eval's `content_digest` and publish's candidate
+    // digest computed the same way — the property this function's contract rests on.
+    if (isEvalAsset(relative)) continue;
     let content = files.get(relative)!;
     if (relative === 'SKILL.md') content = Buffer.from(canonicalSkillMd(content.toString('utf8')));
     aggregate.update(`${digestKey(relative)}:${createHash('sha256').update(content).digest('hex')}\n`);
@@ -260,6 +264,24 @@ function canonicalSkillMd(source: string): string {
 const IGNORED_BASENAMES = new Set(['.DS_Store', 'Thumbs.db']);
 const IGNORED_ROOT_SEGMENTS = new Set(['.git', '.skillhub']);
 
+/** Where a skill's eval cases and triggers live, inside the author's folder and beside its versions. */
+export const EVAL_ASSETS_DIR = 'evals';
+
+/**
+ * Whether a skill-folder-relative key is an eval asset — a case, a trigger file, a fixture.
+ *
+ * These bytes are part of the skill you author and publish, but **not part of its version identity**
+ * (Ajay, 2026-09-13; overrides D9's "digested as content identity / published inside `v<N>/`" clauses
+ * and the matching sentence of D2). A version number answers "did the skill change"; it drives the
+ * marketplace's stale-copy disclosure, install, and the publish comparison, and an eval that only
+ * added cases was moving all of them. D9's own accepted cost — "regenerating cases mints a new skill
+ * version" — is what this reverses; its other clauses stand, and rev 2's §3.1 said the same thing
+ * before D9 reversed it.
+ */
+export function isEvalAsset(key: string): boolean {
+  return key === EVAL_ASSETS_DIR || key.startsWith(`${EVAL_ASSETS_DIR}/`);
+}
+
 /**
  * D2's ignore list, as ONE predicate over a skill-folder-relative POSIX key.
  *
@@ -269,8 +291,10 @@ const IGNORED_ROOT_SEGMENTS = new Set(['.git', '.skillhub']);
  *
  * `.git` and `.skillhub` are matched on the FIRST segment only — a `.git` directory nested inside the
  * skill's own content is content — while the two junk basenames are matched anywhere.
- * **`evals/` is deliberately NOT skipped (D9):** eval cases are ordinary version bytes and part of the
- * skill's identity, so regenerating them mints a new version.
+ *
+ * **`evals/` is NOT skipped here**, because this predicate governs which bytes a walker COLLECTS and
+ * publish must still see the eval assets to hygiene them and to write them to `skills/<name>/evals/`.
+ * They are excluded one level up, from the digest's record stream — see `isEvalAsset`.
  */
 export function ignoredByDigest(key: string): boolean {
   const segments = key.split('/');

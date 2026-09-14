@@ -107,6 +107,12 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
   },
   {
     "file": "src/commands/setup.ts",
+    "line": 138,
+    "policy": "prose",
+    "pattern": "`Setup stopped here, so the project, eval, session hook and /terum-skills steps were not offered \u2014 run \\`${invocation(form, 'setup')}\\` again to finish.`,"
+  },
+  {
+    "file": "src/commands/setup.ts",
     "line": 425,
     "policy": "prose",
     "pattern": "// The /terum-skills Claude Code skill ships inside this package, and setup is the one onboarding"
@@ -1051,7 +1057,7 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "file": "README.md",
     "line": 133,
     "policy": "prose",
-    "pattern": "`eval` runs the skill through your logged-in Claude Code CLI. Each arm gets a fresh throwaway sandbox. The candidate is the folder on this machine. The command stores local run artifacts and writes missing generated eval assets into that folder, announcing the path and content change first. Only publish shares skill bytes and matching receipts."
+    "pattern": "`eval` runs the skill through your logged-in Claude Code CLI. Each arm gets a fresh throwaway sandbox. The candidate is the folder on this machine. The command stores local run artifacts and writes missing generated eval assets into that folder, announcing the path first. Only publish shares skill bytes; a receipt for bytes that are already a published version is shared by `eval` itself."
   },
   {
     "file": "README.md",
@@ -1079,9 +1085,15 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
   },
   {
     "file": "README.md",
-    "line": 303,
+    "line": 306,
     "policy": "prose",
-    "pattern": "`publish` shares matching receipts alongside the immutable version at:"
+    "pattern": "When the evaluated bytes are already a published version, `eval` publishes the receipt itself — that is"
+  },
+  {
+    "file": "README.md",
+    "line": 308,
+    "policy": "prose",
+    "pattern": "command. `--no-commit` keeps the run to yourself. Otherwise `publish` attaches matching receipts at:"
   },
   {
     "file": "README.md",
@@ -1720,7 +1732,7 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "file": "README.md",
     "line": 0,
     "policy": "prose",
-    "pattern": "| | `eval <skill>` | Evaluate the local skill, named by skill name or folder path, with your own Claude Code login; generate only missing assets (`--no-gen` disables generation). Publish to share matching receipts. `eval <a> <b>… [--batch n] [--parallel n]` evaluates several skills as one batch (`--batch n` asks before each further batch); `eval <skill…> --window overnight\\|later` queues them instead, and `eval --pending` picks every shared skill without a receipt. `eval --drain [--parallel n] [--window overnight] [--max n]` runs queued evals; `eval --queue-list` lists them; `eval --dequeue <team>/<skill>` removes matching queued skills |"
+    "pattern": "| | `eval <skill>` | Evaluate the local skill, named by skill name or folder path, with your own Claude Code login; generate only missing assets (`--no-gen` disables generation). A receipt for bytes that are already a published version is published by `eval` itself (`--no-commit` keeps it on this machine). `eval <a> <b>… [--batch n] [--parallel n]` evaluates several skills as one batch (`--batch n` asks before each further batch); `eval <skill…> --window overnight\\|later` queues them instead, and `eval --pending` picks every shared skill without a receipt. `eval --drain [--parallel n] [--window overnight] [--max n]` runs queued evals; `eval --queue-list` lists them; `eval --dequeue <team>/<skill>` removes matching queued skills |"
   },
   {
     "file": "docs/frame-protocol.md",

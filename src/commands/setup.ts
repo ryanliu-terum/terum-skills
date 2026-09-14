@@ -27,7 +27,7 @@ import type { Launch } from '../lib/launch.js';
 import { assetSuffix, detectPlatform, type PlatformEvidence } from '../lib/platform.js';
 import { run as runApp } from './app.js';
 import { run as evalRun, queueItemsFor, skillsWithoutReceipt, type EvalArgs } from './eval.js';
-import { joinCommand, run as invite } from './invite.js';
+import { FIXABLE_INVITE_REASONS, joinCommand, run as invite } from './invite.js';
 import { ensureClone, parseJoinTarget, requireGitConfig, run as team } from './team.js';
 
 export interface SetupVerbs {
@@ -124,6 +124,19 @@ function failed(error: unknown, role: SetupResult['role'], teamName: string, rem
   const outcome = error && typeof error === 'object' && 'ok' in error && error.ok === false && 'error' in error
     ? error as Extract<Result<unknown>, { ok: false }> : fromError(error);
   return { ...outcome, ok: false, error: outcome.ok ? '' : outcome.error, value: { role, team: teamName, remote, steps } };
+}
+
+/**
+ * §6.1 still exits at a failed invite, but it must not exit silently: the team is real and any invitation
+ * already accepted by GitHub stands. Naming both, and naming the re-run, is the whole of A in D1.
+ */
+function unfinishedAtInvite(teamName: string, invited: readonly string[], form: WithForm['form']): string[] {
+  return [
+    invited.length === 0
+      ? `Team ${teamName} is set up; no invitation was sent.`
+      : `Team ${teamName} is set up and ${invited.length} invitation${invited.length === 1 ? '' : 's'} ${invited.length === 1 ? 'was' : 'were'} sent; that stands.`,
+    `Setup stopped here, so the project, eval, session hook and /terum-skills steps were not offered — run \`${invocation(form, 'setup')}\` again to finish.`,
+  ];
 }
 
 function resolvedHook(store: ConfigStore, home: string | undefined, partial: HookOptions | undefined): Required<HookOptions> {
@@ -291,13 +304,25 @@ export async function run(args: SetupArgs, io: Prompter): Promise<Result<SetupRe
     if (role !== 'joiner') section('invite');
     if (role === 'joiner') steps.invite = 'skipped';
     else if (isGitHubRemote(remote)) {
-      const answer = await io.text('Invite teammates by inputting their GitHub usernames (comma or space separated; blank to skip)', '');
-      const logins = answer.split(/[\s,]+/).filter(Boolean);
-      if (logins.length === 0) steps.invite = 'skipped';
-      else {
+      // D1 (2026-09-13): a mistyped or non-existent login is a slip, not a step failure — re-ask instead of
+      // exiting. This deliberately overrides §6.1's blanket "exits non-zero at that step" for that one class
+      // and nothing else: a cap, a permission refusal or an auth failure still exits, and the batch is still
+      // validated before anything is sent, so a re-ask can never double-invite. Whichever way it ends, an
+      // exit here names what is already durable and how to finish, because §6.1's recovery — re-run setup —
+      // was real but had never been said out loud anywhere in the output.
+      for (let attempt = 0; ; attempt++) {
+        const answer = await io.text(attempt === 0
+          ? 'Invite teammates by inputting their GitHub usernames (comma or space separated; blank to skip)'
+          : 'Those GitHub usernames could not be invited; enter them again (comma or space separated; blank to skip)', '');
+        const logins = answer.split(/[\s,]+/).filter(Boolean);
+        if (logins.length === 0) { steps.invite = 'skipped'; break; }
         const result = await verbs.invite({ form: args.form, logins, team: teamName, config: store, runner }, io);
-        if (!result.ok) return failed(result, role, teamName, remote, steps);
-        steps.invite = 'done';
+        if (result.ok) { steps.invite = 'done'; break; }
+        const failures = result.value?.failed ?? [];
+        const retypeable = failures.length > 0 && failures.every(entry => FIXABLE_INVITE_REASONS.has(entry.reason));
+        if (retypeable && attempt + 1 < MAX_SELECT_ATTEMPTS) continue;
+        for (const line of unfinishedAtInvite(teamName, result.value?.invited ?? [], args.form)) io.print(line);
+        return failed(result, role, teamName, remote, steps);
       }
     } else {
       const clean = stripRemoteCredentials(remote);

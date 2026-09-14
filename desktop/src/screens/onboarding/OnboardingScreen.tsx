@@ -51,7 +51,9 @@ function OnboardingReadScreen(){
   const status=useQuery({queryKey:['status',state.mock],queryFn:({signal})=>backend.status(undefined,{signal})});
   const library=useQuery({queryKey:['library','global',state.mock],queryFn:({signal})=>backend.library({scope:{kind:'global'}},{signal}),enabled:step==='done'});
   const data=query.data?.ok?query.data.value:query.data?.value;
-  const error=query.data?.ok===false?query.data.error:query.isError?query.error.message:status.data?.ok===false?status.data.error:status.isError?status.error.message:null;
+  // Only the onboarding read drives BootError: it is the one that means "the sync did not happen". An
+  // unreadable status leaves `identity` undefined, which every use site below already renders around.
+  const error=query.data?.ok===false?query.data.error:query.isError?query.error.message:null;
   const identity=status.data?.ok?status.data.value:undefined;
   return <ScreenFrame ready={(!query.isPending||state.mock==='loading')&&!status.isPending&&(step!=='done'||!library.isPending||state.mock==='loading')}>
     {error?<BootError error={error} data={data} status={identity} retry={()=>{void query.refetch();void status.refetch();}}/>:data?<OnboardingFlow key={step} step={step} data={data} status={identity}/>:<Frame current={null} steps={[]} skipped={[]}><Column><Tile/><Title>Setting up {identity?.teams.length===1?identity.teams[0]?.name:'your workspace'}</Title><div className="onboarding-loading" aria-label="Loading onboarding"><BoardSkeleton width={320} height={18}/><BoardSkeleton width={520} height={160}/></div></Column></Frame>}
@@ -63,10 +65,12 @@ function OnboardingFlow({step,data:d,status}:{step:string;data:Onboarding;status
   const [workspace,setWorkspace]=useState(d.team.name),[logins,setLogins]=useState(d.INVITEE);
   useEffect(()=>{const saved=backend.prefs.get<unknown>('onboardingSkipped',[]);setSkipped(Array.isArray(saved)?saved.filter((value):value is string=>typeof value==='string'&&d.ONBOARD_STEPS.includes(value)):[]);},[backend,d.ONBOARD_STEPS,setSkipped]);
   const current=d.ONBOARD_STEPS.find(name=>name.toLowerCase()===step)??null;
-  const tabs=basicsRows.parse(d.ONBOARD_BASICS),tabKeys=['manage','eval','share','search','more'];
+  // Parsed on its own step only, so a malformed ONBOARD_BASICS breaks the Basics board and not all six.
+  const tabs=step==='basics'?basicsRows.parse(d.ONBOARD_BASICS):[],tabKeys=['manage','eval','share','search','more'];
   const tabIndex=Math.max(0,tabKeys.indexOf(search.get('tab')??'manage')),tab=tabs[tabIndex]?.[0]??'Manage';
-  const pick=search.get('pick'),picked:Theme=pick==='light'||pick==='dark'||pick==='system'?pick:pick===null&&search.get('theme')==='light'?'light':'system';
-  function go(next:string){const nextSearch=new URLSearchParams(search);nextSearch.delete('tab');nextSearch.delete('pick');nextSearch.delete('dialog');navigate('/onboarding/'+next.toLowerCase()+(nextSearch.size?'?'+nextSearch.toString():''));}
+  const pick=search.get('pick'),override=search.get('theme');
+  const picked:Theme=pick==='light'||pick==='dark'||pick==='system'?pick:pick===null&&(override==='light'||override==='dark')?override:'system';
+  function go(next:string){const nextSearch=new URLSearchParams(search);nextSearch.delete('tab');nextSearch.delete('dialog');navigate('/onboarding/'+next.toLowerCase()+(nextSearch.size?'?'+nextSearch.toString():''));}
   function next(){const index=d.ONBOARD_STEPS.findIndex(name=>name.toLowerCase()===step),destination=d.ONBOARD_STEPS[index+1];if(destination)go(destination);else navigate('/library/global');}
   function back(){if(step==='basics'&&tabIndex>0){setSearch(p=>{p.set('tab',tabKeys[tabIndex-1]??'manage');return p;});return;}const index=d.ONBOARD_STEPS.findIndex(name=>name.toLowerCase()===step);go(d.ONBOARD_STEPS[Math.max(0,index-1)]??'welcome');}
   function skip(){if(current){const nextSkipped=[...new Set([...skipped,current])];if(!action.pref('onboardingSkipped',nextSkipped))return;setSkipped(nextSkipped);}next();}
