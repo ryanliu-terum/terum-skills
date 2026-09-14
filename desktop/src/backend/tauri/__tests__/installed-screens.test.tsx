@@ -50,6 +50,7 @@ it('abbreviates the real detail labels while Edit and Manage keep the absolute o
  fireEvent.click(screen.getByRole('button',{name:'Open in editor'}));
  expect(edit).toHaveBeenCalledWith('/Users/teddy/.claude/skills/deploy-check');
  fireEvent.click(screen.getByRole('button',{name:'Manage with Terum…'}));
+ fireEvent.click(await screen.findByRole('menuitem',{name:'Publish to team…'}));
  fireEvent.click(await screen.findByRole('button',{name:'Publish'}));
  await waitFor(()=>expect(publish).toHaveBeenCalledWith({ref:'deploy-check',team:'acme'}));
 });
