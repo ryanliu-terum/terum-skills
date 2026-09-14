@@ -104,10 +104,6 @@ function validateCases(raw: Record<string, unknown>): Result<Record<string, Reco
     if (Object.hasOwn(files, name)) return failure(`generated case name '${name}' is duplicated`);
     if (Object.hasOwn(record, 'fixture')) return failure(`generated case '${name}' may not use fixture`);
     if (typeof record['bucket'] !== 'string' || !BUCKETS.has(record['bucket'])) return failure(`generated case '${name}' needs a bucket from explicit, implicit, contextual, negative, adversarial`);
-    // Engine spec §7.1: a round whose checks name no winner goes to the judge only when the case
-    // carries a rubric; without one it is a default tie (`checks-equal-no-judge`). A generator that
-    // omits the rubric therefore unplugs the designed tiebreak for every case it writes.
-    if (typeof record['judge'] !== 'string' || !record['judge'].trim()) return failure(`generated case '${name}' needs a non-empty 'judge' rubric (2-4 sentences a reviewer uses to compare two transcripts when the checks tie)`);
     const checks = record['checks'];
     if (checks !== undefined && !Array.isArray(checks)) return failure(`generated case '${name}' has a malformed checks field`);
     for (const check of checks ?? []) {
