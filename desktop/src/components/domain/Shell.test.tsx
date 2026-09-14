@@ -11,13 +11,13 @@ import { Shell } from './Shell';
 import { ScreenFrame } from './ScreenFrame';
 import { TopBar } from './TopBar';
 afterEach(()=>{cleanup();location.hash='';useUiStore.getState().setTheme('dark');vi.restoreAllMocks();});
-it('renders the frame shell, selected Global, sidebar and fixture machine identity',async()=>{location.hash='#/frame';render(<Providers><App/></Providers>);expect(screen.getByRole('main')).toBeInTheDocument();expect(await screen.findByText('teniroo')).toBeInTheDocument();expect(screen.getByText('teddy-mbp')).toBeInTheDocument();for(const name of ['Global','Projects','Terum','SSM','MRF','Pushes','Updates','Alerts','Marketplace','Members'])expect(screen.getByRole('link',{name:new RegExp(name)})).toBeInTheDocument();const global=screen.getByRole('link',{name:/Global/});expect(global).toHaveAttribute('aria-current','page');expect(global.style.background).toBe('var(--tk-bg3)');expect(document.documentElement.dataset.appReady).toBe('true');cleanup();expect(document.documentElement.dataset.appReady).toBeUndefined();});
+it('renders the frame shell, selected Global, sidebar and the footer identity link',async()=>{location.hash='#/frame';render(<Providers><App/></Providers>);expect(screen.getByRole('main')).toBeInTheDocument();expect(await screen.findByRole('link',{name:'Your profile'})).toBeInTheDocument();for(const name of ['Global','Projects','Terum','SSM','MRF','Pushes','Updates','Alerts','Marketplace','Members'])expect(screen.getByRole('link',{name:new RegExp(name)})).toBeInTheDocument();const global=screen.getByRole('link',{name:/Global/});expect(global).toHaveAttribute('aria-current','page');expect(global.style.background).toBe('var(--tk-bg3)');expect(document.documentElement.dataset.appReady).toBe('true');cleanup();expect(document.documentElement.dataset.appReady).toBeUndefined();});
 it('supports all capability-driven chrome modes',()=>{const view=render(<TopBar mode="cosmetic"/>);expect(view.container.querySelectorAll('[aria-hidden="true"] div')).toHaveLength(3);view.rerender(<TopBar mode="mac-overlay"/>);expect(view.container.querySelector('.topbar-left')?.firstElementChild).toHaveStyle({width:'52px'});view.rerender(<TopBar mode="native"/>);expect(view.container.querySelectorAll('.window-controls span')).toHaveLength(0);});
 it('renders backend failures as visible alerts',async()=>{location.hash='#/library/global?__mock=error';render(<Providers><App/></Providers>);expect(await screen.findByRole('alert')).toHaveTextContent("EACCES: permission denied, scandir '~/.terum/skills'");expect(document.querySelector('[data-error-boundary]')).toBeNull();});
 
-it('retains footer identity while Library error counts are hidden',async()=>{
+it('retains the footer identity link while Library error counts are hidden',async()=>{
  location.hash='#/library/global?__mock=error';render(<Providers><App/></Providers>);
- expect(await screen.findByText('teniroo')).toBeInTheDocument();expect(screen.getByText('teddy-mbp')).toBeInTheDocument();
+ expect(await screen.findByRole('link',{name:'Your profile'})).toBeInTheDocument();
  expect(screen.getByRole('link',{name:'Your profile'})).toHaveAttribute('href','#/marketplace/people/teddy');
  expect(document.querySelectorAll('.nav-count')).toHaveLength(0);
 });
@@ -31,7 +31,7 @@ it.each([
  ['/settings/account','loading',null],['/settings/account','error',null],
 ] as const)('uses board counts for %s %s',async(route,scenario,counts)=>{
  location.hash='#'+route+(route.includes('?')?'&':'?')+'__mock='+scenario;
- render(<Providers><App/></Providers>);await screen.findByText('teniroo');
+ render(<Providers><App/></Providers>);await screen.findByRole('link',{name:'Your profile'});
  expect([...document.querySelectorAll('.nav-count')].map(node=>node.textContent)).toEqual(counts??[]);
 });
 it.each(['loading','error','empty','default'])('onboarding %s has a main landmark and no sidebar',scenario=>{
@@ -41,7 +41,7 @@ it.each(['loading','error','empty','default'])('onboarding %s has a main landmar
 });
 it.each([undefined,null,{Global:'99'}])('treats explicit Shell counts as authoritative: %j',async counts=>{
  location.hash='#/frame?__mock=error';render(<Providers><HashRouter><Shell counts={counts}><ScreenFrame/></Shell></HashRouter></Providers>);
- await screen.findByText('teniroo');expect([...document.querySelectorAll('.nav-count')].map(node=>node.textContent)).toEqual(counts===undefined?['15','8','3','2','3','3','8']:counts===null?[]:['99','8','3','2']);
+ await screen.findByRole('link',{name:'Your profile'});expect([...document.querySelectorAll('.nav-count')].map(node=>node.textContent)).toEqual(counts===undefined?['15','8','3','2','3','3','8']:counts===null?[]:['99','8','3','2']);
 });
 it('marks a light frame ready only after the URL theme is applied and status resolves',async()=>{
  useUiStore.getState().setTheme('dark');location.hash='#/frame?theme=light';
