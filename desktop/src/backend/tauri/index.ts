@@ -459,13 +459,27 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
   const broadcast = (...sources: ChangeSource[]) => { for (const source of sources) for (const listener of listeners) listener(source); };
   const notify = (...sources: ChangeSource[]) => { if (sources.length === 0) return; clearReads(); broadcast(...sources); };
   // W-08: reads never fetch (src/cli.ts eval-report, docs/frame-protocol.md), so a teammate's committed receipt
-  // reaches this machine only when something runs the fetch-only `sync` (§10; the separate `refresh` verb is gone). Reads are invalidated only when a clone moved, and
-  // only after the reads already in flight have settled: notify('clone') re-spawns seven query prefixes and the
-  // shell caps concurrent CLI children at eight (src-tauri/src/lib.rs).
+  // reaches this machine only when something runs the fetch-only `sync` (§10; the separate `refresh` verb is gone).
+  // Reads are invalidated only after the reads already in flight have settled: a notify re-spawns up to seven
+  // query prefixes and the shell caps concurrent CLI children at eight (src-tauri/src/lib.rs).
+  //
+  // Every completed attempt ends in notify('stamp') — the same source the manual Sync now publishes alongside
+  // 'marketplace'. A successful fetch wrote run/<team>.stamp, so Settings ▸ Sync's "Last fetched", the Status
+  // board and the Inbox are stale; a failed one has a new `lastAutomatic` for Settings ▸ Sync to render, and
+  // waiting for the next fetch to show it would be a minute of silence. 'marketplace' is added only when a clone
+  // actually moved, because nothing in the catalog can have changed otherwise.
+  const settleReads = () => Promise.allSettled([...reads.values()].map(entry => entry.promise));
+  const publish = (...sources: ChangeSource[]) => async () => { await settleReads(); notify(...sources); };
   const refreshPolicy = createRefreshPolicy({
     supported: () => hello?.features.refresh === true,
+    // `workflowGate` is declared just below and needs this policy in its own idle callback, so exactly one of the
+    // two references has to be late-bound. Reading it through a closure is safe: the earliest trigger is the
+    // microtask scheduled by the first hello, long after this function body has run.
+    busy: () => workflowGate.busy(),
     run: () => read(run(['sync'], cliRefresh, value => value, [])),
-    onChanged: async () => { await Promise.allSettled([...reads.values()].map(entry => entry.promise)); notify('marketplace'); },
+    onChanged: publish('marketplace'),
+    onRefreshed: publish('stamp'),
+    onFailed: publish('stamp'),
   });
   const workflowGate = createWorkflowGate(() => { if (!retired) refreshPolicy.trigger(); });
   const onWindowFocus = () => { markStale(); refreshPolicy.trigger(); };
@@ -667,6 +681,8 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
     status: (_, options) => readModels(options, (value, local, platform, home) => statusModel(value, local, platform, { localIdentity: hello?.features.localIdentity ?? false }, home)),
     async settings(_, options) {
       const models = await readModels(options, (value, local, platform, home) => settingsModel(value, local, statusModel(value, local, platform, { localIdentity: hello?.features.localIdentity ?? false }, home), home));
+      // The background fetch has no board of its own; Settings ▸ Sync is where its last outcome is admitted to.
+      if (models.value) models.value.lastAutomatic = refreshPolicy.last();
       const team = models.value?.TEAMS.length === 1 ? models.value.TEAMS[0] : undefined;
       if (!team || !models.value) return models;
       const inventory = await cached(['ls', '--team', team.key], cliLs, options);

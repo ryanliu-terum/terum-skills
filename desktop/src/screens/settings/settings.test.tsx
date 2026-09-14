@@ -417,3 +417,32 @@ it('describes config.json recovery through the replace-and-keep flow, never the 
  expect(row).toHaveTextContent("install asks before replacing the folder already there and keeps it in that root's .claude/old-skills folder");
  expect(row).not.toHaveTextContent('--force');
 });
+
+// f-auto-sync: the app fetches by itself at launch and on focus, and Settings ▸ Sync is the only board that
+// says so. `lastAutomatic` is the adapter's last background outcome; the mock never runs one, so it is null.
+it('explains launch/focus automatic fetch in the existing Sync row',async()=>{
+ open('#/settings/sync');
+ expect(await screen.findByText(/Automatic: at launch and when you come back to the app, at most once a minute; one fetch covers every team and never places, uploads, or edits local skills\./)).toBeVisible();
+ expect(screen.queryByText(/Last automatic fetch failed/)).toBeNull();
+});
+it('shows only the first CLI error line for the last failed automatic fetch',async()=>{
+ const settings=await backend.settings(); if(!settings.ok)throw new Error(settings.error);
+ vi.spyOn(backend,'settings').mockResolvedValue({ok:true,value:{...settings.value,lastAutomatic:{at:Date.now()-120_000,state:'failed',detail:'Could not fetch team\nLong diagnostics',notices:['Skipping acme: Permission denied (publickey).']}}});
+ open('#/settings/sync');
+ expect(await screen.findByText(/Last automatic fetch failed 2 minutes ago: Could not fetch team\./)).toBeVisible();
+ expect(screen.getByText('Skipping acme: Permission denied (publickey).')).toBeVisible();
+ expect(screen.queryByText(/Long diagnostics/)).toBeNull();
+});
+it('names the teams a partial automatic fetch could not reach, without claiming the whole fetch failed silently',async()=>{
+ const settings=await backend.settings(); if(!settings.ok)throw new Error(settings.error);
+ vi.spyOn(backend,'settings').mockResolvedValue({ok:true,value:{...settings.value,lastAutomatic:{at:Date.now()-3_600_000,state:'skipped',detail:'acme: unreachable — no access'}}});
+ open('#/settings/sync');
+ expect(await screen.findByText(/Last automatic fetch failed 1 hour ago: acme: unreachable — no access\./)).toBeVisible();
+});
+it('says nothing about a failure after an automatic fetch that refreshed every team',async()=>{
+ const settings=await backend.settings(); if(!settings.ok)throw new Error(settings.error);
+ vi.spyOn(backend,'settings').mockResolvedValue({ok:true,value:{...settings.value,lastAutomatic:{at:Date.now()-1_000,state:'refreshed'}}});
+ open('#/settings/sync');
+ expect(await screen.findByText(/Automatic: at launch and when you come back to the app/)).toBeVisible();
+ expect(screen.queryByText(/Last automatic fetch failed/)).toBeNull();
+});

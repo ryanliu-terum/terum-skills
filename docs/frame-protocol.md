@@ -384,7 +384,7 @@ under the clone lock. **Nothing on this machine is changed by it: no placement, 
 a local skill.** It never repairs and never re-clones — a clone that is missing or foreign is reported
 as `no-clone` and skipped — because it runs unattended.
 
-The result is `{ changed, teams, notices }`. Each attempted team reports `team`, its own `changed`,
+The result is `{ changed, teams, notices }`. `notices` carries run-wide lines already phrased for a person — one concern per entry, no diagnostics — because a frame-driven caller may render them verbatim: the desktop app prints them under Settings ▸ Sync after an automatic fetch that did not refresh every team. Each attempted team reports `team`, its own `changed`,
 the `head` it ended on (or null when HEAD could not be read), a
 `state` of `refreshed` | `busy` | `unreachable` | `no-clone` | `error`, and a `detail` line for any
 state other than `refreshed`. Top-level `changed` is true when any team moved; a tracked tree that was
@@ -401,3 +401,5 @@ carve-out from "nothing on this machine is changed": it may replace Terum's own 
 
 Work recorded in `pending` is drained by re-running the matching `install` or `uninstall-skill`, never
 by `sync`.
+
+The desktop app is an unattended caller: it spawns plain `sync` at the first hello whose `features.refresh` is true and again whenever its window regains focus, at most once a minute, one at a time, and never while a foreground write verb of its own is running. It drives the run read-only and kills it rather than answer, so `sync` must never ask a question; it keeps only `changed`, each team's `state`/`detail`, and `notices`, so anything a person needs to act on has to be in those fields rather than in printed prose. Every completed automatic fetch refreshes the stamp-driven boards (Status, Settings ▸ Sync, Inbox); one that moved a clone also refreshes the Marketplace boards.

@@ -11,7 +11,7 @@ const currentWindow = vi.hoisted(() => vi.fn<() => Pick<NativeWindow, 'onFocusCh
 vi.mock('@tauri-apps/api/window', () => ({ getCurrentWindow: currentWindow }));
 afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); currentWindow.mockReset(); });
 const recorded = (name: string) => readFileSync(resolve('../.planning/codex-runs/m7-S7g/frames', `${name}.jsonl`), 'utf8').trim().split('\n').map(line => JSON.parse(line) as Record<string, unknown>);
-function fixture(options: { supported?: boolean; changed?: boolean; hold?: 'sync' | 'status'; noHello?: boolean; laterHello?: boolean; failure?: boolean; ask?: boolean; invalid?: boolean } = {}) {
+function fixture(options: { supported?: boolean; changed?: boolean; hold?: 'sync' | 'status' | 'prune'; noHello?: boolean; laterHello?: boolean; failure?: boolean; ask?: boolean; invalid?: boolean } = {}) {
   let release!: () => void;
   let finished!: () => void;
   const held = new Promise<void>(resolve => { release = resolve; });
@@ -49,13 +49,13 @@ describe('adapter background refresh', () => {
     const f = fixture(); await launch(f);
     await vi.waitFor(() => expect(refreshes(f)).toHaveLength(1));
   });
-  it('does not invalidate reads when no clone moved', async () => {
+  it('republishes the stamp but not the marketplace when no clone moved', async () => {
     const f = fixture(); const backend = createTauriBackend(f.bridge); const listener = vi.fn(); backend.subscribe(listener);
-    await backend.status(); await f.refreshed; await drain(); expect(listener).not.toHaveBeenCalled();
+    await backend.status(); await f.refreshed; await drain(); expect(listener).toHaveBeenCalledExactlyOnceWith('stamp');
   });
-  it('invalidates with clone only when a clone moved', async () => {
+  it('adds the marketplace to the stamp only when a clone moved', async () => {
     const f = fixture({ changed: true }); const backend = createTauriBackend(f.bridge); const listener = vi.fn(); backend.subscribe(listener);
-    await backend.status(); await vi.waitFor(() => expect(listener).toHaveBeenCalledExactlyOnceWith('marketplace'));
+    await backend.status(); await vi.waitFor(() => expect(listener.mock.calls).toEqual([['marketplace'], ['stamp']]));
     await backend.status(); expect(f.spawns.filter(s => s.args[0] === 'status')).toHaveLength(2);
   });
   it('throttles: three focus events inside the interval spawn one refresh', async () => {
@@ -87,25 +87,25 @@ describe('adapter background refresh', () => {
     expect(f.spawns.length).toBeGreaterThanOrEqual(2); expect(refreshes(f)).toHaveLength(0);
     expect((await backend.features()).refresh).toBe(true);
   });
-  it('a failing refresh is silent and non-fatal', async () => {
+  it('a failing refresh raises no error and republishes only the stamp, so Settings can say so', async () => {
     const f = fixture({ failure: true }); const backend = createTauriBackend(f.bridge); const listener = vi.fn(); backend.subscribe(listener);
-    await backend.status(); await f.refreshed; await drain(); expect(listener).not.toHaveBeenCalled(); expect((await backend.status()).ok).toBe(true);
+    await backend.status(); await f.refreshed; await drain(); expect(listener).toHaveBeenCalledExactlyOnceWith('stamp'); expect((await backend.status()).ok).toBe(true);
   });
   it('a refresh that asks a question is cancelled, never answered', async () => {
     const f = fixture({ ask: true }); const backend = createTauriBackend(f.bridge); const listener = vi.fn(); backend.subscribe(listener);
     await backend.status(); await vi.waitFor(() => expect(f.kills.length).toBeGreaterThan(0)); await drain();
-    expect(f.writes.filter(line => line.includes('"t":"answer"'))).toEqual([]); expect(listener).not.toHaveBeenCalled();
+    expect(f.writes.filter(line => line.includes('"t":"answer"'))).toEqual([]); expect(listener.mock.calls).toEqual([['stamp']]);
   });
-  it('a refresh whose result does not match the schema is a silent failure', async () => {
+  it('a refresh whose result does not match the schema fails quietly, invalidating no marketplace board', async () => {
     const f = fixture({ invalid: true }); const backend = createTauriBackend(f.bridge); const listener = vi.fn(); backend.subscribe(listener);
-    await backend.status(); await f.refreshed; await drain(); expect(listener).not.toHaveBeenCalled(); expect((await backend.status()).ok).toBe(true);
+    await backend.status(); await f.refreshed; await drain(); expect(listener.mock.calls).toEqual([['stamp']]); expect((await backend.status()).ok).toBe(true);
   });
   it('notify waits for the reads that were in flight when the refresh finished', async () => {
     const f = fixture({ changed: true, hold: 'status' }); const backend = createTauriBackend(f.bridge); const listener = vi.fn(); backend.subscribe(listener);
     const status = backend.status();
     try { await f.refreshed; await drain(); expect(refreshes(f)).toHaveLength(1); expect(listener).not.toHaveBeenCalled(); }
     finally { f.release(); }
-    expect((await status).ok).toBe(true); await vi.waitFor(() => expect(listener).toHaveBeenCalledExactlyOnceWith('marketplace'));
+    expect((await status).ok).toBe(true); await vi.waitFor(() => expect(listener.mock.calls).toEqual([['marketplace'], ['stamp']]));
   });
   it('a retired backend instance never spawns on a later focus event', async () => {
     // This lifecycle test necessarily constructs two instances, unlike every other test in this file.
@@ -116,6 +116,14 @@ describe('adapter background refresh', () => {
   it('refreshLaunch clears the throttle so the next focus refreshes immediately', async () => {
     vi.useFakeTimers({ toFake: ['Date'] }); const f = fixture(); const backend = await launch(f);
     await backend.refreshLaunch(); await drain(); expect(refreshes(f)).toHaveLength(1); focus();
+    await vi.waitFor(() => expect(refreshes(f)).toHaveLength(2)); await drain();
+  });
+  it('never fetches while a foreground write verb runs, and fetches as soon as that verb ends', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] }); const f = fixture({ hold: 'prune' }); const backend = await launch(f);
+    vi.setSystemTime(Date.now() + REFRESH_MIN_INTERVAL_MS + 1);
+    const prune = backend.prune().done; await drain();
+    focus(); await drain(); expect(refreshes(f)).toHaveLength(1);
+    f.release(); expect((await prune).ok).toBe(true);
     await vi.waitFor(() => expect(refreshes(f)).toHaveLength(2)); await drain();
   });
   it('the refresh run is not memoised: it never enters the read cache', async () => {

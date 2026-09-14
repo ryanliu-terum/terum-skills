@@ -1612,12 +1612,7 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "policy": "prose",
     "pattern": "`sync` fetches each configured team clone and hard-resets it to `origin/main`, one team at a time,"
   },
-  {
-    "file": "docs/frame-protocol.md",
-    "line": 379,
-    "policy": "prose",
-    "pattern": "The result is `{ changed, teams, notices }`. Each attempted team reports `team`, its own `changed`,"
-  },
+
   {
     "file": "docs/frame-protocol.md",
     "line": 392,
@@ -1695,5 +1690,17 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "line": 0,
     "policy": "prose",
     "pattern": "- Several skills at once: `eval <a> <b>…` runs them as one batch after one preflight (`--parallel <n>`, default"
+  },
+  {
+    "file": "docs/frame-protocol.md",
+    "line": 0,
+    "policy": "prose",
+    "pattern": "The desktop app is an unattended caller: it spawns plain `sync` at the first hello whose `features.refresh` is true and again whenever its window regains focus, at most once a minute, one at a time, and never while a foreground write verb of its own is running. It drives the run read-only and kills it rather than answer, so `sync` must never ask a question; it keeps only `changed`, each team's `state`/`detail`, and `notices`, so anything a person needs to act on has to be in those fields rather than in printed prose. Every completed automatic fetch refreshes the stamp-driven boards (Status, Settings ▸ Sync, Inbox); one that moved a clone also refreshes the Marketplace boards."
+  },
+  {
+    "file": "docs/frame-protocol.md",
+    "line": 0,
+    "policy": "prose",
+    "pattern": "The result is `{ changed, teams, notices }`. `notices` carries run-wide lines already phrased for a person — one concern per entry, no diagnostics — because a frame-driven caller may render them verbatim: the desktop app prints them under Settings ▸ Sync after an automatic fetch that did not refresh every team. Each attempted team reports `team`, its own `changed`,"
   },
 ];
