@@ -26,11 +26,11 @@ this document **supersedes** the named sections of the parent. The parent is not
 ledger and milestones stand. Rev 10's override of parent D2/D9 (eval assets travel with a skill but no longer
 identify it; `skillContentDigest` skips `evals/`, PR #197) is already what the digest join here relies on.
 
-**Status: M1 shipped, M1.1 in build (this revision), M2 ready for the §11 human gates — NOT yet locked for
-`/codex-implement`.** §11 gate 3 (card height) was closed by D4b; gates 1 (copy) and 2 (adopt consent) remain and
-are walked with Ryan after M1.1 merges. No further `/codex-spec` run is planned on M2 (Ryan, 2026-09-13). The
-team-record check (`check_decision`) has not run: the `terum` MCP refused auth in every session this spec descends
-from.
+**Status: LOCKED for `/codex-implement` (M2), 2026-09-14.** M1 shipped (`753efa4`), M1.1 shipped (`210c27e`, PR
+#208). §11 gates 1–3 are closed (review walk D4b, D9, D10); gate 4 is the maintainers' fidelity oracle and does not
+block the build. M2 is built by Codex in a worktree off `origin/main` (review walk D11); the orchestrator re-runs
+every §9 gate. No further `/codex-spec` run is planned on M2 (Ryan, 2026-09-13). The team-record check
+(`check_decision`) has not run: the `terum` MCP refused auth in every session this spec descends from.
 
 ---
 
@@ -615,13 +615,14 @@ Desktop (`desktop/src/**`):
 
 ---
 
-## 11. Human gates before this spec can be locked
+## 11. Human gates (1–3 closed; the spec is locked)
 
-1. **Ryan — copy.** §7 strings as revised: the `vN` card rows, `you have v{M} (edited)`, the D7 grammar
+1. ~~**Ryan — copy.**~~ **Closed by review walk D9 (2026-09-14): approved as written.** §7 strings as revised: the `vN` card rows, `you have v{M} (edited)`, the D7 grammar
    refusals, the D6 root refusal, the name-only publish warning and `your copy differs`.
-2. **Ryan — `install --adopt` consent.** Adopt runs `ensureConsent` for the folder's `allowed-tools`, so a batch
-   of identical skills with grants asks one extra question each. Alternative: adopt records the approval
-   silently because the skill is already on disk. This spec keeps the question; confirm or flip.
+2. ~~**Ryan — `install --adopt` consent.**~~ **Closed by review walk D10 (2026-09-14): the question stays.** Adopt
+   runs `ensureConsent` for the folder's `allowed-tools`, so a batch of identical skills with grants asks one
+   extra question each; the rejected alternative was a silent approval record because the skill is already on
+   disk.
 3. ~~**Ryan — layout.**~~ **Closed by review walk D4b (2026-09-13):** `.skill-card` keeps `min-height:148px` and
    grows when a label wraps, and card strings abbreviate to `vN` so wrapping is rare.
 4. **Maintainers — fidelity oracle** for the `Your skills` board.

@@ -8,8 +8,6 @@ deferred:
     gate: the first request to reconcile one project from the terminal promotes root to a documented --root <path> flag
   - what: Nothing in this walk was checked against the team's shared record; the terum MCP refused auth again (HTTP 401), so check_decision never ran over D1–D8
     gate: the MCP endpoint accepts the configured Authorization header — re-run check_decision over every row of this ledger before the M1.1 build starts
-  - what: The two remaining §11 human gates on the build spec — the §7 copy as a whole and whether adopt asks the allowed-tools consent question — were not walked here (only gate 3, card height, was)
-    gate: before M2's lock, after the spec revision that carries this ledger
 ---
 
 # Cross-Mirror Overlays Review — Decision Walk
@@ -38,6 +36,9 @@ Ratified by Ryan 2026-09-13. The first clause is the 2026-09-13 cross-mirror ove
 | 6 | Scoping the reconcile scan to a newly added project | GATE | An in-process `root` argument only `project add` passes, refused unless it is a registered project root after canonicalisation; one named desktop handler opens the dialog; no terminal flag | promote to `--root <path>` the first time someone asks to reconcile one project by hand |
 | 7 | `install --adopt` argument shape | LOCK | Exactly one of a skill reference or an adopt path; adopt refuses destination flags; scope derived from which Library root the folder sits under; `ref` becomes optional in the desktop type | — |
 | 8 | How the M1 code-side fixes ship | LOCK | A small M1.1 PR built inline before M2, after one spec revision; M2's build and its codex-spec re-run then see only M2 | — |
+| 9 | The §7 copy as revised (spec §11 gate 1) | LOCK | Approved as written, 2026-09-14: `vN` on cards, `you have vM (edited)`, the D7 grammar refusals, the D6 root refusal, the name-only publish warning, `your copy differs` | a reworded card string is a one-line follow-up, not a spec change |
+| 10 | Does `install --adopt` ask the `allowed-tools` consent question (spec §11 gate 2) | LOCK | Yes — adopt runs `ensureConsent` per adopted skill with grants; a consent row must mean a person read the grants when Terum started tracking the folder | — |
+| 11 | How M2 is built | LOCK | `/codex-implement` against spec rev 2, in an isolated worktree off `origin/main`; the orchestrator re-runs every gate | — |
 
 ---
 
@@ -266,6 +267,50 @@ Ratified by Ryan 2026-09-13. The first clause is the 2026-09-13 cross-mirror ove
 
 ---
 
+## Decision 9 — The §7 copy as revised (spec §11 gate 1)
+
+**Verdict: LOCK — approved as written (Ryan, 2026-09-14, after M1.1 merged as `210c27e`).**
+
+### Plain English
+- **What's at stake:** the exact words on cards, in the terminal and in error lines. Cards say `v3`; every surface with room says `Version 3`. New in rev 2: `v10 · you have v2 (edited)` (also when on the latest), `v2 (edited)`, `run by ajayw36 · v3`, `from v3 · latest v10`, the three D7 grammar refusals, the D6 root refusal.
+- **Strongest reason to push back:** `(edited)` after `you have v10` could be read as v10 itself being edited. The card form is already live on `main`, so a rewording is a one-line follow-up.
+- **The call:** Ryan approved every §7 string as written.
+
+### Technical
+- Spec §11 gate 1 closed; no text changes. Tripwire: a reworded card string goes through `presentation.ts` and the `skill-card-versions` table, never through a spec revision.
+
+---
+
+## Decision 10 — Does `install --adopt` ask the `allowed-tools` consent question? (spec §11 gate 2)
+
+**Verdict: LOCK — A, keep the question.**
+
+### Plain English
+- **What's at stake:** adopt records a folder you already have as installed, copying nothing. Install asks you to approve a skill's `allowed-tools` grants before placing it; adopt runs the same question per folder, so joining a team with eight matching skills that carry grants means eight extra yes/no prompts beside the eight "record as installed" ones.
+- **Options:**
+  - **A — keep the question** (spec as written). *(decides: the team record says you approved the grants because you were asked)*
+  - **B — record approval silently**, because the folder is already on disk and active. *(decides: one question per folder on join; the consent row is written without a prompt)*
+- **Recommendation:** A — `ensureConsent` is the only place a grant hash enters the people file, and adopt is the first path that writes an install record for bytes Terum never placed; a silent write makes the consent record claim something nobody did. The cost is bounded to the join.
+- **The call:** Ryan took A.
+
+### Technical
+- Spec §4.5 effects order unchanged (`ensureConsent` first); §11 gate 2 closed. `install-adopt.test.ts` keeps its consent-refusal case.
+
+---
+
+## Decision 11 — How M2 is built
+
+**Verdict: LOCK — `/codex-implement`.**
+
+### Plain English
+- **What's at stake:** M2 (the `reconcile` verb, `install --adopt`, the `existing` setup step, the `project add` hook, `ReconcileDialog`) is the half of the spec written for an outside implementer. Building it inline would never test that claim; handing it to Codex does, and the orchestrator re-runs every gate regardless.
+- **The call:** Ryan chose `/codex-implement`, 2026-09-14.
+
+### Technical
+- Spec status set to locked for `/codex-implement`; worktree off `origin/main` (M1.1 = `210c27e`); the spec file lives on `feat/frame-mode`, so it is passed by its primary-checkout path. Codex's self-reported gates are hypotheses; the orchestrator runs lint/typecheck/test on both trees, reviews the diff, opens the PR.
+
+---
+
 ## Non-fork spec corrections carried by this walk
 
 Findings the review proved as plain wording errors, with no product decision inside them. Not ledger rows; listed so the spec revision (Decision 8, step 1) has one worklist. Ryan nodded these through as a batch on 2026-09-13.
@@ -289,7 +334,8 @@ Findings the review proved as plain wording errors, with no product decision ins
 - **LOCKED, ready for the spec revision and the M1.1 build (D8):** D1 bytes win for the version number on both mirrors and a byte-matched folder is never "edited"; D2 Publish only on "your copy differs"; D2b "Version N · you have Version M (edited)" on the Marketplace and "Version M (edited)" in the Library; D3 `mine` on both receipts, team wins a tie; D4 the check joins the version words as one wrap unit; D4b cards keep a 148px minimum and grow, and card strings say "vN" while prose keeps "Version N"; D7 exactly one of a skill reference or an adopt path; D8 M1.1 ships first, inline, then M2.
 - **LOCKED for the M2 half of the spec:** D5 adopt writes the machine's record last, with one sentence explaining the deliberate difference from `install` and five interruption tests; D7 as above.
 - **GATED:** D6 the reconcile root is an in-process argument; a terminal flag waits for the first person who asks for it.
-- **DEFERRED:** the team-record check (MCP 401, third walk running); §11 gates 1 and 2 (copy, adopt consent), which still block M2's lock and were not part of this batch.
+- **LOCKED 2026-09-14, after M1.1 (`210c27e`):** D9 the §7 copy as revised, approved as written; D10 adopt keeps the `allowed-tools` consent question; D11 M2 is built with `/codex-implement`.
+- **DEFERRED:** the team-record check (MCP 401, third walk running).
 - **Corrections carried:** the eleven wording items above, nodded through as a batch.
 - **Amendments to the parent ledger (2026-09-13 cross-mirror overlays walk):** D4's "ledger first then byte match" Technical line and "Version N" card copy are superseded by D1 and D4b here; D5's "check stays" is honoured with the check inside the version unit (D4).
-- **Next:** one spec revision of `.planning/specs/2026-09-13-cross-mirror-overlays.md` applying D1–D8 and the eleven corrections, bumping its revision line; then the M1.1 build; then `/codex-spec` again on M2; then §11 gates 1–2; then M2 lock.
+- **Done since:** spec rev 2 (`f72ebcb`, `c875cd2`, `58c6cb2`); M1.1 merged (PR #208 → `210c27e`); gates 1–2 walked (D9, D10). Ryan waived the second `/codex-spec` run on M2 (2026-09-13). **Next:** M2 via `/codex-implement` (D11).
