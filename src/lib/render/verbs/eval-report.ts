@@ -45,12 +45,12 @@ export const render = (raw: unknown, ctx: RenderContext): Board => {
       const w = num(comparison['win']);
       const l = num(comparison['loss']);
       const t = num(comparison['tie']);
+      const signP = num(comparison['sign_p']);
       const lift = w === null || l === null || t === null ? null : liftPercent(w, l, t);
       return {
         version: text(versionText(row['version'])),
         run: text(row['run_id']),
-        // history rows carry no counts
-        verdict: receiptVerdict({ verdict: row['verdict'], execution_status: row['execution_status'], expected_rows: null, scored_rows: null, comparisons: {} }),
+        verdict: receiptVerdict({ verdict: row['verdict'], execution_status: row['execution_status'], expected_rows: null, scored_rows: null, comparisons: { 'candidate-vs-baseline': { win: w, loss: l, tie: t, ...(signP === null ? {} : { sign_p: signP }) } } }),
         lift: text(liftText(lift)),
         wlt: text(w === null ? null : `${w}/${l}/${t}`),
         model: text(row['model']),

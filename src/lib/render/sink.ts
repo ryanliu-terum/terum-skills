@@ -22,8 +22,10 @@ export interface BoardSinkInput {
   now(): number;
   /** The verb's argv after the bin, flags stripped: `['ls', 'skill', 'x']`. */
   argv: readonly string[];
-  /** The same as a re-runnable command line, for the `--rows all` footer. */
+  /** The same as a re-runnable command line, including this board's format. */
   command: string;
+  /** The same command with `--rows all` already inserted before any `--` — the row-cap footer's exact text. */
+  rowsAllCommand: string;
   write(text: string): void;
   stderr(line: string): void;
   setExitCode(code: number): void;
@@ -51,7 +53,7 @@ export function createBoardSink(input: BoardSinkInput): ExecuteSink & { lines: s
     if (input.options.format === 'json') { input.write(`${renderJson(outcome, lines)}\n`); return; }
     const resolved = lines.filter((line) => line.startsWith(RESOLVED_PREFIX));
     const rest = lines.filter((line) => !line.startsWith(RESOLVED_PREFIX));
-    const ctx: RenderContext = { format: input.options.format, host: input.options.host, rows: input.options.rows, width: input.options.width, color: input.options.color, form: input.form, home: input.home, now: input.now(), argv: input.argv, command: input.command };
+    const ctx: RenderContext = { format: input.options.format, host: input.options.host, rows: input.options.rows, width: input.options.width, color: input.options.color, form: input.form, home: input.home, now: input.now(), argv: input.argv, command: input.command, rowsAllCommand: input.rowsAllCommand };
     const board = renderBoard(outcome, rest, resolved, ctx);
     input.write(`${input.options.format === 'pretty' ? renderPretty(board, ctx) : renderMd(board, ctx)}\n`);
   };

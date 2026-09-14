@@ -10,7 +10,7 @@ import { applyRowCap, type Verdict } from './policies.js';
 export type Tone = 'ok' | 'warn' | 'bad' | 'muted' | 'info' | 'pending';
 
 export type Cell =
-  | { kind: 'text'; text: string }
+  | { kind: 'text'; text: string; align?: 'left' | 'right' }
   | { kind: 'count'; n: number | null }
   | { kind: 'verdict'; verdict: Verdict | null; lift: number | null; partial: { scored: number | null; expected: number | null } | null; stale: boolean; from: string | null; invalid: boolean }
   | { kind: 'status'; tone: Tone; text: string }
@@ -41,14 +41,18 @@ export interface RenderContext {
   form: InvocationForm | undefined; home: string;
   /** Epoch milliseconds; the only clock a renderer may read. */
   now: number;
-  /** The verb's own argv (after the bin), e.g. `['search', 'deploy', '--category', 'ops']`, and the same joined for the `--rows all` footer. */
-  argv: readonly string[]; command: string;
+  /** The verb's own argv (after the bin), e.g. `['search', 'deploy', '--category', 'ops']`. */
+  argv: readonly string[];
+  /** The same invocation as a re-runnable command line, including this board's format. */
+  command: string;
+  /** The same command with `--rows all` already inserted before any `--` — the row-cap footer's exact text. */
+  rowsAllCommand: string;
 }
 
 const dash = (): Cell => ({ kind: 'text', text: '—' });
 const empty = (value: unknown): boolean => value === null || value === undefined || value === '';
 
-export function text(value: unknown): Cell { return empty(value) ? dash() : { kind: 'text', text: String(value) }; }
+export function text(value: unknown, align?: 'left' | 'right'): Cell { return empty(value) ? dash() : { kind: 'text', text: String(value), ...(align === undefined ? {} : { align }) }; }
 export function count(value: unknown): Cell { return { kind: 'count', n: typeof value === 'number' && Number.isFinite(value) ? value : null }; }
 export function status(tone: Tone, label: unknown): Cell { return { kind: 'status', tone, text: empty(label) ? '—' : String(label) }; }
 export function date(iso: unknown): Cell { return { kind: 'date', iso: typeof iso === 'string' && iso !== '' ? iso : null }; }

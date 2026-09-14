@@ -131,9 +131,9 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
   },
   {
     "file": "src/lib/render/verbs/status.ts",
-    "line": 55,
+    "line": 57,
     "policy": "not-a-hint",
-    "pattern": "/^terum-skills /, /^Team .+ \\((you are|configured handle) @/, /^  Repository: /, /^  Clone: /, /^  From the local clone; GitHub access is not checked\\.$/,"
+    "pattern": "/^terum-skills /, /^Team .+ \\((you are|configured handle) @/, /^  Repository: /, /^  Clone: /,"
   },
   {
     "file": "src/commands/team.ts",
@@ -1165,7 +1165,7 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "file": "README.md",
     "line": 378,
     "policy": "prose",
-    "pattern": "| | `ls [--local]` / `ls member <handle>` / `ls project <name>` / `ls skill <name>` / `status` / `search <term>` | Read the team, your local skills, or the catalog |"
+    "pattern": "| | `ls [--local]` / `ls member <handle>` / `ls project <name>` / `ls skill [name]` / `status` / `search <term>` | Read the team, your local skills, or the catalog |"
   },
   {
     "file": "README.md",
@@ -1231,14 +1231,14 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "file": "README.md",
     "line": 377,
     "policy": "prose",
-    "pattern": "| Evals | `validate <path\\|name>` | Deterministic safety and formatting checks, no model |"
+    "pattern": "| Evals | `validate [path\\|name]` | Deterministic safety and formatting checks, no model |"
   },
 
   {
     "file": "README.md",
     "line": 379,
     "policy": "prose",
-    "pattern": "| | `eval-report <skill>` | Show a skill's committed eval receipts and this machine's local runs (read-only, no fetch); the desktop app's Evals tab reads it |"
+    "pattern": "| | `eval-report [skill]` | Show a skill's committed eval receipts and this machine's local runs (read-only, no fetch); the desktop app's Evals tab reads it |"
   },
   {
     "file": "README.md",
@@ -1776,7 +1776,7 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "file": "README.md",
     "line": 0,
     "policy": "prose",
-    "pattern": "| | `eval <skill>` | Evaluate the local skill, named by skill name or folder path, with your own Claude Code login; generate only missing assets (`--no-gen` disables generation). A receipt for bytes that are already a published version is published by `eval` itself (`--no-commit` keeps it on this machine). `eval <a> <b>… [--batch n] [--parallel n]` evaluates several skills as one batch (`--batch n` asks before each further batch); `eval <skill…> --window overnight\\|later` queues them instead, and `eval --pending` picks every shared skill without a receipt. `eval --drain [--parallel n] [--window overnight] [--max n]` runs queued evals; `eval --queue-list` lists them; `eval --dequeue <team>/<skill>` removes matching queued skills |"
+    "pattern": "| | `eval [skill]` | Evaluate the local skill, named by skill name or folder path, with your own Claude Code login; generate only missing assets (`--no-gen` disables generation). A receipt for bytes that are already a published version is published by `eval` itself (`--no-commit` keeps it on this machine). `eval <a> <b>… [--batch n] [--parallel n]` evaluates several skills as one batch (`--batch n` asks before each further batch); `eval <skill…> --window overnight\\|later` queues them instead, and `eval --pending` picks every shared skill without a receipt. `eval --drain [--parallel n] [--window overnight] [--max n]` runs queued evals; `eval --queue-list` lists them; `eval --dequeue <team>/<skill>` removes matching queued skills |"
   },
   {
     "file": "docs/frame-protocol.md",
@@ -1972,13 +1972,13 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
   },
   {
     "file": "src/lib/render/board.ts",
-    "line": 0,
+    "line": 31,
     "policy": "prose",
     "pattern": "/** A next step: a named skill (`/skill-info x`, `$skill-info x`) or a verb (`/terum-skills install x`); `raw` is a command that is not a terum-skills verb. */"
   },
   {
     "file": "src/lib/render/cells.ts",
-    "line": 47,
+    "line": 57,
     "policy": "fixed",
     "pattern": "return item.skill === undefined ? `${sigil}terum-skills ${item.verb}${tail}` : `${sigil}${item.skill}${tail}`;"
   },
@@ -1986,7 +1986,7 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     file: 'README.md',
     line: 0,
     policy: 'prose',
-    pattern: '**Boards.** Every command above takes `--format <plain|md|pretty|json|auto>` (default `plain`, the output the tables describe). `--format md` renders the result as a Markdown board — the form the shipped Claude Code and Codex skills ask for — `pretty` draws box tables with colour for a terminal, `json` writes one document (`{ verb, ok, exitCode, error?, value?, lines }`), and `auto` picks `pretty` on a TTY and `md` otherwise. `--rows <n|all>` caps table rows (default 25), `--width <n>` sets a pretty board\'s width, `--host <claude|codex|terminal>` phrases the board\'s **Next** line, `--no-color` drops ANSI. The flags go anywhere before `--`; they are refused with `--frames`, `serve`, and `sync --hook`, whose stdout is spoken for. `ls skill <name>` shows one skill whole, and `ls skill`, `eval-report` and `validate` accept a unique prefix; `eval` takes an exact or case-insensitive name; each of the four, run inside a skill folder, needs no name at all. A usage error (unknown verb, missing argument, bad option value) under any `--format` writes nothing to stdout — one stderr message and exit 1, nothing runs; a reader that sees exit 1 with empty stdout reads stderr.',
+    pattern: '**Boards.** Every command above takes `--format <plain|md|pretty|json|auto>` (default `plain`, the output the tables describe). `--format md` renders the result as a Markdown board — the form the shipped Claude Code and Codex skills ask for — `pretty` draws box tables with colour for a terminal, `json` writes one document (`{ verb, ok, exitCode, error?, declined?, refused?, value?, lines }`), and `auto` picks `pretty` on a TTY and `md` otherwise. `--rows <n|all>` caps table rows (default 25), `--width <n>` sets a pretty board\'s width, `--host <claude|codex|terminal>` phrases the board\'s **Next** line, `--no-color` drops ANSI. The flags go anywhere before `--`; they are refused with `--frames`, `serve`, and `sync --hook`, whose stdout is spoken for. `ls skill <name>` shows one skill whole, and `ls skill`, `eval-report` and `validate` accept a unique prefix; `eval` takes an exact or case-insensitive name; each of the four, run inside a Library skill folder, needs no name at all (`validate` also accepts any skill folder by path). A usage error (unknown verb, missing argument, bad option value) under any `--format` writes nothing to stdout — one stderr message and exit 1, nothing runs; a reader that sees exit 1 with empty stdout reads stderr.',
   },
   {
     file: 'docs/frame-protocol.md',

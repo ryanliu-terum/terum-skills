@@ -15,7 +15,7 @@ const VERDICT_GLYPH = { PASS: '✓', NEUTRAL: '●', FAIL: '✗' } as const;
 
 export function renderCell(cell: Cell, ctx: RenderContext): RenderedCell {
   switch (cell.kind) {
-    case 'text': return { text: singleLine(cell.text), align: 'left' };
+    case 'text': return { text: singleLine(cell.text), align: cell.align ?? 'left' };
     case 'count': return { text: cell.n === null ? '—' : String(cell.n), align: 'right' };
     case 'status': return { text: `${STATUS_GLYPH[cell.tone]} ${cell.text}`, tone: cell.tone, align: 'left' };
     case 'date': return { text: relativeDate(cell.iso, ctx.now), align: 'left' };

@@ -12,11 +12,12 @@ import { padVisible, truncate, visibleWidth } from './text.js';
 const TONE_STYLE: Record<Tone, StyleKind> = { ok: 'green', bad: 'red', warn: 'yellow', pending: 'yellow', muted: 'dim', info: 'cyan' };
 const MIN_COLUMN = 6;
 type Paint = (kind: StyleKind, text: string) => string;
+const clip = (cell: RenderedCell, column: Column): string => (column.max === undefined ? cell.text : truncate(cell.text, column.max));
 
 export function renderPretty(board: Board, ctx: RenderContext): string {
   const c: Paint = (kind, text) => paint(kind, text, ctx.color);
   const out: string[] = [c('bold', board.title)];
-  for (const line of board.resolved) out.push(c('dim', line));
+  for (const line of board.resolved) out.push(c('dim', c('italic', line)));
   if (board.headline !== undefined) out.push(board.headline);
   for (const section of board.sections) out.push('', ...renderSection(section, ctx, c));
   if (board.failure) {
@@ -56,40 +57,44 @@ function renderSection(section: Section, ctx: RenderContext, c: Paint): string[]
 function renderTable(table: Table, ctx: RenderContext, c: Paint): string[] {
   if (table.rows.length === 0) return ['  none'];
   const rendered = table.rows.map((row) => table.columns.map((column) => renderCell(row[column.key] ?? { kind: 'text', text: '—' }, ctx)));
-  if (ctx.width < 60) return keyValueRows(table.columns, rendered, c);
-  const clip = (cell: RenderedCell, column: Column): string => (column.max === undefined ? cell.text : truncate(cell.text, column.max));
-  const widths = table.columns.map((column, index) => Math.max(visibleWidth(column.label), ...rendered.map((row) => visibleWidth(clip(row[index]!, column)))));
-  let keep = table.columns.map((_, index) => index);
-  const total = (): number => keep.reduce((sum, index) => sum + widths[index]! + 3, 1);
-  for (const priority of [3, 2] as const) {
-    while (total() > ctx.width) {
-      const drop = [...keep].reverse().find((index) => table.columns[index]!.priority === priority);
-      if (drop === undefined) break;
-      keep = keep.filter((index) => index !== drop);
+  let out: string[];
+  let dropped: string[] = [];
+  if (ctx.width < 60) {
+    out = keyValueRows(table.columns, rendered, c);
+  } else {
+    const widths = table.columns.map((column, index) => Math.max(visibleWidth(column.label), ...rendered.map((row) => visibleWidth(clip(row[index]!, column)))));
+    let keep = table.columns.map((_, index) => index);
+    const total = (): number => keep.reduce((sum, index) => sum + widths[index]! + 3, 1);
+    for (const priority of [3, 2] as const) {
+      while (total() > ctx.width) {
+        const drop = [...keep].reverse().find((index) => table.columns[index]!.priority === priority);
+        if (drop === undefined) break;
+        keep = keep.filter((index) => index !== drop);
+      }
     }
+    // Only priority-1 columns left and still too wide: narrow the widest until it fits or nothing can give.
+    while (total() > ctx.width) {
+      const widest = keep.reduce((a, b) => (widths[a]! >= widths[b]! ? a : b));
+      if (widths[widest]! <= MIN_COLUMN) break;
+      widths[widest] = widths[widest]! - 1;
+    }
+    const rule = (left: string, mid: string, right: string): string => `${left}${keep.map((index) => '─'.repeat(widths[index]! + 2)).join(mid)}${right}`;
+    const line = (cells: string[]): string => `│ ${cells.join(' │ ')} │`;
+    out = [
+      rule('╭', '┬', '╮'),
+      line(keep.map((index) => c('bold', padVisible(table.columns[index]!.label, widths[index]!, table.columns[index]!.align ?? 'left')))),
+      rule('├', '┼', '┤'),
+    ];
+    for (const row of rendered) {
+      out.push(line(keep.map((index) => {
+        const cell = row[index]!; const width = widths[index]!;
+        return padVisible(colour(truncate(clip(cell, table.columns[index]!), width), cell, c), width, cell.align);
+      })));
+    }
+    out.push(rule('╰', '┴', '╯'));
+    dropped = table.columns.filter((_, index) => !keep.includes(index)).map((column) => column.label);
   }
-  // Only priority-1 columns left and still too wide: narrow the widest until it fits or nothing can give.
-  while (total() > ctx.width) {
-    const widest = keep.reduce((a, b) => (widths[a]! >= widths[b]! ? a : b));
-    if (widths[widest]! <= MIN_COLUMN) break;
-    widths[widest] = widths[widest]! - 1;
-  }
-  const rule = (left: string, mid: string, right: string): string => `${left}${keep.map((index) => '─'.repeat(widths[index]! + 2)).join(mid)}${right}`;
-  const line = (cells: string[]): string => `│ ${cells.join(' │ ')} │`;
-  const out = [
-    rule('╭', '┬', '╮'),
-    line(keep.map((index) => c('bold', padVisible(table.columns[index]!.label, widths[index]!, table.columns[index]!.align ?? 'left')))),
-    rule('├', '┼', '┤'),
-  ];
-  for (const row of rendered) {
-    out.push(line(keep.map((index) => {
-      const cell = row[index]!; const width = widths[index]!;
-      return padVisible(colour(truncate(clip(cell, table.columns[index]!), width), cell, c), width, cell.align);
-    })));
-  }
-  out.push(rule('╰', '┴', '╯'));
-  if (table.more) out.push(c('dim', `… and ${table.more.count} more — run ${ctx.command} --rows all`));
-  const dropped = table.columns.filter((_, index) => !keep.includes(index)).map((column) => column.label);
+  if (table.more) out.push(c('dim', `… and ${table.more.count} more — run ${ctx.rowsAllCommand}`));
   if (dropped.length) out.push(c('dim', `(columns not shown at this width: ${dropped.join(', ')})`));
   return out;
 }
@@ -101,7 +106,7 @@ function keyValueRows(columns: readonly Column[], rendered: readonly RenderedCel
     if (rowIndex > 0) out.push('');
     for (const [index, column] of columns.entries()) {
       const cell = row[index]!;
-      out.push(`  ${padVisible(`${column.label}:`, width)} ${colour(column.max === undefined ? cell.text : truncate(cell.text, column.max), cell, c)}`);
+      out.push(`  ${padVisible(`${column.label}:`, width)} ${colour(clip(cell, column), cell, c)}`);
     }
   }
   return out;

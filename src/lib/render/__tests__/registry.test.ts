@@ -3,7 +3,7 @@ import { FRAME_VERBS } from '../../frames.js';
 import { board, type RenderContext } from '../board.js';
 import { FALLBACK_VERBS, REGISTRY, RENDERED_VERBS, renderBoard } from '../registry.js';
 
-export const CTX: RenderContext = { format: 'md', host: 'claude', rows: 25, width: 100, color: false, form: undefined, home: '/home/u', now: Date.parse('2026-09-13T12:00:00Z'), argv: ['publish', 'x'], command: 'npx -y terum-skills@latest publish x --format md' };
+export const CTX: RenderContext = { format: 'md', host: 'claude', rows: 25, width: 100, color: false, form: undefined, home: '/home/u', now: Date.parse('2026-09-13T12:00:00Z'), argv: ['publish', 'x'], command: 'npx -y terum-skills@latest publish x --format md', rowsAllCommand: 'npx -y terum-skills@latest publish x --format md --rows all' };
 
 describe('registry (D5)', () => {
   it('rendered verbs and fallback verbs partition FRAME_VERBS exactly', () => {

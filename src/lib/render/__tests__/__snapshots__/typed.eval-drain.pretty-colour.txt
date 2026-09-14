@@ -21,6 +21,8 @@ Evaluated 1 of 2; 1 failed.
 [1mNotes[0m
   • ── tdd ──
   • verdict: PASS
+  • ✓ tdd
+  • ✗ notes: probe failed
 
 [1mNext:[0m [36m/eval-report tdd[0m · [36m/eval --drain[0m
 

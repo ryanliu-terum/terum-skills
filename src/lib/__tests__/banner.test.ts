@@ -23,12 +23,15 @@ it('never decorates frames, pipes, quiet mode, NO_COLOR, dumb terminals, or non-
  vi.stubEnv('NO_COLOR','');expect(decorate(io,{})).toBe(false);vi.stubEnv('NO_COLOR',undefined);
  vi.mocked(tty.terminalOutputIsTTY).mockReturnValue(false);expect(decorate(io,{})).toBe(false);
 });
-it('uses only the six specified styles and reset, and paint() is the pure form', () => {
-  for (const [kind, code] of [['bold', 1], ['dim', 2], ['cyan', 36], ['green', 32], ['red', 31], ['yellow', 33]] as const) {
+it('uses only the seven specified styles and reset, and paint() is the pure form', () => {
+  for (const [kind, code] of [['bold', 1], ['dim', 2], ['italic', 3], ['cyan', 36], ['green', 32], ['red', 31], ['yellow', 33]] as const) {
     expect(paint(kind, 'line', true)).toBe(`\x1b[${code}mline\x1b[0m`);
     expect(paint(kind, 'line', false)).toBe('line');
   }
   expect(style('yellow', 'line')).toBe(colorCapable() ? '\x1b[33mline\x1b[0m' : 'line');
+  expect(body('  command')).toBe('    command');
+  expect(body('  • item')).toBe('  • item');
+  expect(body('  • Could not look in /gone')).toBe('  • \x1b[31m✗ Could not look in /gone\x1b[0m');
 });
 it.each(['NO_COLOR','notTTY'])('keeps style helpers plain for %s', mode => {
  if(mode==='NO_COLOR')vi.stubEnv('NO_COLOR','1');else vi.mocked(tty.terminalOutputIsTTY).mockReturnValue(false);

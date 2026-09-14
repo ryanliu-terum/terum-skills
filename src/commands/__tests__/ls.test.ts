@@ -684,6 +684,30 @@ describe('ls skill (D10)', () => {
     const alone = await run({ kind: 'skill', value: 'notes', config: teamless, home, cwd: home }, new ScriptedPrompter());
     expect(alone).toMatchObject({ ok: true, value: { selection: { kind: 'skill', name: 'notes', source: 'library' }, viewer: undefined, roster: [] } });
   });
+  it('uses the Library row selected by the resolver when an earlier root has a same-named rejected folder', async () => {
+    const home = await temporaryDirectory();
+    const project = join(home, 'project');
+    await mkdir(join(project, '.git'), { recursive: true });
+    const store = await withProject(join(home, 'state'), project);
+    const decoy = await localSource(home, 'deploy', '---\nname: something-else\ndescription: Rejected decoy.\n---\n');
+    const selected = await localSource(project, 'deploy', '---\nname: deploy\ndescription: Project deploy.\n---\n# Project deploy\n');
+    const runner: Runner = { run: async () => ({ code: 1, stdout: '', stderr: '' }) };
+    const read = async () => {
+      const io = new ScriptedPrompter();
+      const result = await run({ kind: 'skill', value: 'deploy', config: store, home, cwd: home, runner }, io);
+      if (!result.ok) throw new Error(result.error);
+      return { result, lines: io.lines };
+    };
+
+    const withDecoy = await read();
+    expect(withDecoy.result.value.selection).toEqual({ kind: 'skill', name: 'deploy', source: 'library' });
+    expect(withDecoy.result.value.local?.flatMap((section) => section.rows).map((row) => row.path)).toEqual([selected]);
+    expect(withDecoy.result.value.local?.flatMap((section) => section.notOffered).map((entry) => entry.path)).toEqual([decoy]);
+    expect(withDecoy.lines).toEqual([`  deploy — untracked locally; path: ${selected}`, 'Project deploy.', '# Project deploy']);
+
+    await rm(decoy, { recursive: true, force: true });
+    expect((await read()).lines).toEqual(withDecoy.lines);
+  });
   it('autofills through the ladder, prints the resolved line, and fails a miss with one sentence', async () => {
     const { store, home } = await teamAndLibrary();
     const io = new ScriptedPrompter();

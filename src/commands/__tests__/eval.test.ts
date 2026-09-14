@@ -455,7 +455,7 @@ describe('eval (§6 / IE2)', () => {
     if (!result.ok) throw new Error(result.error);
     expect(io.lines[0]).toBe('Resolved: sample from the working directory');
     expect(result.value.receiptPath).toBe(join(result.value.runDir, 'receipt.json'));
-    expect(result.value.report?.aggregate.verdict).toBe(result.value.report?.aggregate.verdict);
+    expect(io.lines.flatMap((line) => line.split('\n'))).toContain(`verdict: ${result.value.report!.aggregate.verdict}`);
     expect(result.value.report?.aggregate.execution_status).toBe(result.value.executionStatus);
     expect(result.value.report?.triggers).toBeNull();
   });

@@ -54,6 +54,6 @@ function renderTable(table: Table, ctx: RenderContext): string[] {
     `|${right.map((isRight) => (isRight ? '---:' : '---')).join('|')}|`,
     ...cells.map((row) => `| ${row.map(inline).join(' | ')} |`),
   ];
-  if (table.more) out.push(`_… and ${table.more.count} more — run \`${ctx.command} --rows all\`_`);
+  if (table.more) out.push('', `_… and ${table.more.count} more — run \`${ctx.rowsAllCommand}\`_`);
   return out;
 }

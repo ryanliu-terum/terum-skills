@@ -21,7 +21,7 @@ const asking = (async (_args: unknown, io: Prompter) => { io.print('before'); aw
 
 function harness(verbs: CliVerbs, format: 'md' | 'pretty' | 'json' = 'md') {
   const written: string[] = []; const stderr: string[] = []; const codes: number[] = [];
-  const sink = createBoardSink({ options: { format, formatGiven: true, host: 'claude', rows: 25, width: 100, color: false }, home: '/home/u', now: () => 0, argv: [], command: 'x', write: (text) => written.push(text), stderr: (line) => stderr.push(line), setExitCode: (code) => codes.push(code) });
+  const sink = createBoardSink({ options: { format, formatGiven: true, host: 'claude', rows: 25, width: 100, color: false }, home: '/home/u', now: () => 0, argv: [], command: 'x', rowsAllCommand: 'x --rows all', write: (text) => written.push(text), stderr: (line) => stderr.push(line), setExitCode: (code) => codes.push(code) });
   const program = buildProgram(createExecute(sink), verbs, { noUpdateCheck: true });
   program.exitOverride();
   return { written, stderr, codes, run: (argv: string[]) => program.parseAsync(['node', 'terum-skills', ...argv]) };
@@ -62,7 +62,7 @@ describe('board mode through commander — every public verb', () => {
     const command = invocation(undefined, 'search', ...['deploy check'].map(shellArg), { raw: '--format md' });
     const sink = createBoardSink({
       options: { format: 'md', formatGiven: true, host: 'claude', rows: 1, width: 100, color: false },
-      home: '/home/u', now: () => 0, argv: ['search', 'deploy check'], command,
+      home: '/home/u', now: () => 0, argv: ['search', 'deploy check'], command, rowsAllCommand: `${command} --rows all`,
       write: (text) => written.push(text), stderr: () => undefined, setExitCode: () => undefined,
     });
     await createExecute(sink)(async () => success([
@@ -70,5 +70,22 @@ describe('board mode through commander — every public verb', () => {
       { id: 'b', name: 'deploy-check-2', description: 'd2', author: 'Mira', category: 'ops', latest: 'v1', installs: 1, updated: null, team: 'acme' },
     ]), { verb: 'search', notices: false });
     expect(written[0]).toContain("search 'deploy check' --format md --rows all");
+  });
+  it('uses a row-cap command whose board flags precede a literal -- separator', async () => {
+    const written: string[] = [];
+    const command = 'npx -y terum-skills@latest ls --local --format md --';
+    const rowsAllCommand = 'npx -y terum-skills@latest ls --local --format md --rows all --';
+    const sink = createBoardSink({
+      options: { format: 'md', formatGiven: true, host: 'claude', rows: 1, width: 100, color: false },
+      home: '/home/u', now: () => 0, argv: ['ls', '--local', '--'], command, rowsAllCommand,
+      write: (text) => written.push(text), stderr: () => undefined, setExitCode: () => undefined,
+    });
+    await createExecute(sink)(async () => success({
+      local: [{ root: '/home/u/.claude/skills', label: 'Global', rootState: 'scanned', registered: false, notOffered: [], rows: [
+        { name: 'alpha', path: '/home/u/.claude/skills/alpha' },
+        { name: 'beta', path: '/home/u/.claude/skills/beta' },
+      ] }],
+    }), { verb: 'ls', notices: false });
+    expect(written[0]).toContain('_… and 1 more — run `npx -y terum-skills@latest ls --local --format md --rows all --`_');
   });
 });

@@ -91,6 +91,8 @@ export async function git(args: string[], cwd?: string, env?: NodeJS.ProcessEnv)
   return result.stdout;
 }
 
+const at = (iso: string): NodeJS.ProcessEnv => ({ GIT_AUTHOR_DATE: iso, GIT_COMMITTER_DATE: iso });
+
 export const TEAM_JSON = { layout_version: 3, name: 'team', categories: [], projects: { Global: { remotes: [], skills: [] as string[] } }, archived: [] as string[], policy: { skill_license: 'UNLICENSED' } };
 export const person = (handle: string, extra: Record<string, unknown> = {}) => ({ handle, display_name: handle, email: `${handle}@example.com`, github: handle, bio: '', installed: [], declined: [], ...extra });
 
@@ -113,7 +115,7 @@ export async function bareTeam(): Promise<{ root: string; bare: string; seed: st
   await writeFile(join(seed, 'team.json'), `${JSON.stringify(TEAM_JSON, null, 2)}\n`);
   await writeFile(join(seed, 'people', 'seed.json'), `${JSON.stringify(person('seed'), null, 2)}\n`);
   await git(['add', '--all'], seed);
-  await git(['commit', '-q', '-m', 'seed'], seed);
+  await git(['commit', '-q', '-m', 'seed'], seed, at('2026-09-01T09:00:00Z'));
   await git(['push', '-q', 'origin', 'HEAD:main'], seed);
   return { root, bare, seed };
 }
@@ -284,7 +286,6 @@ export async function dashboardTeam(options: { storeUnderHome?: boolean; localRe
   const store = createConfigStore(options.storeUnderHome ? join(home, '.terum', 'skills') : join(team.root, 'state'));
   const remote = options.localRemote ? team.bare : DASHBOARD_REMOTE;
   const seed = team.seed;
-  const at = (iso: string): NodeJS.ProcessEnv => ({ GIT_AUTHOR_DATE: iso, GIT_COMMITTER_DATE: iso });
   const commit = async (message: string, iso: string): Promise<void> => {
     await git(['add', '--all'], seed); await git(['commit', '-q', '-m', message], seed, at(iso)); await git(['push', '-q', 'origin', 'HEAD:main'], seed);
   };

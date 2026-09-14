@@ -18,5 +18,8 @@ export const render = (raw: unknown, _ctx: RenderContext): Board => { void _ctx;
   return b;
 };
 /** Every line `update` prints is in `value.lines`; a line outside it is a note. */
-export function uncovered(lines: readonly string[], raw: unknown): string[] { const printed = new Set(asArray(asRecord(raw)['lines']).map(String)); return lines.filter((line) => !printed.has(line)); }
+export function uncovered(lines: readonly string[], raw: unknown): string[] {
+  const printed = new Set(asArray(asRecord(raw)['lines']).map(String));
+  return lines.filter((line) => line.startsWith('This copy: ') || line.startsWith('Declared dependency of: ') || !printed.has(line));
+}
 export const renderer: Renderer = { render, covered: [], uncovered };

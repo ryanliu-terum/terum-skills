@@ -1,5 +1,5 @@
 [1mdiagnose — Version 1 (1 version)[0m
-[2mResolved: "DIAG" → diagnose (unique prefix)[0m
+[2m[3mResolved: "DIAG" → diagnose (unique prefix)[0m[0m
 
   Narrow a failure to one cause before changing anything.
 

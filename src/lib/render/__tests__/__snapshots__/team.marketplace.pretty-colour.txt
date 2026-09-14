@@ -5,7 +5,7 @@
 ╭──────────────┬───────────┬──────────┬────────────────────────────╮
 │ [1mSkill       [0m │ [1mVer      [0m │ [1mInstalls[0m │ [1mEval                      [0m │
 ├──────────────┼───────────┼──────────┼────────────────────────────┤
-│ deploy-check │ Version 2 │ 2 ▲      │ [2m● NEUTRAL ±0% (6/8 scored)[0m │
+│ deploy-check │ Version 2 │      2 ▲ │ [2m● NEUTRAL ±0% (6/8 scored)[0m │
 │ tdd          │ Version 2 │        1 │ [32m✓ PASS +67% (Version 1)[0m    │
 │ diagnose     │ Version 1 │        0 │ [33m⚠ invalid receipt[0m          │
 ╰──────────────┴───────────┴──────────┴────────────────────────────╯

@@ -25,8 +25,8 @@ export const MARK = `@@@@*=:           .......            :=*@@@@
 @:       .::.        ..        .::.       :@
 @@+.        .::....      ....::.        .+@@
 @@@@*=:          ..........          :=*@@@@`;
-export type StyleKind = 'bold' | 'dim' | 'cyan' | 'green' | 'red' | 'yellow';
-const CODES: Record<StyleKind, number> = { bold: 1, dim: 2, cyan: 36, green: 32, red: 31, yellow: 33 };
+export type StyleKind = 'bold' | 'dim' | 'italic' | 'cyan' | 'green' | 'red' | 'yellow';
+const CODES: Record<StyleKind, number> = { bold: 1, dim: 2, italic: 3, cyan: 36, green: 32, red: 31, yellow: 33 };
 export function colorCapable(): boolean {
   return terminalOutputIsTTY() && process.env.NO_COLOR === undefined && process.env.TERM !== 'dumb';
 }

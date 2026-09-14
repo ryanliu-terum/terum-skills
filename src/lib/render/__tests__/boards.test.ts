@@ -31,13 +31,14 @@ export const BACKENDS: Record<string, Partial<RenderOptions>> = {
 
 const RENDER_CTX: RenderContext = {
   format: 'md', host: 'claude', rows: 25, width: 100, color: false, form: undefined,
-  home: '/home/seed', now: DASHBOARD_NOW, argv: ['ls'], command: 'npx -y terum-skills@latest ls --format md',
+  home: '/home/seed', now: DASHBOARD_NOW, argv: ['ls'], command: 'npx -y terum-skills@latest ls --format md', rowsAllCommand: 'npx -y terum-skills@latest ls --format md --rows all',
 };
 
 export async function boardOf(verb: string, argv: string[], backend: string, act: (io: Prompter) => Promise<Result<unknown>>, fixture: { root: string; home: string }): Promise<string> {
   const written: string[] = []; const errors: string[] = []; const codes: number[] = [];
   const options: RenderOptions = { format: 'md', formatGiven: true, host: 'claude', rows: 25, width: 100, color: false, ...BACKENDS[backend] };
-  const sink = createBoardSink({ options, form: undefined, home: fixture.home, now: () => DASHBOARD_NOW, argv, command: `npx -y terum-skills@latest ${argv.join(' ')} --format ${options.format}`, write: (text) => written.push(text), stderr: (line) => errors.push(line), setExitCode: (code) => codes.push(code) });
+  const command = `npx -y terum-skills@latest ${argv.join(' ')} --format ${options.format}`;
+  const sink = createBoardSink({ options, form: undefined, home: fixture.home, now: () => DASHBOARD_NOW, argv, command, rowsAllCommand: `${command} --rows all`, write: (text) => written.push(text), stderr: (line) => errors.push(line), setExitCode: (code) => codes.push(code) });
   await createExecute(sink)(act, { verb, notices: false });
   expect(written).toHaveLength(1);
   const trailer = errors.length || codes.length ? `\n--- stderr ---\n${errors.join('\n')}\n--- exit ${codes.join(',')} ---\n` : '';
@@ -168,7 +169,7 @@ describe('status, update, sync boards', () => {
       await expect(text).toMatchFileSnapshot(snapshot('empty.status', backend));
     });
     it(`typed.update (${backend})`, async () => {
-      const value = { running: '0.16.0', latest: '0.17.0', observation: 'older', launch: 'npx', description: 'Latest advertised release: 0.17.0 (observed 2026-09-13T08:00:00Z)', advice: ['Cache request recorded as: terum-skills@latest', "To request the registry's latest release, run:", '  npx -y terum-skills@latest <command>', 'This does not update other local or global installations.'], lines: ['terum-skills 0.16.0', 'This copy: /home/seed/.npm/_npx/abc/node_modules/terum-skills', 'Latest advertised release: 0.17.0 (observed 2026-09-13T08:00:00Z)', 'Cache request recorded as: terum-skills@latest', "To request the registry's latest release, run:", '  npx -y terum-skills@latest <command>', 'This does not update other local or global installations.'] };
+      const value = { running: '0.16.0', latest: '0.17.0', observation: 'older', launch: 'local', description: 'Latest advertised release: 0.17.0 (observed 2026-09-13T08:00:00Z)', advice: ['If managed with npm, run in /home/seed/work/app:', '  npm install terum-skills@latest'], lines: ['terum-skills 0.16.0', 'This copy: /home/seed/work/app/node_modules/terum-skills', 'Declared dependency of: /home/seed/work/app', 'Latest advertised release: 0.17.0 (observed 2026-09-13T08:00:00Z)', 'If managed with npm, run in /home/seed/work/app:', '  npm install terum-skills@latest'] };
       await expect(await typed('update', ['update'], backend, { ok: true, value, exitCode: 0 }, value.lines)).toMatchFileSnapshot(snapshot('typed.update', backend));
     });
     it(`typed.sync (${backend})`, async () => {
@@ -191,6 +192,20 @@ describe('status, update, sync boards', () => {
     expect(text).toContain('**Next:** `npm install -g terum-skills@latest`');
   });
 
+  it('update board preserves the npx copy path and all cache-update advice without inventing a dependency root', async () => {
+    const value = {
+      running: '0.16.0', latest: '0.17.0', observation: 'older', launch: 'npx',
+      description: 'Latest advertised release: 0.17.0 (observed 2026-09-13T08:00:00Z)',
+      advice: ['Cache request recorded as: terum-skills@latest', "To request the registry's latest release, run:", '  npx -y terum-skills@latest <command>', 'This does not update other local or global installations.'],
+      lines: ['terum-skills 0.16.0', 'This copy: /home/seed/.npm/_npx/abc/node_modules/terum-skills', 'Latest advertised release: 0.17.0 (observed 2026-09-13T08:00:00Z)', 'Cache request recorded as: terum-skills@latest', "To request the registry's latest release, run:", '  npx -y terum-skills@latest <command>', 'This does not update other local or global installations.'],
+    };
+    const rendered = await typed('update', ['update'], 'md', { ok: true, value, exitCode: 0 }, value.lines, { root: '/not-the-fixture-root', home: '/not-the-fixture-home' });
+    expect(rendered).toContain('- This copy: /home/seed/.npm/_npx/abc/node_modules/terum-skills');
+    expect(rendered).not.toContain('Declared dependency of:');
+    expect(rendered).toContain('### How to update');
+    for (const line of value.advice) expect(rendered).toContain(line);
+  });
+
   it('status board keeps the clone-repair instruction as a note, not a covered line', async () => {
     const value = {
       version: '0.16.0',
@@ -207,6 +222,62 @@ describe('status, update, sync boards', () => {
     const text = await typed('status', ['status'], 'md', { ok: true, value, exitCode: 0 }, lines);
     expect(text).toContain('**Notes**');
     expect(text).toContain('-   Restore it: npx -y terum-skills@latest team join https://github.com/acme/team');
+  });
+
+  it.each([
+    {
+      label: 'foreign',
+      clone: { state: 'foreign', origin: 'https://github.com/other/team' },
+      cloneLine: '  Clone: /home/seed/.terum/skills/acme is a clone of https://github.com/other/team, not https://github.com/acme/team.',
+      cell: '- **clone:** ✗ /home/seed/.terum/skills/acme is a clone of https://github.com/other/team, not https://github.com/acme/team.',
+      restore: '  Restore it: move /home/seed/.terum/skills/acme aside, then run npx -y terum-skills@latest team join https://github.com/acme/team',
+    },
+    {
+      label: 'incomplete',
+      clone: { state: 'incomplete' },
+      cloneLine: '  Clone: /home/seed/.terum/skills/acme exists but is not a complete clone.',
+      cell: '- **clone:** ✗ /home/seed/.terum/skills/acme exists but is not a complete clone.',
+      restore: '  Restore it: move /home/seed/.terum/skills/acme aside, then run npx -y terum-skills@latest team join https://github.com/acme/team',
+    },
+    {
+      label: 'incomplete/unverifiable',
+      clone: { state: 'incomplete', reason: 'unverifiable', error: 'spawn git ENOENT' },
+      cloneLine: '  Clone: /home/seed/.terum/skills/acme could not be verified (spawn git ENOENT); check that git is installed before repairing anything.',
+      cell: '- **clone:** ✗ /home/seed/.terum/skills/acme could not be verified (spawn git ENOENT); check that git is installed before repairing anything.',
+      restore: undefined,
+    },
+  ])('status board renders the exact $label clone state', async ({ clone, cloneLine, cell, restore }) => {
+    const value = {
+      version: '0.16.0',
+      teams: [{ team: 'acme', handle: 'seed', repository: 'https://github.com/acme/team', clone, clonePath: '/home/seed/.terum/skills/acme', membership: null, policy: null, categories: null, members: [], pending: [], syncedAt: null, stale: false }],
+      ledger: { placements: [], approvals: [] }, identity: null, tools: { git: false, gh: false }, hostArch: 'x64', processArch: 'x64',
+    };
+    const lines = ['terum-skills 0.16.0', 'Team acme (configured handle @seed)', '  Repository: https://github.com/acme/team', cloneLine, ...(restore === undefined ? [] : [restore])];
+    const rendered = await typed('status', ['status'], 'md', { ok: true, value, exitCode: 0 }, lines, { root: '/not-the-fixture-root', home: '/not-the-fixture-home' });
+    expect(rendered).toContain(cell);
+    if (restore !== undefined) expect(rendered).toContain(`- ${restore}`);
+    else expect(rendered).not.toContain('Restore it:');
+  });
+
+  it('status board shows readable and unreadable shared-skill counts and keeps clone provenance and eval availability as notes', async () => {
+    const value = {
+      version: '0.16.0',
+      teams: [{ team: 'acme', handle: 'seed', repository: 'https://github.com/acme/team', clone: { state: 'ok' }, clonePath: '/home/seed/.terum/skills/acme', membership: 'active', policy: { skill_license: 'UNLICENSED' }, categories: ['ops'], members: [], pending: [], syncedAt: null, stale: false, sharedSkills: 2, unreadableSkills: 1 }],
+      ledger: { placements: [], approvals: [] }, identity: null, tools: { git: true, gh: false }, hostArch: 'x64', processArch: 'x64',
+    };
+    const lines = [
+      'terum-skills 0.16.0',
+      'Team acme (you are @seed)',
+      '  Repository: https://github.com/acme/team',
+      '  From the local clone; GitHub access is not checked.',
+      '  Members: 0',
+      '  Shared skills: 2 readable; 1 unreadable',
+      '  Evaluated skills: not yet available',
+    ];
+    const rendered = await typed('status', ['status'], 'md', { ok: true, value, exitCode: 0 }, lines);
+    expect(rendered).toContain('- **shared skills:** 2 readable; 1 unreadable');
+    expect(rendered).toContain('-   From the local clone; GitHub access is not checked.');
+    expect(rendered).toContain('-   Evaluated skills: not yet available');
   });
 });
 
@@ -258,10 +329,19 @@ describe('search, eval-report, eval boards', () => {
     expect(text).not.toContain('**Next:**');
   });
 
+  it('caps drain outcomes at the requested row count and reports the remainder', () => {
+    const value = { items: [], attempted: 3, outcomes: [{ skill: 'one', ok: true }, { skill: 'two', ok: false, error: 'failed' }, { skill: 'three', ok: true }] };
+    const rendered = evalRenderer.render(value, { ...RENDER_CTX, rows: 2 });
+    const outcomes = rendered.sections.find((section) => section.kind === 'table' && section.title === 'Outcomes');
+    if (outcomes === undefined || outcomes.kind !== 'table') throw new Error('Expected the Outcomes table.');
+    expect(outcomes.rows).toHaveLength(2);
+    expect(outcomes.more).toEqual({ count: 1 });
+  });
+
   // Fix round 1, R4: the batch headline is the exact printed sentence (ok, not ok+failed).
   it('typed.eval-many', async () => {
     const value = { mode: 'ran', team: 'acme', skills: ['tdd', 'notes'], ok: 1, failed: 1, queued: [], stoppedAfter: 1 };
-    const lines = ['Evaluating 2 skills, 1 at a time…', '── tdd ──', 'verdict: PASS', '── notes ──', 'verdict: FAIL', 'Evaluated 1 of 2; 1 failed.'];
+    const lines = ['Evaluating 2 skills, 1 at a time…', '── tdd ──', 'verdict: PASS', '✓ tdd', '── notes ──', 'verdict: FAIL', '✗ notes: judge failed', 'Evaluated 1 of 2; 1 failed.'];
     const text = await typed('eval', ['eval', 'tdd', 'notes'], 'md', { ok: false, error: '1 of 2 evals failed.', value, exitCode: 1 }, lines);
     expect(text).toContain('**Evaluated 1 of 2; 1 failed.**');
     expect(text).toContain('Stopped after 1 of 2: a declined "Continue?" queued the rest for later.');

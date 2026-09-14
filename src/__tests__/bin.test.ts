@@ -124,6 +124,23 @@ describe('the built bin (dist/index.js)', () => {
     expect(result.stdout).toContain('## Search "--rows"');
   });
 
+  it.skipIf(process.platform === 'win32')('prints a runnable uncapped footer command with board flags before a literal --', async () => {
+    const f = await dashboardTeam({ storeUnderHome: true, localRemote: true });
+    const child = { ...env, HOME: f.home, USERPROFILE: f.home, GH_CONFIG_DIR: resolve(f.home, '.config', 'gh') };
+    const capped = await run(process.execPath, [bin, '--format', 'md', '--rows', '1', 'ls', '--local', '--'], { cwd: f.home, env: child });
+    const footer = capped.stdout.match(/_… and \d+ more — run `([^`]+)`_/u)?.[1];
+    expect(footer).toBe('npx -y terum-skills@latest ls --local --format md --rows all --');
+
+    const shims = resolve(out, 'rows-all-shims');
+    await mkdir(shims, { recursive: true });
+    const npx = resolve(shims, 'npx');
+    await writeFile(npx, '#!/bin/sh\n[ "$1" = "-y" ] || exit 64\n[ "$2" = "terum-skills@latest" ] || exit 64\nshift 2\nexec "$ROWS_ALL_NODE" "$ROWS_ALL_BIN" "$@"\n');
+    await chmod(npx, 0o755);
+    const uncapped = await run('/bin/sh', ['-c', footer!], { cwd: f.home, env: { ...child, PATH: `${shims}${delimiter}${env.PATH}`, ROWS_ALL_NODE: process.execPath, ROWS_ALL_BIN: bin } });
+    expect(uncapped.stdout).toContain('## Library');
+    expect(uncapped.stdout).not.toMatch(/_… and \d+ more — run /u);
+  });
+
   it('keeps successful framed version and help requests as commander text without a result', async () => {
     const plain = await run(process.execPath, [bin, '--version'], { cwd: out, env });
     const framed = await framedRun(['--frames', '--version']);

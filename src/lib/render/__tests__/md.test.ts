@@ -3,11 +3,12 @@ import { bar, bars, board, code, count, date, kv, path, status, strip, table, te
 import { barText, nextCommand, renderCell } from '../cells.js';
 import { renderMd } from '../md.js';
 
-const ctx: RenderContext = { format: 'md', host: 'claude', rows: 25, width: 100, color: false, form: undefined, home: '/home/u', now: Date.parse('2026-09-13T12:00:00Z'), argv: ['ls'], command: 'npx -y terum-skills@latest ls --format md' };
+const ctx: RenderContext = { format: 'md', host: 'claude', rows: 25, width: 100, color: false, form: undefined, home: '/home/u', now: Date.parse('2026-09-13T12:00:00Z'), argv: ['ls'], command: 'npx -y terum-skills@latest ls --format md', rowsAllCommand: 'npx -y terum-skills@latest ls --format md --rows all' };
 
 describe('cells', () => {
   it('renders every cell kind as the spec words it', () => {
     expect(renderCell(text('a|b\nc'), ctx).text).toBe('a|b c');
+    expect(renderCell(text('2 ▲', 'right'), ctx)).toEqual({ text: '2 ▲', align: 'right' });
     expect(renderCell(count(null), ctx)).toEqual({ text: '—', align: 'right' });
     expect(renderCell(count(12), ctx)).toEqual({ text: '12', align: 'right' });
     expect(renderCell(verdict({ verdict: 'PASS', lift: 33 }), ctx)).toEqual({ text: '✓ PASS +33%', tone: 'ok', align: 'left' });
@@ -69,6 +70,7 @@ describe('md backend', () => {
       '|---|---:|---|',
       '| deploy-check | 2 | ✓ PASS +33% |',
       '| a\\|b | — | — not evaluated |',
+      '',
       '_… and 1 more — run `npx -y terum-skills@latest ls --format md --rows all`_',
       '',
       '### Identity',

@@ -48,7 +48,7 @@
 
 | Version | Run | Verdict | Lift | W/L/T | Model | Runner | When |
 |---|---|---|---|---|---|---|---|
-| Version 1 | 20260902T100000Z | ✓ PASS — | +67% | 5/1/0 | sonnet | @seed | 11d ago |
+| Version 1 | 20260902T100000Z | ✓ PASS +67% | +67% | 5/1/0 | sonnet | @seed | 11d ago |
 
 **Notes**
 - The receipt shown comes from Version 1; the current version has none.

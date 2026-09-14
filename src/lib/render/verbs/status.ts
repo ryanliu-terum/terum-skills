@@ -23,10 +23,12 @@ export const render = (raw: unknown, ctx: RenderContext): Board => {
   for (const team of teams) {
     const handle = str(team['handle']) ?? '?'; const ok = asRecord(team['clone'])['state'] === 'ok';
     const synced = str(team['syncedAt']); const stale = bool(team['stale']);
+    const sharedSkills = num(team['sharedSkills']); const unreadableSkills = num(team['unreadableSkills']);
     b.sections.push(kv([
       ['repository', text(team['repository'])], ['clone', cloneText(team)],
       ['synced', synced === null ? text(null) : statusCell(stale ? 'warn' : 'ok', `${relativeDate(synced, ctx.now)}${stale ? ' stale' : ''}`)],
-      ['membership', text(team['membership'])], ['policy license', text(asRecord(team['policy'])['skill_license'])], ['categories', text(asArray(team['categories']).join(', ') || null)],
+      ['membership', text(team['membership'])], ['shared skills', text(sharedSkills === null ? null : `${sharedSkills}${unreadableSkills !== null && unreadableSkills > 0 ? ` readable; ${unreadableSkills} unreadable` : ''}`)],
+      ['policy license', text(asRecord(team['policy'])['skill_license'])], ['categories', text(asArray(team['categories']).join(', ') || null)],
     ], `Team ${str(team['team']) ?? '?'} — ${ok ? 'you are' : 'configured handle'} @${handle}`));
     const members = asArray(team['members']).map(asRecord);
     if (members.length) b.sections.push(table([{ key: 'handle', label: 'Handle', priority: 1 }, { key: 'name', label: 'Name', priority: 2 }, { key: 'role', label: 'Role', priority: 3 }, { key: 'joined', label: 'Joined', priority: 3 }],
@@ -52,8 +54,8 @@ export const render = (raw: unknown, ctx: RenderContext): Board => {
 };
 
 export const covered: RegExp[] = [
-  /^terum-skills /, /^Team .+ \((you are|configured handle) @/, /^  Repository: /, /^  Clone: /, /^  From the local clone; GitHub access is not checked\.$/,
-  /^  Members: \d+/, /^    @\S+ — /, /^    … and \d+ more$/, /^  Your membership: /, /^  Shared skills: \d+/, /^  Evaluated skills: not yet available$/, /^  \S+ may be stale; run /,
+  /^terum-skills /, /^Team .+ \((you are|configured handle) @/, /^  Repository: /, /^  Clone: /,
+  /^  Members: \d+/, /^    @\S+ — /, /^    … and \d+ more$/, /^  Your membership: /, /^  Shared skills: \d+/, /^  \S+ may be stale; run /,
   ...[...getStartedLines(undefined), ...getStartedLines('bare')].map((line) => new RegExp(`^${escapeRegExp(line)}$`)),
 ];
 export const renderer: Renderer = { render, covered };

@@ -33,6 +33,14 @@ describe('resolveSkillRef (§6.1)', () => {
     expect(await resolveSkillRef({ ...base, cwd: inside })).toMatchObject({ ok: true, value: { name: 'deploy-check', how: 'cwd', source: 'library', match: { path: join(root, 'deploy-check') } } });
     expect(printed).toEqual(['Resolved: deploy-check from the working directory']);
   });
+  it('treats empty and whitespace-only refs exactly like an absent ref', async () => {
+    const { root, base, printed } = await library();
+    const inside = join(root, 'deploy-check', 'sub'); await mkdir(inside, { recursive: true });
+    const absent = await resolveSkillRef({ ...base, cwd: inside });
+    printed.length = 0;
+    for (const ref of ['', '  ']) expect(await resolveSkillRef({ ...base, ref, cwd: inside })).toEqual(absent);
+    expect(printed).toEqual(['Resolved: deploy-check from the working directory', 'Resolved: deploy-check from the working directory']);
+  });
   it('rung 0: outside every skill folder, or inside one that is not in a Library root, is the one sentence', async () => {
     const { home, base } = await library();
     expect(await resolveSkillRef({ ...base, cwd: home })).toEqual({ ok: false, error: CWD_MISS });

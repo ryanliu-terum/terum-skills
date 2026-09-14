@@ -3,7 +3,7 @@ import { bars, board, count, kv, path, status, strip, table, text, textBlock, ve
 import { renderPretty } from '../pretty.js';
 import { stripAnsi } from '../text.js';
 
-const ctx: RenderContext = { format: 'pretty', host: 'terminal', rows: 25, width: 100, color: false, form: 'bare', home: '/home/u', now: Date.parse('2026-09-13T12:00:00Z'), argv: ['ls'], command: 'terum-skills ls --format pretty' };
+const ctx: RenderContext = { format: 'pretty', host: 'terminal', rows: 25, width: 100, color: false, form: 'bare', home: '/home/u', now: Date.parse('2026-09-13T12:00:00Z'), argv: ['ls'], command: 'terum-skills ls --format pretty', rowsAllCommand: 'terum-skills ls --format pretty --rows all' };
 const columns = [
   { key: 'skill', label: 'Skill', priority: 1 as const },
   { key: 'desc', label: 'Desc', priority: 2 as const, max: 20 },
@@ -45,6 +45,10 @@ describe('pretty backend', () => {
     const out = renderPretty(board('M', { sections: [table(columns, rows)] }), { ...ctx, width: 40 });
     expect(out).toBe(['M', '', '  Skill:    deploy-check', '  Desc:     A very long descrip…', '  Author:   Mira Chen', '  Installs: 2', '', '  Skill:    tdd', '  Desc:     Short.', '  Author:   Seed', '  Installs: —'].join('\n'));
   });
+  it('keeps the row-cap footer when a table degrades below 60 columns', () => {
+    const out = renderPretty(board('M', { sections: [table(columns, rows, { cap: 1 })] }), { ...ctx, width: 59 });
+    expect(out.split('\n').at(-1)).toBe('… and 1 more — run terum-skills ls --format pretty --rows all');
+  });
   it('renders kv, text, bars, notes, next, failure and the more footer', () => {
     const out = renderPretty(board('T', {
       headline: 'h', resolved: ['Resolved: x from the working directory'],
@@ -70,5 +74,10 @@ describe('pretty backend', () => {
     expect(stripAnsi(coloured)).toBe(plain);
     expect(coloured).toContain('\x1b[32m✓ git\x1b[0m'); expect(coloured).toContain('\x1b[31m✗ FAIL −50%\x1b[0m');
     expect(coloured).toContain('\x1b[32mW\x1b[0m\x1b[31mL\x1b[0m\x1b[2mT\x1b[0m'); expect(coloured).toContain('\x1b[36mterum-skills sync\x1b[0m'); expect(coloured).toContain('\x1b[1mT\x1b[0m');
+  });
+  it('renders resolved lines dim outside italic, with the ANSI nesting order pinned', () => {
+    expect(renderPretty(board('T', { resolved: ['Resolved: x from the working directory'] }), { ...ctx, color: true })).toBe(
+      '\x1b[1mT\x1b[0m\n\x1b[2m\x1b[3mResolved: x from the working directory\x1b[0m\x1b[0m',
+    );
   });
 });

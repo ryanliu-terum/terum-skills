@@ -127,7 +127,7 @@ export function skillsTable(rows: readonly SkillRowInput[], ctx: RenderContext, 
     return {
       ...(options.team ? { team: text(row.team) } : {}),
       skill: text(row.name), desc: text(shortDescription(str(row.description), 60)), author: text(displayName(str(row.author))), category: text(row.category),
-      ver: text(versionText(row.latest)), installs: marker ? text(`${num(row.installs) ?? '—'} ▲`) : count(row.installs),
+      ver: text(versionText(row.latest)), installs: marker ? text(`${num(row.installs) ?? '—'} ▲`, 'right') : count(row.installs),
       ...(options.eval ? { eval: receiptVerdict(row.receipt, { invalid: row.latestEvalState === 'invalid', from: evalN !== null && latestN !== null && evalN !== latestN ? `Version ${evalN}` : null }) } : {}),
       updated: date(row.updated),
     };

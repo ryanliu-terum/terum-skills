@@ -110,10 +110,15 @@ const setExitCode = (code: number) => { process.exitCode = code; };
 // D3: a board run swaps the terminal Prompter for the collecting sink; stderr and the exit code are unchanged.
 const board = !frames && render.format !== 'plain';
 const verb = argv[2] ?? '';
+const tail = argv.slice(3);
+const cut = tail.indexOf('--');
+const head = cut === -1 ? tail : tail.slice(0, cut);
+const rest = cut === -1 ? [] : tail.slice(cut);
 const execute = createExecute(board
   ? createBoardSink({
     options: render, form, home: homedir(), now: () => Date.now(), argv: argv.slice(2),
-    command: invocation(form, verb, ...argv.slice(3).map(shellArg), { raw: `--format ${render.format}` }),
+    command: invocation(form, verb, ...head.map(shellArg), { raw: `--format ${render.format}` }, ...rest.map(shellArg)),
+    rowsAllCommand: invocation(form, verb, ...head.map(shellArg), { raw: `--format ${render.format}` }, { raw: '--rows all' }, ...rest.map(shellArg)),
     write: (text) => { process.stdout.write(text); }, stderr: stderrLine, setExitCode,
     progress: render.format === 'pretty' && process.stderr.isTTY ? (line) => { process.stderr.write(`\r\x1b[K${line}`); } : undefined,
     afterVerb,

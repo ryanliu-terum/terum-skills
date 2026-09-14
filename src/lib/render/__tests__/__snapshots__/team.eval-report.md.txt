@@ -52,8 +52,8 @@ recall 0.80 · precision 1.00 (tp 4 fn 1 fp 0 tn 5)
 
 | Version | Run | Verdict | Lift | W/L/T | Model | Runner | When |
 |---|---|---|---|---|---|---|---|
-| Version 2 | 20260905T100000Z | ● NEUTRAL — (—/— scored) | ±0% | 2/2/2 | sonnet | @seed | 8d ago |
-| Version 1 | 20260901T100000Z | ✓ PASS — | +33% | 4/2/0 | sonnet | @mira | 12d ago |
+| Version 2 | 20260905T100000Z | ● NEUTRAL ±0% (—/— scored) | ±0% | 2/2/2 | sonnet | @seed | 8d ago |
+| Version 1 | 20260901T100000Z | ✓ PASS +33% | +33% | 4/2/0 | sonnet | @mira | 12d ago |
 
 ### Local runs
 

@@ -264,7 +264,11 @@ async function showSkill(args: LsArgs, store: ConfigStore, io: Prompter, runner:
   const name = resolved.value.name;
   const library = await collectLocal(store, home, io, runner, name);
   const local = library.sections.map((section) => ({ ...section, rows: section.rows.filter((row) => row.name === name), notOffered: section.notOffered.filter((entry) => entry.name === name) })).filter((section) => section.rows.length > 0 || section.notOffered.length > 0);
-  const row = local[0]?.rows[0];
+  const fallbackRow = local.find((section) => section.rows.length > 0)?.rows[0];
+  const resolvedLibraryPath = resolved.value.source === 'library' ? resolved.value.match.path : undefined;
+  const row = resolvedLibraryPath !== undefined
+    ? local.flatMap((section) => section.rows).find((candidate) => candidate.path === resolvedLibraryPath) ?? fallbackRow
+    : fallbackRow;
   if (clone !== null && teamName !== null && viewer !== undefined) {
     const team = parseJson(teamSchema, await readFile(join(clone, 'team.json'), 'utf8'), 'team.json');
     const problems: { source: string; message: string }[] = [];

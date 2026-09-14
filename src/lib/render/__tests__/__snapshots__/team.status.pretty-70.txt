@@ -5,17 +5,18 @@ Team acme — you are @seed
   clone:          ✓ ok
   synced:         ⚠ today stale
   membership:     active
+  shared skills:  3
   policy license: UNLICENSED
   categories:     ops, engineering, debugging
 
 Members (3)
-╭─────────────┬────────────┬───────────┬────────────╮
-│ Handle      │ Name       │ Role      │ Joined     │
-├─────────────┼────────────┼───────────┼────────────┤
-│ @mira       │ Mira Chen  │ —         │ 12d ago    │
-│ @ravi       │ Ravi Patel │ Debugging │ 12d ago    │
-│ @seed (you) │ Seed       │ Platform  │ 2026-09-14 │
-╰─────────────┴────────────┴───────────┴────────────╯
+╭─────────────┬────────────┬───────────┬─────────╮
+│ Handle      │ Name       │ Role      │ Joined  │
+├─────────────┼────────────┼───────────┼─────────┤
+│ @mira       │ Mira Chen  │ —         │ 12d ago │
+│ @ravi       │ Ravi Patel │ Debugging │ 12d ago │
+│ @seed (you) │ Seed       │ Platform  │ 12d ago │
+╰─────────────┴────────────┴───────────┴─────────╯
 
 Pending
 ╭─────────┬──────────┬────────┬─────────┬─────────╮
@@ -46,5 +47,9 @@ Tools
 Architecture
   host: arm64
   node: x64
+
+Notes
+  •   From the local clone; GitHub access is not checked.
+  •   Evaluated skills: not yet available
 
 Next: /terum-skills install 33333333-3333-4333-8333-333333333333 · /sync-skills

@@ -3,7 +3,7 @@
 
 - **latest:** ⚠ 0.17.0
 - **observation:** older
-- **launch:** npx
+- **launch:** local
 
 ### Release check
 
@@ -11,9 +11,11 @@ Latest advertised release: 0.17.0 (observed 2026-09-13T08:00:00Z)
 
 ### How to update
 
-Cache request recorded as: terum-skills@latest
-To request the registry's latest release, run:
-  npx -y terum-skills@latest <command>
-This does not update other local or global installations.
+If managed with npm, run in <HOME>/work/app:
+  npm install terum-skills@latest
 
-**Next:** `npx -y terum-skills@latest <command>`
+**Notes**
+- This copy: <HOME>/work/app/node_modules/terum-skills
+- Declared dependency of: <HOME>/work/app
+
+**Next:** `npm install terum-skills@latest`

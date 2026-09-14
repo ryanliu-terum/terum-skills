@@ -41,7 +41,7 @@
               "terum"
             ],
             "admin": null,
-            "joined": "2026-09-14",
+            "joined": "2026-09-01",
             "skillsTotal": 4
           }
         ],

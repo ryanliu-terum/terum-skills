@@ -59,15 +59,15 @@ export async function nearestSkillFolder(cwd: string): Promise<string | undefine
 export async function resolveSkillRef(input: ResolveInput): Promise<Result<ResolvedRef>> {
   const { home, config, stateRoot, team } = input;
   const library = (ref: string): Promise<LibrarySkillMatch | undefined> => resolveLibrarySkill(home, config, stateRoot, ref);
+  const ref = input.ref === undefined || input.ref.trim() === '' ? undefined : input.ref;
   // Rung 0 — the folder above cwd, which must itself lie inside a Library root.
-  if (input.ref === undefined) {
+  if (ref === undefined) {
     const folder = await nearestSkillFolder(input.cwd);
     const match = folder === undefined ? undefined : await library(folder);
     if (match === undefined) return failure(CWD_MISS);
     input.print(`${RESOLVED_PREFIX}${match.name} from the working directory`);
     return success({ name: match.name, how: 'cwd', source: 'library', match });
   }
-  const ref = input.ref;
   // Rung 1 — exact: the Library (name or path), then the team (name or unique id prefix).
   const exact = await library(ref);
   if (exact !== undefined) return success({ name: exact.name, how: 'exact', source: 'library', match: exact });
@@ -91,7 +91,7 @@ export async function resolveSkillRef(input: ResolveInput): Promise<Result<Resol
     if (!resolved.ok) return failure(resolved.error);
     if (resolved.value === undefined) break;
     input.print(`${RESOLVED_PREFIX}"${ref}" → ${name} (${HOW_TEXT[how as Exclude<ResolveHow, 'cwd' | 'exact'>]})`);
-    return success({ ...resolved.value, how } as ResolvedRef);
+    return success({ ...resolved.value, how });
   }
   return failure(input.miss(ref));
 }

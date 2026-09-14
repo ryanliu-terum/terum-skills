@@ -6,7 +6,7 @@ import type { RenderOptions } from '../options.js';
 const options: RenderOptions = { format: 'md', formatGiven: true, host: 'claude', rows: 25, width: 100, color: false };
 function make(overrides: Partial<Parameters<typeof createBoardSink>[0]> = {}) {
   const written: string[] = []; const errors: string[] = []; const codes: number[] = []; const progress: string[] = [];
-  const sink = createBoardSink({ options, home: '/home/u', now: () => Date.parse('2026-09-13T12:00:00Z'), argv: ['publish', 'x'], command: 'npx -y terum-skills@latest publish x --format md', write: (text) => written.push(text), stderr: (line) => errors.push(line), setExitCode: (code) => codes.push(code), progress: (line) => progress.push(line), ...overrides });
+  const sink = createBoardSink({ options, home: '/home/u', now: () => Date.parse('2026-09-13T12:00:00Z'), argv: ['publish', 'x'], command: 'npx -y terum-skills@latest publish x --format md', rowsAllCommand: 'npx -y terum-skills@latest publish x --format md --rows all', write: (text) => written.push(text), stderr: (line) => errors.push(line), setExitCode: (code) => codes.push(code), progress: (line) => progress.push(line), ...overrides });
   return { sink, written, errors, codes, progress };
 }
 
