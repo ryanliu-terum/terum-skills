@@ -216,6 +216,21 @@ Rules, all of which need a test:
   unrecognised value is not a reason to guess; fall back to what the process reports.
 - `env` absent entirely → `evidence.arch` unchanged.
 
+**Amendment, 2026-09-13 (branch fix/auto-update-auto-sync-refactor).** The rules above assumed every emulated
+Windows process carries `PROCESSOR_ARCHITEW6432`. Prism (x64 code on Windows on ARM64) does not set it:
+measured on a Snapdragon X machine, an x64 Node sees `PROCESSOR_ARCHITECTURE=AMD64`, no
+`PROCESSOR_ARCHITEW6432`, and `PROCESSOR_IDENTIFIER="ARMv8 (64-bit) Family 8 Model 1 Revision 201, Qualcomm
+Technologies Inc"`, so `hostArch` answered `x64` and the x64 installer was downloaded on every update (the
+release download counts showed it). Two rules are added after the `PROCESSOR_ARCHITEW6432` ones, which still
+win when present:
+
+- `win32` and `PROCESSOR_ARCHITECTURE` is `ARM64` (case-insensitive) → `'arm64'`.
+- `win32` and `PROCESSOR_IDENTIFIER` starts with `ARM` (case-insensitive, leading whitespace ignored) → `'arm64'`.
+
+An x64 identifier (`Intel64 …`, `AMD64 …`) changes nothing, and the environment is still never read off
+Windows. Tests: `platform.test.ts` ("recognises an ARM64 host from the processor identifier when the WOW64 hint
+is absent (Prism)" and its siblings) and the Prism row of the host-architecture table in `app.test.ts`.
+
 `detectPlatform` then uses `hostArch(evidence)` in the `win32` branch **only**. Leave `darwin` on
 `evidence.arch`: Rosetta's `sysctl.proc_translated` is not an environment variable and is out of scope; add a
 one-line comment saying so, naming this decision, so the asymmetry is not read later as an oversight.

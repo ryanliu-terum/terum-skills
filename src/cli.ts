@@ -202,7 +202,7 @@ export function buildProgram(execute: Execute, verbs: CliVerbs = { login, team: 
     });
   program.command('app-update')
     .description('Check for, download, or install a newer Terum Skills desktop app (reports only, unless --stage or --apply)')
-    .option('--check', 'report what is advertised and what is staged; downloads nothing (default)')
+    .option('--check', 'ask GitHub for the newest release at most once a day, then report what is advertised and what is staged; downloads nothing (default)')
     .option('--stage', 'download and verify the desktop app for --release; installs nothing')
     .option('--apply', 'hand the install to a background process and return; the caller must then quit')
     .option('--release <version>', 'which released version to act on (default: this copy’s version)')

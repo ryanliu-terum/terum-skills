@@ -78,6 +78,13 @@ describe('refresh', () => {
     expect((await run({ config: store }, io)).ok).toBe(true);
     expect(io.lines).toEqual(['b: not refreshed (no-clone) — no clone for this team on this machine']);
   });
+  it('in hook mode keeps stdout to the reload directive and carries the per-team lines as notices (the bin routes them to stderr)', async () => {
+    const { store } = await setup(['a', 'b']); await clean(store.teamClone('b')); const io = new ScriptedPrompter();
+    const outcome = await run({ config: store, hook: true }, io);
+    expect(io.lines).toEqual(['{"hookSpecificOutput":{"hookEventName":"SessionStart","reloadSkills":true}}']);
+    expect(outcome).toMatchObject({ ok: true, value: { notices: ['b: not refreshed (no-clone) — no clone for this team on this machine'] } });
+    expect(Object.getOwnPropertyDescriptor(outcome.value, 'hook')).toMatchObject({ value: true, enumerable: false });
+  });
   it('prints nothing when a program is on the other end', async () => {
     const { store } = await setup(['a', 'b']); await clean(store.teamClone('b'));
     const io = Object.assign(new ScriptedPrompter(), { channel: 'frames' as const });

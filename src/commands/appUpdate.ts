@@ -1,8 +1,8 @@
 import { createHash } from 'node:crypto';
-import { mkdtemp, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { createConfigStore, type ConfigStore } from '../lib/config.js';
-import { exists, mkdirPrivate, writeJsonPrivate } from '../lib/fs.js';
+import { exists, mkdirPrivate, writeJsonPrivate, type TransientRetry } from '../lib/fs.js';
 import { invocation, type WithForm } from '../lib/invocation.js';
 import type { Launch } from '../lib/launch.js';
 import { packageVersion } from '../lib/package.js';
@@ -11,7 +11,7 @@ import type { Prompter } from '../lib/prompt.js';
 import { failure, success, type Result } from '../lib/result.js';
 import { execCommand, systemRunner, type Exec, type Runner } from '../lib/runner.js';
 import { compare, createReleaseState, describeUpdate, maintainReleaseState, probePolicy, type ProbePolicy, type ReleaseStateStore } from '../lib/update.js';
-import { APP_PRODUCT, APP_REPOSITORY, APP_SLUG, RELEASE_ASSETS_MISSING, explainDownloadFailure, locateApp } from './app.js';
+import { APP_PRODUCT, APP_REPOSITORY, APP_SLUG, RELEASE_ASSETS_MISSING, explainDownloadFailure, locateApp, moveRetrying, removeRetrying, removeStaging, sweepStaleDownloads } from './app.js';
 
 export interface AppUpdateArgs extends WithForm {
   check?: boolean; stage?: boolean; apply?: boolean; applyNow?: boolean;
@@ -19,8 +19,8 @@ export interface AppUpdateArgs extends WithForm {
   /** Injected seams; identical in shape to AppArgs so both verbs test the same way. */
   config?: ConfigStore; runner?: Runner; exec?: Exec; state?: ReleaseStateStore; probe?: ProbePolicy;
   launch?: Launch; evidence?: PlatformEvidence; now?: () => number;
-  /** Test knobs. */
-  node?: string; entry?: string; localAppData?: string; waitMs?: number; pollMs?: number;
+  /** Test knobs; `sleep` is the wait between Windows retries of a move or removal. */
+  node?: string; entry?: string; localAppData?: string; waitMs?: number; pollMs?: number; sleep?: (milliseconds: number) => Promise<void>;
   /** Test knob: liveness probe for --apply-now (default process.kill(pid, 0)). */
   alive?: (pid: number) => boolean;
 }
@@ -54,20 +54,23 @@ export async function run(args: AppUpdateArgs, io: Prompter): Promise<Result<App
   const platform = detectPlatform(args.evidence ?? { platform: process.platform, arch: process.arch, env: process.env, procVersion: await readProcVersion() });
   const suffix = assetSuffix(platform); const supported = suffix !== null;
   const runner = args.runner ?? systemRunner, exec = args.exec ?? execCommand;
+  const retry: TransientRetry = { windows: platform.startsWith('win32'), ...(args.sleep === undefined ? {} : { sleep: args.sleep }) };
   if (!args.applyNow && !args.apply && !args.stage) {
     const cliVersion = packageVersion(), state = args.state ?? createReleaseState(root);
     let probe: AppUpdateCheck['probe'] = 'cached', probeError: string | null = null;
     try {
       const policy = probePolicy(await store.read(), args.probe);
-      if (args.force) {
-        const outcome = await maintainReleaseState({ state, running: cliVersion, launch: args.launch, now: args.now, runner, probe: policy, force: true });
-        probe = policy === 'nobody' ? 'skipped' : outcome === null ? 'cached' : outcome.ok ? 'ok' : 'failed';
-        probeError = outcome && !outcome.ok ? outcome.error : null;
-      } else {
+      // The launch check keeps the advertisement fresh by itself: it probes the release tags when the last attempt is a
+      // day old or missing (the `update` verb's cap) and serves the cache otherwise; --force probes regardless. Nothing
+      // else on the app's path reaches the release upstream since the fetch-only sync (§10), so without this the app
+      // could never learn that a newer version exists.
+      const outcome = await maintainReleaseState({ state, running: cliVersion, launch: args.launch, now: args.now, runner, probe: policy, force: args.force === true });
+      if (policy === 'nobody') probe = 'skipped';
+      else if (outcome === null) {
         const current = await state.read();
-        probe = policy === 'nobody' ? 'skipped' : current?.attempt?.ok === false ? 'failed' : 'cached';
+        probe = current?.attempt?.ok === false ? 'failed' : 'cached';
         probeError = current?.attempt?.ok === false ? current.attempt.error : null;
-      }
+      } else { probe = outcome.ok ? 'ok' : 'failed'; probeError = outcome.ok ? null : outcome.error; }
     } catch { probe = 'failed'; probeError = 'The release state could not be read.'; }
     const described = describeUpdate(await state.read().catch(() => null), cliVersion, (args.now ?? Date.now)());
     const installed: string[] = [], staged: string[] = [];
@@ -90,13 +93,7 @@ export async function run(args: AppUpdateArgs, io: Prompter): Promise<Result<App
   if (!args.applyNow && !args.apply) {
     try {
       await store.ensureRoot(); await mkdirPrivate(appRoot);
-      // A killed frame child cannot run its finally; old incomplete downloads are safe to discard.
-      for (const name of await readdir(appRoot).catch(() => [] as string[])) {
-        if (name.startsWith('.download-')) await (async () => {
-          const path = join(appRoot, name);
-          if ((await stat(path)).mtimeMs < (args.now ?? Date.now)() - 3_600_000) await rm(path, { recursive: true, force: true });
-        })().catch(() => undefined);
-      }
+      await sweepStaleDownloads(appRoot, args.now ?? Date.now);
       if (await exists(join(versionDir, 'installed.json')) || await exists(join(versionDir, 'staged.json'))) return success({ mode: 'stage', version, platform, staged: true, notPublished: false, alreadyStaged: true, asset, bytes: 0, path: versionDir });
       const staging = await mkdtemp(join(appRoot, '.download-'));
       const notPublished = () => {
@@ -128,9 +125,10 @@ export async function run(args: AppUpdateArgs, io: Prompter): Promise<Result<App
         }
         await rm(`${file}.sha256`, { force: true });
         await writeFile(join(staging, 'staged.json'), JSON.stringify({ schema: 1, version, platform, bundle, installer: bundle === null ? asset : null, stagedAt: new Date().toISOString() }, null, 2));
-        await rm(versionDir, { recursive: true, force: true }); await rename(staging, versionDir);
+        // Windows holds a just-written installer for a moment (a scanner, the indexer): the move is retried, and a failed move is reported as itself.
+        await removeRetrying(versionDir, retry); await moveRetrying(staging, versionDir, retry);
         return success({ mode: 'stage', version, platform, staged: true, notPublished: false, alreadyStaged: false, asset, bytes, path: versionDir });
-      } finally { await rm(staging, { recursive: true, force: true }); }
+      } finally { await removeStaging(staging, retry, io); }
     } catch (error) { return failure(`${message(error)} ${tail(args.form)}`); }
   }
   if (!(await exists(join(versionDir, 'staged.json')))) return rejected(`Nothing is staged for ${version}; download it first.`);
@@ -176,7 +174,8 @@ export async function run(args: AppUpdateArgs, io: Prompter): Promise<Result<App
     await mark('launched');
     const versions = (await versionDirectories(appRoot)).sort(newestFirst);
     const keep = new Set([...versions.slice(0, 2), version, packageVersion()]);
-    for (const name of versions) if (!keep.has(name)) await rm(join(appRoot, name), { recursive: true, force: true }).catch(() => undefined);
+    // A version directory that cannot be removed costs disk and nothing else; the next apply prunes again.
+    for (const name of versions) if (!keep.has(name)) await removeRetrying(join(appRoot, name), retry).catch(() => undefined);
     return success({ mode: 'apply-now', version, platform, phase: 'launched', error: null });
   } catch (error) {
     // Even a spawn or disk exception must leave an actionable marker when storage is writable.

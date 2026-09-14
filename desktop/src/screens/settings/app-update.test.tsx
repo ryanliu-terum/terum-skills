@@ -33,6 +33,8 @@ const cases:{name:string;patch:Partial<AppUpdateStatus>;desc:string;button?:stri
  {name:'apply failed',patch:{lastApply:{version:'0.1.12',phase:'failed',at:'2026-09-10T00:00:00Z',error:'boom'}},desc:'0.1.10 · installing 0.1.12 did not finish.',button:'Try again'},
  {name:'probe skipped',patch:{probe:'skipped',latest:null,newer:false},desc:'0.1.10 · release advertisements are not checked on this machine.'},
  {name:'probe failed',patch:{probe:'failed',newer:false},desc:'0.1.10 · could not reach github.com to check for a newer app.',button:'Check again'},
+ // An empty cache is not evidence of being up to date: nothing has been read from GitHub yet.
+ {name:'never probed',patch:{latest:null,latestAt:null,newer:false},desc:'0.1.10 · no release advertisement has been read on this machine yet.',button:'Check again'},
  {name:'up to date',patch:{newer:false},desc:'0.1.10 · up to date',ok:true},
  {name:'downloaded',patch:{staged:'0.1.12'},desc:'0.1.10 · 0.1.12 downloaded and verified.',button:'Install now'},
  {name:'newer available',patch:{},desc:'0.1.10 · 0.1.12 available.',button:'Download'},

@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import * as fs from 'node:fs/promises';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createConfigStore } from '../../lib/config.js';
 import { exists, writeJsonPrivate } from '../../lib/fs.js';
@@ -14,9 +14,11 @@ import { run, type AppUpdateArgs } from '../appUpdate.js';
 
 vi.mock('node:fs/promises', async importOriginal => {
   const original = await importOriginal<typeof import('node:fs/promises')>();
-  return { ...original, rm: vi.fn(original.rm) };
+  return { ...original, rename: vi.fn(original.rename), rm: vi.fn(original.rm) };
 });
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => { vi.restoreAllMocks(); vi.mocked(fs.rename).mockReset(); vi.mocked(fs.rm).mockReset(); });
+const real = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises');
+const held = () => Object.assign(new Error('EPERM: operation not permitted, rename'), { code: 'EPERM' });
 const ok: CommandResult = { code: 0, stdout: '', stderr: '' };
 const V = '0.1.12', ASSET = `${APP_SLUG}_${V}_aarch64.app.tar.gz`, WIN = `${APP_SLUG}_${V}_x64-setup.exe`;
 const mac = { platform: 'darwin' as const, arch: 'arm64' }, windows = { platform: 'win32' as const, arch: 'x64' };
@@ -67,7 +69,31 @@ describe('app-update', () => {
     await state.update(s => { s.advertisement = { version: V, at, source: 'git-tags' }; s.attempt = { at, ok: true, error: null }; });
     const before = await fs.readFile(join(h.root, 'run', 'latest-version.json'), 'utf8');
     const output = io(); expect(await run({ ...h.args, now: () => now }, output)).toMatchObject({ ok: true, value: { probe: 'cached', latest: V, latestAt: at } });
-    expect(h.runner.calls).toEqual([]); expect(output.lines).toEqual([]); expect(await fs.readFile(join(h.root, 'run', 'latest-version.json'), 'utf8')).toBe(before);
+    expect(h.runner.calls).toEqual([]); expect(output.lines).toEqual([]);
+    // Only the running observation may be recorded (as every sync did before the fetch-only collapse); the advertisement and the attempt are untouched.
+    const after = JSON.parse(await fs.readFile(join(h.root, 'run', 'latest-version.json'), 'utf8')), prior = JSON.parse(before);
+    expect(after.advertisement).toEqual(prior.advertisement); expect(after.attempt).toEqual(prior.attempt); expect(after.running).toMatchObject({ version: pkg.packageVersion() });
+  });
+  it('--check probes on its own when the advertisement is missing or a day old, then serves the cache for the rest of the day', async () => {
+    const h = await setup(); await githubTeam(h.config); let now = Date.parse('2026-09-13T08:00:00Z');
+    const call = vi.fn<Runner['run']>().mockResolvedValue({ ...ok, stdout: `${'a'.repeat(40)}\trefs/tags/v0.2.0\n` });
+    const args = { ...h.args, runner: { run: call }, now: () => now };
+    expect(await run(args, io())).toMatchObject({ ok: true, value: { probe: 'ok', latest: '0.2.0', probeError: null } }); expect(call).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(await fs.readFile(join(h.root, 'run', 'latest-version.json'), 'utf8')).advertisement).toMatchObject({ version: '0.2.0', source: 'git-tags' });
+    now += 3_600_000; expect(await run(args, io())).toMatchObject({ ok: true, value: { probe: 'cached', latest: '0.2.0' } }); expect(call).toHaveBeenCalledTimes(1);
+    now += 24 * 3_600_000; expect(await run(args, io())).toMatchObject({ ok: true, value: { probe: 'ok', latest: '0.2.0' } }); expect(call).toHaveBeenCalledTimes(2);
+  });
+  it('--check keeps reporting a failed probe for the day without retrying, and --force probes again at once', async () => {
+    const h = await setup(); await githubTeam(h.config); let now = Date.parse('2026-09-13T08:00:00Z');
+    const call = vi.fn<Runner['run']>().mockResolvedValueOnce({ ...ok, code: 1, stderr: 'fatal: unable to access github.com' }).mockResolvedValue({ ...ok, stdout: `${'a'.repeat(40)}\trefs/tags/v0.2.0\n` });
+    const args = { ...h.args, runner: { run: call }, now: () => now };
+    expect(await run(args, io())).toMatchObject({ ok: true, value: { probe: 'failed', latest: null, probeError: 'fatal: unable to access github.com' } });
+    now += 3_600_000; expect(await run(args, io())).toMatchObject({ ok: true, value: { probe: 'failed', latest: null, probeError: 'fatal: unable to access github.com' } }); expect(call).toHaveBeenCalledTimes(1);
+    expect(await run({ ...args, force: true }, io())).toMatchObject({ ok: true, value: { probe: 'ok', latest: '0.2.0', probeError: null } }); expect(call).toHaveBeenCalledTimes(2);
+  });
+  it('--check on a machine with no GitHub-hosted team never probes, forced or not', async () => {
+    const h = await setup(); const call = vi.fn<Runner['run']>();
+    expect(await run({ ...h.args, runner: { run: call } }, io())).toMatchObject({ ok: true, value: { probe: 'skipped', latest: null } }); expect(call).not.toHaveBeenCalled();
   });
   it('--check --force runs exactly one git ls-remote and reports the highest stable tag', async () => {
     const h = await setup(); await githubTeam(h.config); const call = vi.fn<Runner['run']>().mockResolvedValue({ ...ok, stdout: ['0.1.9','0.1.12','0.1.13-rc1','0.2.0'].map(v => `${'a'.repeat(40)}\trefs/tags/v${v}`).join('\n') });
@@ -157,6 +183,29 @@ describe('app-update', () => {
   });
   it('--apply with nothing staged fails and spawns nothing', async () => {
     const h = await setup(); expect(await run({...h.args,apply:true},io())).toMatchObject({ok:false,error:`Nothing is staged for ${V}; download it first.`}); expect(h.calls).toEqual([]);
+  });
+  it('--stage on Windows retries the move into place while the fresh download is still held (a scanner, the launcher), then reports it staged', async () => {
+    const h = await setup(); h.args.evidence = windows; const sleeps: number[] = []; let refusals = 0;
+    vi.mocked(fs.rename).mockImplementation(async (from, to) => { if (String(from).includes('.download-') && refusals++ < 3) throw held(); return real.rename(from, to); });
+    expect(await run({ ...h.args, stage: true, sleep: async ms => { sleeps.push(ms); } }, io())).toMatchObject({ ok: true, value: { mode: 'stage', staged: true, alreadyStaged: false, path: join(h.root, 'app', V) } });
+    expect(sleeps).toEqual([50, 100, 200]);
+    expect(await fs.readdir(join(h.root, 'app'))).toEqual([V]);
+    expect(await exists(join(h.root, 'app', V, 'staged.json'))).toBe(true); expect(await exists(join(h.root, 'app', V, WIN))).toBe(true);
+  });
+  it('--stage on macOS does not retry: a rename failure there is a real answer, reported once', async () => {
+    const h = await setup(); const sleeps: number[] = [];
+    vi.mocked(fs.rename).mockImplementation(async (from, to) => { if (String(from).includes('.download-')) throw held(); return real.rename(from, to); });
+    expect(await run({ ...h.args, stage: true, sleep: async ms => { sleeps.push(ms); } }, io())).toMatchObject({ ok: false, error: expect.stringContaining('EPERM: operation not permitted, rename') });
+    expect(sleeps).toEqual([]); expect(await fs.readdir(join(h.root, 'app'))).toEqual([]);
+  });
+  it('--stage reports the move failure itself, not the cleanup failure, when the download folder cannot be removed either', async () => {
+    const h = await setup(); h.args.evidence = windows; const output = io();
+    vi.mocked(fs.rename).mockImplementation(async (from, to) => { if (String(from).includes('.download-')) throw held(); return real.rename(from, to); });
+    // Only the folder itself is held (the checksum inside it is removed normally, as on a real box where the installer is what a scanner holds).
+    vi.mocked(fs.rm).mockImplementation(async (path, options) => { if (basename(String(path)).startsWith('.download-')) throw Object.assign(new Error('EBUSY: resource busy or locked, rmdir'), { code: 'EBUSY' }); return real.rm(path, options); });
+    expect(await run({ ...h.args, stage: true, sleep: async () => undefined }, output)).toMatchObject({ ok: false, error: expect.stringContaining('EPERM: operation not permitted, rename') });
+    const leftovers = (await fs.readdir(join(h.root, 'app'))).filter(name => name.startsWith('.download-')); expect(leftovers).toHaveLength(1);
+    expect(output.lines).toContain(`Could not remove the download folder ${join(h.root, 'app', leftovers[0]!)} (EBUSY: resource busy or locked, rmdir); it is removed on a later update check.`);
   });
   it('--apply-now on Windows waits for the pid, then runs the installer with /S /UPDATE /R', async () => {
     const h = await stageFixture(true), before=await fs.readFile(join(h.root,'run','app.json'),'utf8'), alive=vi.fn().mockReturnValueOnce(true).mockReturnValueOnce(true).mockReturnValue(false);
