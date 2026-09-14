@@ -109,6 +109,21 @@ describe('validate (§9)', () => {
     expect(await atCwd(fixture.root, () => run({ target: 'sample', config: store }, new ScriptedPrompter()))).toMatchObject({ ok: false, error: expect.stringContaining('HYG2') });
     expect(await atCwd(fixture.root, () => run({ target: 'missing', config: store }, new ScriptedPrompter()))).toMatchObject({ ok: false, error: 'skills/missing holds no v<N> folder.' });
   });
+
+  it('a bare validate checks the skill folder above cwd; a name resolves through the ladder after both lookups miss; --cwd is untouched', async () => {
+    const fixture = await bareTeam(); await pushFromSeed(fixture.seed, 'skills/sample/v1/SKILL.md', skill());
+    const store = createConfigStore(join(fixture.root, 'state')); const clone = await cloneWithIdentity(fixture.bare, store.teamClone('team'));
+    await store.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
+    const io = new ScriptedPrompter();
+    expect(await run({ workingDirectory: join(clone, 'skills', 'sample', 'v1'), config: store }, io)).toMatchObject({ ok: true, value: { name: 'sample', directory: join(clone, 'skills', 'sample', 'v1'), findings: 0 } });
+    expect(io.lines[0]).toBe('Resolved: sample from the working directory');
+    expect(await run({ workingDirectory: fixture.root, config: store }, new ScriptedPrompter())).toEqual({ ok: false, error: 'Name a skill; the working directory is not inside a library skill folder.' });
+    const ladder = new ScriptedPrompter();
+    expect(await run({ target: 'SAMP', config: store }, ladder)).toMatchObject({ ok: true, value: { name: 'sample', directory: join(clone, 'skills', 'sample', 'v1') } });
+    expect(ladder.lines[0]).toBe('Resolved: "SAMP" → sample (unique prefix)');
+    expect(await run({ target: 'zzz', config: store }, new ScriptedPrompter())).toEqual({ ok: false, error: 'skills/zzz holds no v<N> folder.' });
+    expect(await run({ target: 'SAMP', cwd: clone }, new ScriptedPrompter())).toEqual({ ok: false, error: 'skills/SAMP holds no v<N> folder.' });
+  });
 });
 
 it.each([false, true])('reports size warnings before errors and preserves exit semantics (cwd: %s)', async (cwd) => {

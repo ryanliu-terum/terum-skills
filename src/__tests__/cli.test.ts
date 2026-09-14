@@ -198,12 +198,14 @@ describe('CLI wiring (§3: commander wiring only)', () => {
     const calls: unknown[] = [];
     const program = buildProgram(async (invoke) => { await invoke(new ScriptedPrompter()); }, {
       login: async () => success({ gh: { installed: true, authenticated: true }, handle: 'me', updated: [], notice: null }), team: async () => success({ team: 't', remote: 'r' }),
-      validate: async (args) => { calls.push(args); return success({ name: args.target, findings: 0, warnings: 0, repairable: 0, repairs: [] }); },
+      validate: async (args) => { calls.push(args); return success({ name: args.target ?? 'sample', findings: 0, warnings: 0, repairable: 0, repairs: [], directory: '/skill' }); },
     });
     program.configureOutput({ writeErr: () => undefined, writeOut: () => undefined });
     await program.parseAsync(['validate', 'sample', '--team', 't'], { from: 'user' });
     await program.parseAsync(['validate', 'sample', '--cwd', '/checkout'], { from: 'user' });
-    expect(calls).toEqual([{ target: 'sample', team: 't' }, { target: 'sample', cwd: '/checkout' }]);
+    await program.parseAsync(['validate'], { from: 'user' });
+    expect(calls).toEqual([{ target: 'sample', workingDirectory: process.cwd(), team: 't' }, { target: 'sample', workingDirectory: process.cwd(), cwd: '/checkout' }, { workingDirectory: process.cwd() }]);
+    expect(Object.keys(calls[2] as object)).not.toContain('target');
     const validate = program.commands.find((command) => command.name() === 'validate');
     expect(validate?.description()).toContain('by name or its local source folder by path');
     expect(validate?.description()).toContain('requires a configured team');
@@ -212,6 +214,19 @@ describe('CLI wiring (§3: commander wiring only)', () => {
     validate?.configureOutput({ writeOut: (text) => { help += text; } });
     validate?.outputHelp();
     expect(help).toContain('Deterministic and offline');
+  });
+
+  it('wires eval-report with its skill and team selection', async () => {
+    const calls: unknown[] = [];
+    const program = buildProgram(async (invoke) => { await invoke(new ScriptedPrompter()); }, {
+      login: async () => success({ gh: { installed: true, authenticated: true }, handle: 'me', updated: [], notice: null }), team: async () => success({ team: 't', remote: 'r' }),
+      evalReport: async (args) => { calls.push(args); return success({ skill: { id: 'id', name: args.ref ?? 'sample' }, versions: { placed: null, teamCurrent: null, evaluated: null }, latest: null, latestState: 'none', fallbackFrom: null, history: [], localRuns: [] }); },
+    });
+    program.configureOutput({ writeErr: () => undefined, writeOut: () => undefined });
+    await program.parseAsync(['eval-report', 'sample', '--team', 't'], { from: 'user' });
+    await program.parseAsync(['eval-report'], { from: 'user' });
+    expect(calls).toEqual([{ ref: 'sample', cwd: process.cwd(), team: 't' }, { cwd: process.cwd() }]);
+    expect(Object.keys(calls[1] as object)).not.toContain('ref');
   });
 
   it('wires team project create with its optional remote and team selection', async () => {
