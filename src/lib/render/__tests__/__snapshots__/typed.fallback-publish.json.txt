@@ -1,0 +1,13 @@
+{
+  "verb": "publish",
+  "ok": true,
+  "exitCode": 0,
+  "value": {
+    "kind": "published",
+    "version": "v1"
+  },
+  "lines": [
+    "Published notes as Version 1.",
+    "Category: misc (fallback)."
+  ]
+}

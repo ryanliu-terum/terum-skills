@@ -1,0 +1,7 @@
+[1minstall[0m
+
+[31m✗ Install deploy-check to ~/.claude/skills? (not interactive) (declined)[0m
+
+--- stderr ---
+Install deploy-check to ~/.claude/skills? (not interactive)
+--- exit 1 ---

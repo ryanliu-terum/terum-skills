@@ -307,3 +307,68 @@ describe('search, eval-report, eval boards', () => {
     if (verbName === 'eval') expect(() => renderer.uncovered?.([], value)).not.toThrow();
   });
 });
+
+describe('validate, install, uninstall-skill, project boards and fallbacks', () => {
+  for (const backend of Object.keys(BACKENDS)) {
+    it(`typed.validate (${backend})`, async () => {
+      await expect(await typed('validate', ['validate', 'deploy-check'], backend, { ok: true, value: { name: 'deploy-check', findings: 0, warnings: 1, repairable: 0, directory: '/home/seed/.claude/skills/deploy-check' }, exitCode: 0 }, ['warning HYG6 SKILL.md: description is over 20,000 characters', 'deploy-check: hygiene passed (1 warning).'])).toMatchFileSnapshot(snapshot('typed.validate', backend));
+      await expect(await typed('validate', ['validate', 'notes'], backend, { ok: false, error: 'Hygiene failed for notes:\nHYG1 SKILL.md:2: description must be quoted\nHYG4 bin/run.sh: executable', value: { name: 'notes', findings: 2, warnings: 0, repairable: 1, directory: '/home/seed/.claude/skills/notes' }, exitCode: 1 }, ['HYG1 SKILL.md:2: description must be quoted', 'HYG4 bin/run.sh: executable'])).toMatchFileSnapshot(snapshot('typed.validate-fail', backend));
+    });
+    it(`typed.install and uninstall (${backend})`, async () => {
+      await expect(await typed('install', ['install', 'deploy-check'], backend, { ok: true, value: [{ id: DASHBOARD_IDS.deploy, team: 'acme', path: '/home/seed/.claude/skills/deploy-check', version: 'v2', profiled: false }], exitCode: 0 }, ['Your copy is kept at /home/seed/.claude/old-skills/deploy-check.'])).toMatchFileSnapshot(snapshot('typed.install', backend));
+      await expect(await typed('install', ['install', 'deploy-check'], backend, { ok: false, error: 'Install deploy-check to ~/.claude/skills? (not interactive)', cancelled: true, exitCode: 1 }, [])).toMatchFileSnapshot(snapshot('typed.install-declined', backend));
+      await expect(await typed('uninstall-skill', ['uninstall-skill', 'deploy-check'], backend, { ok: true, value: [{ id: DASHBOARD_IDS.deploy, team: 'acme', removed: 1 }], exitCode: 0 }, ['Your profile is unchanged.'])).toMatchFileSnapshot(snapshot('typed.uninstall-skill', backend));
+    });
+    it(`typed.project (${backend})`, async () => {
+      await expect(await typed('project list', ['project', 'list'], backend, { ok: true, value: { projects: [{ path: '/home/seed/work/terum', label: 'terum', rootState: 'scanned', skillFolders: 2 }, { path: '/home/seed/work/gone', label: 'gone', rootState: 'absent', skillFolders: 0 }] }, exitCode: 0 }, ['terum — /home/seed/work/terum; scanned; 2 skill folders', 'gone — /home/seed/work/gone; absent; 0 skill folders'])).toMatchFileSnapshot(snapshot('typed.project-list', backend));
+      await expect(await typed('project add', ['project', 'add', '/home/seed/work/terum'], backend, { ok: true, value: { path: '/home/seed/work/terum', label: 'terum', added: true }, exitCode: 0 }, ['Added /home/seed/work/terum to your library.'])).toMatchFileSnapshot(snapshot('typed.project-add', backend));
+      await expect(await typed('project remove', ['project', 'remove', '/home/seed/work/terum'], backend, { ok: true, value: { path: '/home/seed/work/terum', placementsRemaining: 1 }, exitCode: 0 }, ['Removed /home/seed/work/terum from your library.', '1 placements recorded under /home/seed/work/terum stay in the ledger; uninstall-skill removes them.'])).toMatchFileSnapshot(snapshot('typed.project-remove', backend));
+    });
+    it(`typed.fallback (${backend})`, async () => {
+      await expect(await typed('publish', ['publish', 'notes'], backend, { ok: true, value: { kind: 'published', version: 'v1' }, exitCode: 0 }, ['Published notes as Version 1.', 'Category: misc (fallback).'])).toMatchFileSnapshot(snapshot('typed.fallback-publish', backend));
+      await expect(await typed('prune', ['prune'], backend, { ok: false, error: 'Delete 2 quarantined items? (not interactive)', cancelled: true, exitCode: 1 }, ['quarantine/notes-2026-09-01'])).toMatchFileSnapshot(snapshot('typed.fallback-declined', backend));
+    });
+  }
+
+  it('validate shows only string repair plans as Will change (§5)', async () => {
+    const text = await typed('validate', ['validate', 'notes'], 'md', { ok: true, value: { name: 'notes', findings: 1, warnings: 0, repairable: 2, directory: '/home/seed/.claude/skills/notes', repairs: ['Quote the description.', null, 42, 'Remove the executable bit.'] }, exitCode: 0 }, []);
+    expect(text).toContain('### Will change');
+    expect(text).toContain('Quote the description.');
+    expect(text).toContain('Remove the executable bit.');
+    expect(text).not.toContain('42');
+  });
+
+  // Fix round 1, R4: an empty install/uninstall array is a legitimate value (InstalledResult[]/
+  // UninstalledResult[] both can be []), never a fallback — lock the headline and Next.
+  it('typed.install-empty', async () => {
+    const text = await typed('install', ['install', 'ghost'], 'md', { ok: true, value: [], exitCode: 0 }, []);
+    expect(text).toContain('**Nothing installed.**');
+    expect(text).toContain('/list-skills --local');
+    await expect(text).toMatchFileSnapshot(snapshot('typed.install-empty', 'md'));
+  });
+  it('typed.uninstall-empty', async () => {
+    const text = await typed('uninstall-skill', ['uninstall-skill', 'ghost'], 'md', { ok: true, value: [], exitCode: 0 }, []);
+    expect(text).toContain('**Nothing was placed on this machine.**');
+    await expect(text).toMatchFileSnapshot(snapshot('typed.uninstall-empty', 'md'));
+  });
+
+  // Fix round 1, R1: a value without findings/warnings/repairable is impossible today, but the
+  // renderer must still degrade to — rather than a false 0/No findings.
+  it('validate renders unknown counts as — with no headline, Fix, or Publish', async () => {
+    const text = await typed('validate', ['validate', 'tdd'], 'md', { ok: true, value: { name: 'tdd', directory: '/x' }, exitCode: 0 }, []);
+    expect(text).not.toMatch(/^\*\*/m);
+    expect(text).toContain('- **findings:** —');
+    expect(text).toContain('- **warnings:** —');
+    expect(text).toContain('- **repairable:** —');
+    expect(text).not.toContain('**Next:**');
+  });
+
+  // Fix round 1, R2: a warning-only success prints no HYG error lines to quote away — the warning
+  // stays a note (never in the error/failure block) and the pass line is covered, not duplicated.
+  it('validate keeps warnings as notes while the pass line stays covered', async () => {
+    const text = await typed('validate', ['validate', 'tdd'], 'md', { ok: true, value: { name: 'tdd', findings: 0, warnings: 1, repairable: 0, repairs: [], directory: '/x' }, exitCode: 0 }, ['warning HYG6 SKILL.md:3: description is long', 'tdd: hygiene passed (1 warning).']);
+    expect(text).toContain('- warning HYG6 SKILL.md:3: description is long');
+    expect(text).not.toContain('tdd: hygiene passed (1 warning).');
+    expect(text).toContain('/terum-skills publish tdd');
+  });
+});

@@ -1,0 +1,12 @@
+{
+  "verb": "install",
+  "ok": false,
+  "exitCode": 1,
+  "error": "Install deploy-check to ~/.claude/skills? (not interactive)",
+  "declined": true,
+  "lines": []
+}
+
+--- stderr ---
+Install deploy-check to ~/.claude/skills? (not interactive)
+--- exit 1 ---

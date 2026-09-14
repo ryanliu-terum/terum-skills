@@ -1,0 +1,4 @@
+## Install
+**Nothing installed.**
+
+**Next:** `/list-skills --local`

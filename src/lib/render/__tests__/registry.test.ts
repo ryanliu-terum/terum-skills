@@ -10,8 +10,17 @@ describe('registry (D5)', () => {
     expect([...RENDERED_VERBS, ...FALLBACK_VERBS].sort()).toEqual([...FRAME_VERBS].sort());
     expect(RENDERED_VERBS.filter((verb) => FALLBACK_VERBS.includes(verb))).toEqual([]);
   });
-  it('every registry key is a rendered verb (the registry fills in as renderers land)', () => {
-    for (const key of Object.keys(REGISTRY)) expect(RENDERED_VERBS).toContain(key);
+  it('every rendered verb has a renderer, and only those', () => {
+    expect(Object.keys(REGISTRY).sort()).toEqual([...RENDERED_VERBS].sort());
+  });
+  it('no renderer throws on a missing, null or wrongly-shaped value (§12)', () => {
+    const shapes: unknown[] = [undefined, null, {}, [], 'text', 42, { local: null, skills: null, selection: { kind: 'skill' } }, { selection: { kind: 'member' }, member: null }, { items: null }, { report: { aggregate: null } }, { teams: [{}], ledger: null }, { projects: [null] }, [{}], [null]];
+    for (const [verb, renderer] of Object.entries(REGISTRY)) for (const shape of shapes) {
+      const b = renderer.render(shape, CTX);
+      expect(typeof b.title, `${verb} on ${JSON.stringify(shape)}`).toBe('string');
+      expect(Array.isArray(b.sections) && Array.isArray(b.next) && Array.isArray(b.notes)).toBe(true);
+      if (renderer.uncovered) expect(renderer.uncovered(['a line'], shape)).toEqual(expect.any(Array));
+    }
   });
   it('renders an unregistered verb as a fenced block of its lines, with resolved lines and the failure attached', () => {
     const b = renderBoard({ verb: 'publish', ok: false, error: 'declined', cancelled: true, exitCode: 1 }, ['a', 'b'], ['Resolved: x from the working directory'], CTX);

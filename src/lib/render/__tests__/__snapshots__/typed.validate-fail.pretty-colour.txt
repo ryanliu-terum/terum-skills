@@ -1,0 +1,19 @@
+[1mValidate — notes[0m
+2 findings · 0 warnings · 1 repairable
+
+  folder:     ~/.claude/skills/notes
+  findings:   2
+  warnings:   0
+  repairable: 1
+
+[31m✗ Hygiene failed for notes: (partial result above)[0m
+[31m  HYG1 SKILL.md:2: description must be quoted[0m
+[31m  HYG4 bin/run.sh: executable[0m
+
+[1mNext:[0m [36m/terum-skills skill fix <HOME>/.claude/skills/notes[0m
+
+--- stderr ---
+Hygiene failed for notes:
+HYG1 SKILL.md:2: description must be quoted
+HYG4 bin/run.sh: executable
+--- exit 1 ---

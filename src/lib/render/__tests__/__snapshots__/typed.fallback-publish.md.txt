@@ -1,0 +1,6 @@
+## publish
+
+```
+Published notes as Version 1.
+Category: misc (fallback).
+```

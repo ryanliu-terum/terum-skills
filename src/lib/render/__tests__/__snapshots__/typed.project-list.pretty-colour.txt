@@ -1,0 +1,11 @@
+[1mLibrary projects[0m
+2 projects
+
+╭───────┬──────────────┬───────────┬───────────────╮
+│ [1mLabel[0m │ [1mPath        [0m │ [1mState    [0m │ [1mSkill folders[0m │
+├───────┼──────────────┼───────────┼───────────────┤
+│ terum │ ~/work/terum │ [32m✓ scanned[0m │             2 │
+│ gone  │ ~/work/gone  │ [31m✗ absent[0m  │             0 │
+╰───────┴──────────────┴───────────┴───────────────╯
+
+[1mNext:[0m [36m/terum-skills project add[0m · [36m/list-skills --local[0m

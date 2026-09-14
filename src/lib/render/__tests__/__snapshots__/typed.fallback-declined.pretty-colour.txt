@@ -1,0 +1,9 @@
+[1mprune[0m
+
+  quarantine/notes-2026-09-01
+
+[31m✗ Delete 2 quarantined items? (not interactive) (declined)[0m
+
+--- stderr ---
+Delete 2 quarantined items? (not interactive)
+--- exit 1 ---

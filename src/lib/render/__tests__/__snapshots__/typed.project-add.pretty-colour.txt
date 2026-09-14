@@ -1,0 +1,7 @@
+[1mProject added[0m
+Added <HOME>/work/terum to your library.
+
+  path:  ~/work/terum
+  label: terum
+
+[1mNext:[0m [36m/list-skills --local[0m
