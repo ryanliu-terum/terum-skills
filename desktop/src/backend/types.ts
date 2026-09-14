@@ -94,7 +94,14 @@ export interface ProjectAdded {path:string;label:string;added:boolean;reconcile?
 /** `project create`: the team project as team.json now holds it. A new project is always born with no skills. */
 export interface ProjectCreated {team:string;name:string;remotes:string[];skills:number}
 export interface ProjectRemoved {path:string;placementsRemaining:number}
-export interface Library {roots:Root[];scanned:string[]|null;skills:SkillCard[];overview:Design['LIBRARY_OVERVIEW'];title:string;root:Root;problems?:readonly {source:string;message:string}[]}
+/** The Library overview row's fourth tile counts skills never published to the team marketplace. It
+ *  stands where the design board draws Team installs, so the two extra strings are declared here
+ *  rather than in `src/fixtures/design.json`, which invariant 3 forbids hand-editing (`installs` /
+ *  `installs_note` / `zero.installs` therefore stay in the generated shape, now unread by the row).
+ *  `unpublished` is '—' when the driving CLI is too old to report publish state — an unknown, never
+ *  a zero. */
+export type LibraryOverview=Design['LIBRARY_OVERVIEW'] & {unpublished:string;unpublished_note:string;zero:Design['LIBRARY_OVERVIEW']['zero'] & {unpublished:string}};
+export interface Library {roots:Root[];scanned:string[]|null;skills:SkillCard[];overview:LibraryOverview;title:string;root:Root;problems?:readonly {source:string;message:string}[]}
 /** attention = failingEvals + updatesAvailable + notEvaluated; counts.Alerts = attention, counts.Updates = updatesAvailable. Absent CLI counters are omitted. */
 export type CloneState = {state:'absent'} | {state:'incomplete';reason:'not-a-repository'|'no-team-json'|'unverifiable';error?:string} | {state:'foreign'|'ok';origin:string};
 /** name comes from team.json via status; key is the config identifier. They may differ; there is no label. */

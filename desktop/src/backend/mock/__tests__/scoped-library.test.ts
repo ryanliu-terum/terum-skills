@@ -2,13 +2,16 @@ import { afterEach, expect, it } from 'vitest';
 import { createMockBackend } from '../index';
 import { design } from '../fixture';
 import { parseDesign } from '../../../fixtures/schema';
+import { overviewCopy } from '../../../lib/overview-copy';
 
 afterEach(()=>{location.hash='';});
 it.each(['Global','Terum','SSM','MRF'] as const)('serves the exact %s title and overview',async scope=>{
  const result=await createMockBackend().library({scope:scope==='Global'?{kind:'global'}:{kind:'checkout',root:'/Users/you/code/'+scope.toLowerCase()}});
  expect(result.ok).toBe(true);
  expect(result.value?.title).toBe(design.DERIVED.libraryTitles[scope]);
- expect(result.value?.overview).toEqual({...design.OVERVIEW_BY_SCOPE[scope],installs:'—'});
+ // The two Unpublished strings and its zero caption are app copy the generated fixture cannot carry.
+ expect(result.value?.overview).toEqual({...design.OVERVIEW_BY_SCOPE[scope],installs:'—',unpublished:result.value?.overview.unpublished,unpublished_note:result.value?.overview.unpublished_note,zero:{...design.OVERVIEW_BY_SCOPE[scope].zero,unpublished:overviewCopy.unpublished}});
+ expect(result.value?.overview.unpublished).toMatch(/^(\d+|—)$/);
  expect(result.value?.skills).toHaveLength(Number(design.COUNTS[scope]));
  expect(result.value?.title).toBe(`${result.value?.skills.length} skills`);
  const status=await createMockBackend().status();const root=status.value?.roots.find(root=>root.label===scope);
