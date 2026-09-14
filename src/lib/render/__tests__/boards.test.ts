@@ -2,6 +2,8 @@ import { utimes } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { run as ls } from '../../../commands/ls.js';
+import { run as search } from '../../../commands/search.js';
+import { run as evalReport } from '../../../commands/evalReport.js';
 import { run as status } from '../../../commands/status.js';
 import { createExecute } from '../../execute.js';
 import type { ResultOutcome } from '../../frames.js';
@@ -12,6 +14,9 @@ import type { RenderContext } from '../board.js';
 import type { RenderOptions } from '../options.js';
 import { createBoardSink } from '../sink.js';
 import { render as renderLs } from '../verbs/ls.js';
+import { renderer as searchRenderer } from '../verbs/search.js';
+import { renderer as evalReportRenderer } from '../verbs/eval-report.js';
+import { renderer as evalRenderer } from '../verbs/eval.js';
 import { escapeRegExp, receiptHeadline, receiptSections, versionText } from '../verbs/shared.js';
 
 /**
@@ -206,5 +211,99 @@ describe('status, update, sync boards', () => {
     const text = await typed('status', ['status'], 'md', { ok: true, value, exitCode: 0 }, lines);
     expect(text).toContain('**Notes**');
     expect(text).toContain('-   Restore it: npx -y terum-skills@latest team join https://github.com/acme/team');
+  });
+});
+
+describe('search, eval-report, eval boards', () => {
+  for (const backend of Object.keys(BACKENDS)) {
+    it(`team.search (${backend})`, async () => {
+      const f = await fixture();
+      await expect(await boardOf('search', ['search', 'deploy', '--category', 'ops'], backend, (io) => search({ term: 'deploy', category: 'ops', config: f.store, runner: f.runner, now: () => DASHBOARD_NOW }, io), f)).toMatchFileSnapshot(snapshot('team.search', backend));
+      await expect(await boardOf('search', ['search', 'zzz'], backend, (io) => search({ term: 'zzz', config: f.store, runner: f.runner, now: () => DASHBOARD_NOW }, io), f)).toMatchFileSnapshot(snapshot('team.search-none', backend));
+    });
+    it.each([['team.eval-report', 'deploy-check'], ['team.eval-report-fallback', 'tdd'], ['team.eval-report-invalid', 'diagnose']])('%s (' + backend + ')', async (name, ref) => {
+      const f = await fixture();
+      await expect(await boardOf('eval-report', ['eval-report', ref], backend, (io) => evalReport({ ref, config: f.store, runner: f.runner, home: f.home }, io), f)).toMatchFileSnapshot(snapshot(name, backend));
+    });
+    it(`typed.eval (${backend})`, async () => {
+      const receipt = dashboardReceipt({ skill_id: DASHBOARD_IDS.deploy, skill_name: 'deploy-check', version: null, run_id: '20260913T110000Z', content_digest: `sha256:${'a'.repeat(64)}`, w: 4, l: 2, t: 0, timestamp: '2026-09-13T11:00:00Z' });
+      const aggregate = { verdict: receipt.verdict, attribution: receipt.attribution, execution_status: receipt.execution_status, expected_rows: receipt.expected_rows, scored_rows: receipt.scored_rows, comparisons: receipt.comparisons, arm_scores: receipt.arm_scores, efficiency: receipt.efficiency, environment_skips: { audit: ['docker'] } };
+      const triggers = { kind: 'triggers', skill: 'deploy-check', rows: [{ prompt: 'ship it', expected: true, fired: false, selected: [], correct: false }], recall: 0.8, precision: 1, tp: 4, fn: 1, fp: 0, tn: 5 };
+      const lines = ['warning HYG6 SKILL.md: description is long', 'verdict: PASS', 'why: The candidate answered every case with the checklist; the baseline skipped the rollback step twice.', 'skipped (environment): audit — missing docker', 'candidate-vs-baseline: 4W 2L 0T', 'arm scores: candidate 0.80 · baseline 0.50', 'triggers: recall=0.80 precision=1.00 (tp=4 fn=1 fp=0 tn=5)', '  MISS: "ship it"', 'efficiency: candidate 6.5 turns · 30.0s · $0.40 | baseline 5.0 turns · 20.0s · $0.30', 'Published this receipt to acme for Version 2 of deploy-check.'];
+      const value = { team: 'acme', id: DASHBOARD_IDS.deploy, name: 'deploy-check', runDir: '/home/seed/.terum/skills/evals/local/aaaa/20260913T110000Z', ccVersion: '2.1.0', executionStatus: 'complete', receiptPath: '/home/seed/.terum/skills/evals/local/aaaa/20260913T110000Z/receipt.json', report: { aggregate, triggers }, publishedTo: 'v2' };
+      await expect(await typed('eval', ['eval', 'deploy-check'], backend, { ok: true, value, exitCode: 0 }, lines)).toMatchFileSnapshot(snapshot('typed.eval', backend));
+      await expect(await typed('eval', ['eval', 'deploy-check'], backend, { ok: true, value: { ...value, executionStatus: 'partial', publishedTo: undefined, shareHint: true, report: { aggregate: { ...aggregate, execution_status: 'partial', scored_rows: 4, expected_rows: 6 }, triggers: null } }, exitCode: 0 }, ['verdict: PASS [partial — 4/6 scored]', 'The eval is complete and saved locally, but publishing its receipt failed: origin refused the push'])).toMatchFileSnapshot(snapshot('typed.eval-partial', backend));
+      await expect(await typed('eval', ['eval', 'deploy-check'], backend, { ok: true, value: { alreadyEvaluated: true, team: 'acme', id: DASHBOARD_IDS.deploy, name: 'deploy-check', runDir: '', ccVersion: '2.1.0', executionStatus: 'complete' }, exitCode: 0 }, ['Already evaluated these exact bytes of deploy-check.'])).toMatchFileSnapshot(snapshot('typed.eval-already', backend));
+      const item = (skill: string, lastError?: string) => ({ skill, path: `/home/seed/.claude/skills/${skill}`, contentHash: `sha256:${'b'.repeat(64)}`, requestedAt: '2026-09-12T22:00:00Z', window: 'overnight', team: 'acme', ...(lastError === undefined ? {} : { lastError }) });
+      await expect(await typed('eval', ['eval', '--queue-list'], backend, { ok: true, value: { items: [item('tdd'), item('notes', 'not signed in')] }, exitCode: 0 }, [`acme/tdd@sha256:${'b'.repeat(64)} · overnight · 2026-09-12T22:00:00Z`, `acme/notes@sha256:${'b'.repeat(64)} · overnight · 2026-09-12T22:00:00Z · not signed in`])).toMatchFileSnapshot(snapshot('typed.eval-queue', backend));
+      await expect(await typed('eval', ['eval', '--drain'], backend, { ok: false, error: '1 queued evals failed; they remain queued.', value: { items: [item('notes', 'probe failed')], attempted: 2, completed: 1, failures: [{ item: item('notes'), error: 'probe failed' }], outcomes: [{ skill: 'tdd', team: 'acme', ok: true }, { skill: 'notes', team: 'acme', ok: false, error: 'probe failed' }] }, exitCode: 1 }, ['Evaluating 2 skills, 4 at a time…', '── tdd ──', 'verdict: PASS', '✓ tdd', '✗ notes: probe failed', 'Evaluated 1 of 2; 1 failed.'])).toMatchFileSnapshot(snapshot('typed.eval-drain', backend));
+    });
+  }
+
+  // Fix round 1, R1: Publish is gated off when the run's own verdict is FAIL — eval.ts advises evaluating a fix instead.
+  it('typed.eval-fail', async () => {
+    const receipt = dashboardReceipt({ skill_id: DASHBOARD_IDS.tdd, skill_name: 'tdd', version: null, run_id: '20260913T120000Z', content_digest: `sha256:${'c'.repeat(64)}`, w: 1, l: 4, t: 1, timestamp: '2026-09-13T12:00:00Z' });
+    const aggregate = { verdict: receipt.verdict, attribution: receipt.attribution, execution_status: receipt.execution_status, expected_rows: receipt.expected_rows, scored_rows: receipt.scored_rows, comparisons: receipt.comparisons, arm_scores: receipt.arm_scores, efficiency: receipt.efficiency, environment_skips: {} };
+    const value = { team: 'acme', id: DASHBOARD_IDS.tdd, name: 'tdd', runDir: '/home/seed/.terum/skills/evals/local/cccc/20260913T120000Z', ccVersion: '2.1.0', executionStatus: 'complete', receiptPath: '/home/seed/.terum/skills/evals/local/cccc/20260913T120000Z/receipt.json', report: { aggregate, triggers: null }, shareHint: true };
+    const lines = ['verdict: FAIL', "These bytes are not a published version, so nothing was shared. This run's verdict is FAIL: evaluate a fix rather than publishing these bytes — npx -y terum-skills@latest publish tdd asks before it publishes a failed verdict."];
+    const text = await typed('eval', ['eval', 'tdd'], 'md', { ok: true, value, exitCode: 0 }, lines);
+    const nextLine = text.split('\n').find((line) => line.startsWith('**Next:**'));
+    expect(nextLine).not.toContain('publish');
+    expect(text).toContain("This run's verdict is FAIL: evaluate a fix rather than publishing these bytes");
+    await expect(text).toMatchFileSnapshot(snapshot('typed.eval-fail', 'md'));
+  });
+
+  // Fix round 1, R2: an empty drain (nothing attempted, nothing to report) renders the list board, never "Evaluated 0 of 0".
+  it('typed.eval-drain-empty renders the list board, not a batch-of-zero sentence', async () => {
+    const value = { items: [], attempted: 0, completed: 0, failures: [], outcomes: [] };
+    const text = await typed('eval', ['eval', '--drain'], 'md', { ok: true, value, exitCode: 0 }, ['No queued evals.']);
+    expect(text).toContain('**No queued evals.**');
+    expect(text).not.toContain('Evaluated 0 of 0');
+    expect(text).not.toContain('**Next:**');
+  });
+
+  // Fix round 1, R4: the batch headline is the exact printed sentence (ok, not ok+failed).
+  it('typed.eval-many', async () => {
+    const value = { mode: 'ran', team: 'acme', skills: ['tdd', 'notes'], ok: 1, failed: 1, queued: [], stoppedAfter: 1 };
+    const lines = ['Evaluating 2 skills, 1 at a time…', '── tdd ──', 'verdict: PASS', '── notes ──', 'verdict: FAIL', 'Evaluated 1 of 2; 1 failed.'];
+    const text = await typed('eval', ['eval', 'tdd', 'notes'], 'md', { ok: false, error: '1 of 2 evals failed.', value, exitCode: 1 }, lines);
+    expect(text).toContain('**Evaluated 1 of 2; 1 failed.**');
+    expect(text).toContain('Stopped after 1 of 2: a declined "Continue?" queued the rest for later.');
+    expect(text).toContain('/eval-report tdd');
+    await expect(text).toMatchFileSnapshot(snapshot('typed.eval-many', 'md'));
+  });
+
+  it('typed.eval-queued-many', async () => {
+    const queuedItem = { skill: 'tdd', path: '/home/seed/.claude/skills/tdd', contentHash: `sha256:${'d'.repeat(64)}`, requestedAt: '2026-09-13T09:00:00Z', window: 'overnight', team: 'acme' };
+    const value = { mode: 'queued', team: 'acme', skills: ['tdd'], ok: 0, failed: 0, queued: [queuedItem] };
+    const lines = ['Queued 1 eval for overnight: the app runs them in parallel between 01:00 and 05:00 while it is open and idle. Run them now with `npx -y terum-skills@latest eval --drain`.'];
+    const text = await typed('eval', ['eval', 'tdd', '--window', 'overnight'], 'md', { ok: true, value, exitCode: 0 }, lines);
+    expect(text).toContain('**Queued 1 of 1; nothing was run.**');
+    expect(text).toContain('/eval --drain');
+    await expect(text).toMatchFileSnapshot(snapshot('typed.eval-queued-many', 'md'));
+  });
+
+  // Null safety: every renderer this task added must survive a missing/malformed limb without throwing.
+  const NULL_SAFETY_RENDERERS = [
+    ['search', searchRenderer],
+    ['eval-report', evalReportRenderer],
+    ['eval', evalRenderer],
+  ] as const;
+  const NULL_SAFETY_VALUES: { label: string; value: unknown }[] = [
+    { label: '{}', value: {} },
+    { label: 'null', value: null },
+    { label: '{ items: null }', value: { items: null } },
+    { label: "{ mode: 'ran' }", value: { mode: 'ran' } },
+    { label: '{ report: { aggregate: null } }', value: { report: { aggregate: null } } },
+    { label: '{ skill: null, history: null, localRuns: null }', value: { skill: null, history: null, localRuns: null } },
+    { label: '{ hits: null, teams: null }', value: { hits: null, teams: null } },
+  ];
+  it.each(
+    NULL_SAFETY_RENDERERS.flatMap(([verbName, renderer]) =>
+      NULL_SAFETY_VALUES.map(({ label, value }) => [verbName, label, renderer, value] as const),
+    ),
+  )('%s renderer stays null-safe for %s', (verbName, _label, renderer, value) => {
+    expect(() => renderer.render(value, RENDER_CTX)).not.toThrow();
+    if (verbName === 'eval') expect(() => renderer.uncovered?.([], value)).not.toThrow();
   });
 });

@@ -1,0 +1,48 @@
+Eval — deploy-check
+✓ PASS +33% · 4W 2L 0T (n=6) · p=0.031 · complete
+
+Why
+  The candidate answered every case with the checklist; the baseline skipped the rollback step twice.
+
+Skipped (environment)
+  audit — missing docker
+
+Comparisons
+╭───────────────────────┬───┬───┬───┬──────┬───────┬────────╮
+│ Comparison            │ W │ L │ T │ Lift │ p     │ Record │
+├───────────────────────┼───┼───┼───┼──────┼───────┼────────┤
+│ candidate-vs-baseline │ 4 │ 2 │ 0 │ +33% │ 0.031 │ WWWWLL │
+╰───────────────────────┴───┴───┴───┴──────┴───────┴────────╯
+
+Arm scores
+  candidate ████████░░ 0.80
+  baseline  █████░░░░░ 0.50
+
+Efficiency
+╭───────────┬───────┬───────┬───────╮
+│ Arm       │ Turns │ Time  │ Cost  │
+├───────────┼───────┼───────┼───────┤
+│ candidate │ 6.5   │ 30.0s │ $0.40 │
+│ baseline  │ 5.0   │ 20.0s │ $0.30 │
+╰───────────┴───────┴───────┴───────╯
+
+Cost, over the costlier arm
+  candidate ██████████ $0.40
+  baseline  ███████░░░ $0.30
+
+Triggers
+  recall 0.80 · precision 1.00 (tp 4 fn 1 fp 0 tn 5)
+  MISS: "ship it"
+
+Run
+  run dir:      ~/.terum/skills/evals/local/aaaa/20260913T110000Z
+  receipt:      ~/.terum/skills/evals/local/aaaa/20260913T110000Z/receipt.json
+  claude code:  2.1.0
+  execution:    ✓ complete
+  team:         acme
+  published to: acme (Version 2)
+
+Notes
+  • warning HYG6 SKILL.md: description is long
+
+Next: /eval-report deploy-check

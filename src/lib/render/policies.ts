@@ -34,8 +34,8 @@ export function liftText(lift: number | null): string {
 export const HEADLINE_COMPARISON = 'candidate-vs-baseline';
 
 export interface ComparisonLike { win: number; loss: number; tie: number; net_lift?: number; sign_p?: number }
-export interface ReceiptLike { verdict: Verdict; execution_status: 'complete' | 'partial' | 'failed'; expected_rows: number; scored_rows: number; comparisons: Record<string, ComparisonLike> }
-export interface ReceiptSummary { verdict: Verdict; w: number; l: number; t: number; n: number; lift: number | null; partial: [number, number] | null; signP: string | null }
+export interface ReceiptLike { verdict: Verdict; execution_status: 'complete' | 'partial' | 'failed'; expected_rows: number | null; scored_rows: number | null; comparisons: Record<string, ComparisonLike> }
+export interface ReceiptSummary { verdict: Verdict; w: number; l: number; t: number; n: number; lift: number | null; partial: { scored: number | null; expected: number | null } | null; signP: string | null }
 
 /** One receipt's headline numbers — never combined across receipts (eval-engine spec §12). */
 export function summariseReceipt(receipt: ReceiptLike | null | undefined): ReceiptSummary | null {
@@ -45,7 +45,8 @@ export function summariseReceipt(receipt: ReceiptLike | null | undefined): Recei
   return {
     verdict: receipt.verdict, w, l, t, n: w + l + t,
     lift: comparison ? liftPercent(w, l, t) : null,
-    partial: receipt.execution_status === 'partial' ? [receipt.scored_rows, receipt.expected_rows] : null,
+    // R6: a row may know it is partial without knowing its counts — nulls stay nulls, never coerced to 0.
+    partial: receipt.execution_status === 'partial' ? { scored: receipt.scored_rows, expected: receipt.expected_rows } : null,
     signP: comparison && typeof comparison.sign_p === 'number' ? comparison.sign_p.toFixed(3) : null,
   };
 }

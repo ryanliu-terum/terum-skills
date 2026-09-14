@@ -11,7 +11,9 @@ describe('board model constructors are null-safe', () => {
     expect(bar(1.7, 'x')).toEqual({ kind: 'bar', fraction: 1, label: 'x' }); expect(bar(null, null)).toEqual({ kind: 'bar', fraction: null, label: '' });
     expect(status('ok', null)).toEqual({ kind: 'status', tone: 'ok', text: '—' });
     expect(verdict({ verdict: 'bogus' })).toEqual({ kind: 'verdict', verdict: null, lift: null, partial: null, stale: false, from: null, invalid: false });
-    expect(verdict({ verdict: 'PASS', lift: 33, partial: [4, 6], stale: true, from: 'v2', invalid: false })).toEqual({ kind: 'verdict', verdict: 'PASS', lift: 33, partial: [4, 6], stale: true, from: 'v2', invalid: false });
+    expect(verdict({ verdict: 'PASS', lift: 33, partial: { scored: 4, expected: 6 }, stale: true, from: 'v2', invalid: false })).toEqual({ kind: 'verdict', verdict: 'PASS', lift: 33, partial: { scored: 4, expected: 6 }, stale: true, from: 'v2', invalid: false });
+    // R6: a partial cell may know it is partial without knowing its counts — both stay null, not 0.
+    expect(verdict({ verdict: 'PASS', lift: 33, partial: { scored: null, expected: null } })).toEqual({ kind: 'verdict', verdict: 'PASS', lift: 33, partial: { scored: null, expected: null }, stale: false, from: null, invalid: false });
   });
   it('builds a board with empty lists and a table with a capped row set', () => {
     expect(board('T')).toEqual({ title: 'T', resolved: [], sections: [], notes: [], next: [] });

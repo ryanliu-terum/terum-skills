@@ -1,0 +1,47 @@
+## Eval — tdd
+**✗ FAIL −50% · 1W 4L 1T (n=6) · p=0.031 · complete**
+
+### Why
+
+The candidate answered every case with the checklist; the baseline skipped the rollback step twice.
+
+### Comparisons
+
+| Comparison | W | L | T | Lift | p | Record |
+|---|---:|---:|---:|---|---|---|
+| candidate-vs-baseline | 1 | 4 | 1 | −50% | 0.031 | `WLLLLT` |
+
+### Arm scores
+
+| Label | Bar |
+|---|---|
+| candidate | ████████░░ 0.80 |
+| baseline | █████░░░░░ 0.50 |
+
+### Efficiency
+
+| Arm | Turns | Time | Cost |
+|---|---:|---|---|
+| candidate | 6.5 | 30.0s | $0.40 |
+| baseline | 5.0 | 20.0s | $0.30 |
+
+### Cost, over the costlier arm
+
+| Label | Bar |
+|---|---|
+| candidate | ██████████ $0.40 |
+| baseline | ███████░░░ $0.30 |
+
+### Run
+
+- **run dir:** `~/.terum/skills/evals/local/cccc/20260913T120000Z`
+- **receipt:** `~/.terum/skills/evals/local/cccc/20260913T120000Z/receipt.json`
+- **claude code:** 2.1.0
+- **execution:** ✓ complete
+- **team:** acme
+- **published to:** —
+
+**Notes**
+- These bytes are not a published version, so nothing was shared. This run's verdict is FAIL: evaluate a fix rather than publishing these bytes — npx -y terum-skills@latest publish tdd asks before it publishes a failed verdict.
+
+**Next:** `/eval-report tdd`

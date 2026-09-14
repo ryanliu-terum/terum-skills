@@ -27,8 +27,10 @@ describe('policies (§5) — the desktop\'s semantics', () => {
 
   it('summarises one receipt from its candidate-vs-baseline comparison and keeps its own sign p', () => {
     const receipt = { verdict: 'PASS' as const, execution_status: 'partial' as const, expected_rows: 6, scored_rows: 4, comparisons: { 'candidate-vs-baseline': { win: 3, loss: 1, tie: 0, net_lift: 0.5, sign_p: 0.03125 }, 'candidate-vs-incumbent': { win: 1, loss: 1, tie: 2, net_lift: 0, sign_p: 1 } } };
-    expect(summariseReceipt(receipt)).toEqual({ verdict: 'PASS', w: 3, l: 1, t: 0, n: 4, lift: 50, partial: [4, 6], signP: '0.031' });
-    expect(summariseReceipt({ ...receipt, comparisons: {} })).toEqual({ verdict: 'PASS', w: 0, l: 0, t: 0, n: 0, lift: null, partial: [4, 6], signP: null });
+    expect(summariseReceipt(receipt)).toEqual({ verdict: 'PASS', w: 3, l: 1, t: 0, n: 4, lift: 50, partial: { scored: 4, expected: 6 }, signP: '0.031' });
+    expect(summariseReceipt({ ...receipt, comparisons: {} })).toEqual({ verdict: 'PASS', w: 0, l: 0, t: 0, n: 0, lift: null, partial: { scored: 4, expected: 6 }, signP: null });
+    // R6: a partial row may carry no counts at all — the summary still knows it is partial, but both counts stay null.
+    expect(summariseReceipt({ ...receipt, expected_rows: null, scored_rows: null })).toEqual({ verdict: 'PASS', w: 3, l: 1, t: 0, n: 4, lift: 50, partial: { scored: null, expected: null }, signP: '0.031' });
     expect(summariseReceipt(null)).toBeNull();
     expect(stripText(4, 2, 0)).toBe('WWWWLL');
   });

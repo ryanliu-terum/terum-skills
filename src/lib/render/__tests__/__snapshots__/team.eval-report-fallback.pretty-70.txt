@@ -1,0 +1,53 @@
+Eval report — tdd
+✓ PASS +67% · 5W 1L 0T (n=6) · p=0.031 · complete · sonnet k=1 · @seed · 11d ago
+
+  placed:       Version 1
+  team current: Version 2
+  evaluated:    Version 1
+  id:           22222222-2222-4222-8222-222222222222
+
+Comparisons
+╭───────────────────────┬───┬───┬───┬──────┬───────┬────────╮
+│ Comparison            │ W │ L │ T │ Lift │ p     │ Record │
+├───────────────────────┼───┼───┼───┼──────┼───────┼────────┤
+│ candidate-vs-baseline │ 5 │ 1 │ 0 │ +67% │ 0.031 │ WWWWWL │
+╰───────────────────────┴───┴───┴───┴──────┴───────┴────────╯
+
+Arm scores
+  candidate ████████░░ 0.80
+  baseline  █████░░░░░ 0.50
+
+Efficiency
+╭───────────┬───────┬───────┬───────╮
+│ Arm       │ Turns │ Time  │ Cost  │
+├───────────┼───────┼───────┼───────┤
+│ candidate │ 6.5   │ 30.0s │ $0.40 │
+│ baseline  │ 5.0   │ 20.0s │ $0.30 │
+╰───────────┴───────┴───────┴───────╯
+
+Cost, over the costlier arm
+  candidate ██████████ $0.40
+  baseline  ███████░░░ $0.30
+
+Provenance
+  model:       sonnet
+  judge:       opus
+  k:           1
+  cases:       6
+  engine:      0.16.0 (abc1234)
+  claude code: 2.1.0
+  runner:      @seed
+  when:        11d ago
+
+History
+╭───────────┬──────────────────┬──────────┬──────┬───────┬────────╮
+│ Version   │ Run              │ Verdict  │ Lift │ W/L/T │ Model  │
+├───────────┼──────────────────┼──────────┼──────┼───────┼────────┤
+│ Version 1 │ 20260902T100000Z │ ✓ PASS — │ +67% │ 5/1/0 │ sonnet │
+╰───────────┴──────────────────┴──────────┴──────┴───────┴────────╯
+(columns not shown at this width: Runner, When)
+
+Notes
+  • The receipt shown comes from Version 1; the current version has none.
+
+Next: /eval tdd --k 3 · /terum-skills publish tdd

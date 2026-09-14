@@ -198,7 +198,7 @@ function marketplace(value: Record<string, unknown>, ctx: RenderContext): Board 
       remotes: text(asArray(p['remotes']).join(', ') || null),
     })), { title: 'Projects', cap: ctx.rows }));
   }
-  const top = [...skills].sort((a, c) => (num(c.installs) ?? 0) - (num(a.installs) ?? 0) || a.name.localeCompare(c.name))[0];
+  const top = [...skills].sort((a, c) => (num(c.installs) ?? 0) - (num(a.installs) ?? 0) || compareText(a.name, c.name))[0];
   if (top) b.next.push(nextSkillInfo(top.name));
   const unevaluated = skills.find((s) => s.receipt === null || s.receipt === undefined);
   if (unevaluated) b.next.push(nextEval(unevaluated.name));

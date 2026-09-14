@@ -15,6 +15,11 @@ const receiptCount = (value: unknown): number => {
   const n = num(value);
   return n !== null && Number.isSafeInteger(n) && n >= 0 ? n : 0;
 };
+/** Unlike receiptCount, a missing or malformed row count stays null (not 0) — R6: a partial cell must render — / —, never a false 0/0. */
+const receiptCountOrNull = (value: unknown): number | null => {
+  const n = num(value);
+  return n !== null && Number.isSafeInteger(n) && n >= 0 ? n : null;
+};
 
 function receiptLike(value: unknown): ReceiptLike | null {
   const r = asRecord(value);
@@ -32,7 +37,7 @@ function receiptLike(value: unknown): ReceiptLike | null {
       ...(signP === null ? {} : { sign_p: signP }),
     };
   }
-  return { verdict: verdictValue, execution_status: status === 'partial' || status === 'failed' ? status : 'complete', expected_rows: receiptCount(r['expected_rows']), scored_rows: receiptCount(r['scored_rows']), comparisons };
+  return { verdict: verdictValue, execution_status: status === 'partial' || status === 'failed' ? status : 'complete', expected_rows: receiptCountOrNull(r['expected_rows']), scored_rows: receiptCountOrNull(r['scored_rows']), comparisons };
 }
 
 export function receiptVerdict(receipt: unknown, extra: { stale?: boolean; from?: string | null; invalid?: boolean } = {}): Cell {
@@ -49,7 +54,8 @@ export function receiptHeadline(receipt: unknown, ctx: RenderContext): string {
   const glyph = summary.verdict === 'PASS' ? '✓' : summary.verdict === 'FAIL' ? '✗' : '●';
   const parts = [`${glyph} ${summary.verdict} ${liftText(summary.lift)}`, `${summary.w}W ${summary.l}L ${summary.t}T (n=${summary.n})`];
   if (summary.signP !== null) parts.push(`p=${summary.signP}`);
-  parts.push(summary.partial ? `partial ${summary.partial[0]}/${summary.partial[1]}` : str(r['execution_status']) ?? 'complete');
+  // R6: same "partial X/Y" wording as today when both counts exist; an absent count renders — rather than a false 0.
+  parts.push(summary.partial ? `partial ${summary.partial.scored ?? '—'}/${summary.partial.expected ?? '—'}` : str(r['execution_status']) ?? 'complete');
   const model = str(provenance['model']); const k = num(provenance['k']);
   if (model !== null) parts.push(k === null ? model : `${model} k=${k}`);
   const runner = str(provenance['runner_handle']); if (runner !== null) parts.push(`@${runner}`);
@@ -131,6 +137,7 @@ export function skillsTable(rows: readonly SkillRowInput[], ctx: RenderContext, 
 export const nextSkillInfo = (name: string): NextItem => ({ label: 'Details', skill: 'skill-info', verb: 'ls skill', args: [name] });
 export const nextEval = (name: string, ...flags: string[]): NextItem => ({ label: 'Evaluate', skill: 'eval', verb: 'eval', args: [name, ...flags] });
 export const nextEvalReport = (name: string): NextItem => ({ label: 'Eval report', skill: 'eval-report', verb: 'eval-report', args: [name] });
+export function nextDrain(label = 'Drain'): NextItem { return { label, skill: 'eval', verb: 'eval', args: ['--drain'] }; }
 export const nextInstall = (...args: string[]): NextItem => ({ label: 'Install', verb: 'install', args });
 export const nextListSkills = (local = false): NextItem => ({ label: local ? 'Library' : 'Marketplace', skill: 'list-skills', verb: 'ls', args: local ? ['--local'] : [] });
 export const nextSearch = (term: string): NextItem => ({ label: 'Search', skill: 'search-skills', verb: 'search', args: [term] });

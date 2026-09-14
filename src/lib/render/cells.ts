@@ -27,7 +27,7 @@ export function renderCell(cell: Cell, ctx: RenderContext): RenderedCell {
       if (cell.invalid) return { text: '⚠ invalid receipt', tone: 'warn', align: 'left' };
       if (cell.verdict === null) return cell.stale ? { text: '⚠ stale — edited since the eval', tone: 'warn', align: 'left' } : { text: '— not evaluated', tone: 'muted', align: 'left' };
       let text = `${VERDICT_GLYPH[cell.verdict]} ${cell.verdict} ${liftText(cell.lift)}`;
-      if (cell.partial) text += ` (${cell.partial[0]}/${cell.partial[1]} scored)`;
+      if (cell.partial) text += ` (${cell.partial.scored ?? '—'}/${cell.partial.expected ?? '—'} scored)`;
       if (cell.stale) text += ' ⚠ stale';
       if (cell.from !== null) text += ` (${cell.from})`;
       return { text, tone: cell.partial ? 'muted' : VERDICT_TONE[cell.verdict], align: 'left' };

@@ -1,0 +1,44 @@
+[1mEval — deploy-check[0m
+✓ PASS +33% · 4W 2L 0T (n=6) · p=0.031 · partial 4/6
+
+[1mWhy[0m
+  The candidate answered every case with the checklist; the baseline skipped the rollback step twice.
+
+[1mSkipped (environment)[0m
+  audit — missing docker
+
+[1mComparisons[0m
+╭───────────────────────┬───┬───┬───┬──────┬───────┬────────╮
+│ [1mComparison           [0m │ [1mW[0m │ [1mL[0m │ [1mT[0m │ [1mLift[0m │ [1mp    [0m │ [1mRecord[0m │
+├───────────────────────┼───┼───┼───┼──────┼───────┼────────┤
+│ candidate-vs-baseline │ 4 │ 2 │ 0 │ +33% │ 0.031 │ [32mW[0m[32mW[0m[32mW[0m[32mW[0m[31mL[0m[31mL[0m │
+╰───────────────────────┴───┴───┴───┴──────┴───────┴────────╯
+
+[1mArm scores[0m
+  candidate ████████░░ 0.80
+  baseline  █████░░░░░ 0.50
+
+[1mEfficiency[0m
+╭───────────┬───────┬───────┬───────╮
+│ [1mArm      [0m │ [1mTurns[0m │ [1mTime [0m │ [1mCost [0m │
+├───────────┼───────┼───────┼───────┤
+│ candidate │ 6.5   │ 30.0s │ $0.40 │
+│ baseline  │ 5.0   │ 20.0s │ $0.30 │
+╰───────────┴───────┴───────┴───────╯
+
+[1mCost, over the costlier arm[0m
+  candidate ██████████ $0.40
+  baseline  ███████░░░ $0.30
+
+[1mRun[0m
+  run dir:      ~/.terum/skills/evals/local/aaaa/20260913T110000Z
+  receipt:      ~/.terum/skills/evals/local/aaaa/20260913T110000Z/receipt.json
+  claude code:  2.1.0
+  execution:    [33m⚠ partial[0m
+  team:         acme
+  published to: —
+
+[1mNotes[0m
+  • The eval is complete and saved locally, but publishing its receipt failed: origin refused the push
+
+[1mNext:[0m [36m/terum-skills publish deploy-check[0m · [36m/eval-report deploy-check[0m

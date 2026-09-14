@@ -1,0 +1,64 @@
+## Eval report — deploy-check
+**● NEUTRAL ±0% · 2W 2L 2T (n=6) · p=0.031 · partial 6/8 · sonnet k=1 · @seed · 8d ago**
+
+- **placed:** Version 1
+- **team current:** Version 2
+- **evaluated:** Version 2
+- **id:** 11111111-1111-4111-8111-111111111111
+
+### Comparisons
+
+| Comparison | W | L | T | Lift | p | Record |
+|---|---:|---:|---:|---|---|---|
+| candidate-vs-baseline | 2 | 2 | 2 | ±0% | 0.031 | `WWLLTT` |
+
+### Arm scores
+
+| Label | Bar |
+|---|---|
+| candidate | ████████░░ 0.80 |
+| baseline | █████░░░░░ 0.50 |
+
+### Efficiency
+
+| Arm | Turns | Time | Cost |
+|---|---:|---|---|
+| candidate | 6.5 | 30.0s | $0.40 |
+| baseline | 5.0 | 20.0s | $0.30 |
+
+### Cost, over the costlier arm
+
+| Label | Bar |
+|---|---|
+| candidate | ██████████ $0.40 |
+| baseline | ███████░░░ $0.30 |
+
+### Triggers
+
+recall 0.80 · precision 1.00 (tp 4 fn 1 fp 0 tn 5)
+
+### Provenance
+
+- **model:** sonnet
+- **judge:** opus
+- **k:** 1
+- **cases:** 6
+- **engine:** 0.16.0 (abc1234)
+- **claude code:** 2.1.0
+- **runner:** @seed
+- **when:** 8d ago
+
+### History
+
+| Version | Run | Verdict | Lift | W/L/T | Model | Runner | When |
+|---|---|---|---|---|---|---|---|
+| Version 2 | 20260905T100000Z | ● NEUTRAL — (—/— scored) | ±0% | 2/2/2 | sonnet | @seed | 8d ago |
+| Version 1 | 20260901T100000Z | ✓ PASS — | +33% | 4/2/0 | sonnet | @mira | 12d ago |
+
+### Local runs
+
+| Run | Status | Committed | Verdict | Run dir |
+|---|---|---|---|---|
+| 20260912T100000Z | ✓ complete | no | ✗ FAIL −50% | `<ROOT>/state/evals/local/c321de0607c98eff4e7514f7cd5b0a797d324bbe937cf52cec527d5fb0d63899/20260912T100000Z` |
+
+**Next:** `/eval deploy-check --k 3` · `/terum-skills publish deploy-check`

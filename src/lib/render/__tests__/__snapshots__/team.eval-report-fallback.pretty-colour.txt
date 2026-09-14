@@ -1,0 +1,52 @@
+[1mEval report — tdd[0m
+✓ PASS +67% · 5W 1L 0T (n=6) · p=0.031 · complete · sonnet k=1 · @seed · 11d ago
+
+  placed:       Version 1
+  team current: Version 2
+  evaluated:    Version 1
+  id:           22222222-2222-4222-8222-222222222222
+
+[1mComparisons[0m
+╭───────────────────────┬───┬───┬───┬──────┬───────┬────────╮
+│ [1mComparison           [0m │ [1mW[0m │ [1mL[0m │ [1mT[0m │ [1mLift[0m │ [1mp    [0m │ [1mRecord[0m │
+├───────────────────────┼───┼───┼───┼──────┼───────┼────────┤
+│ candidate-vs-baseline │ 5 │ 1 │ 0 │ +67% │ 0.031 │ [32mW[0m[32mW[0m[32mW[0m[32mW[0m[32mW[0m[31mL[0m │
+╰───────────────────────┴───┴───┴───┴──────┴───────┴────────╯
+
+[1mArm scores[0m
+  candidate ████████░░ 0.80
+  baseline  █████░░░░░ 0.50
+
+[1mEfficiency[0m
+╭───────────┬───────┬───────┬───────╮
+│ [1mArm      [0m │ [1mTurns[0m │ [1mTime [0m │ [1mCost [0m │
+├───────────┼───────┼───────┼───────┤
+│ candidate │ 6.5   │ 30.0s │ $0.40 │
+│ baseline  │ 5.0   │ 20.0s │ $0.30 │
+╰───────────┴───────┴───────┴───────╯
+
+[1mCost, over the costlier arm[0m
+  candidate ██████████ $0.40
+  baseline  ███████░░░ $0.30
+
+[1mProvenance[0m
+  model:       sonnet
+  judge:       opus
+  k:           1
+  cases:       6
+  engine:      0.16.0 (abc1234)
+  claude code: 2.1.0
+  runner:      @seed
+  when:        11d ago
+
+[1mHistory[0m
+╭───────────┬──────────────────┬──────────┬──────┬───────┬────────┬────────┬─────────╮
+│ [1mVersion  [0m │ [1mRun             [0m │ [1mVerdict [0m │ [1mLift[0m │ [1mW/L/T[0m │ [1mModel [0m │ [1mRunner[0m │ [1mWhen   [0m │
+├───────────┼──────────────────┼──────────┼──────┼───────┼────────┼────────┼─────────┤
+│ Version 1 │ 20260902T100000Z │ [32m✓ PASS —[0m │ +67% │ 5/1/0 │ sonnet │ @seed  │ 11d ago │
+╰───────────┴──────────────────┴──────────┴──────┴───────┴────────┴────────┴─────────╯
+
+[1mNotes[0m
+  • The receipt shown comes from Version 1; the current version has none.
+
+[1mNext:[0m [36m/eval tdd --k 3[0m · [36m/terum-skills publish tdd[0m

@@ -12,7 +12,7 @@ export type Tone = 'ok' | 'warn' | 'bad' | 'muted' | 'info' | 'pending';
 export type Cell =
   | { kind: 'text'; text: string }
   | { kind: 'count'; n: number | null }
-  | { kind: 'verdict'; verdict: Verdict | null; lift: number | null; partial: [number, number] | null; stale: boolean; from: string | null; invalid: boolean }
+  | { kind: 'verdict'; verdict: Verdict | null; lift: number | null; partial: { scored: number | null; expected: number | null } | null; stale: boolean; from: string | null; invalid: boolean }
   | { kind: 'status'; tone: Tone; text: string }
   | { kind: 'date'; iso: string | null }
   | { kind: 'path'; path: string }
@@ -59,7 +59,7 @@ export function bar(fraction: unknown, label: unknown): Cell {
   const clamped = typeof fraction === 'number' && Number.isFinite(fraction) ? Math.min(1, Math.max(0, fraction)) : null;
   return { kind: 'bar', fraction: clamped, label: empty(label) ? '' : String(label) };
 }
-export function verdict(input: { verdict?: unknown; lift?: number | null; partial?: [number, number] | null; stale?: boolean; from?: string | null; invalid?: boolean }): Cell {
+export function verdict(input: { verdict?: unknown; lift?: number | null; partial?: { scored: number | null; expected: number | null } | null; stale?: boolean; from?: string | null; invalid?: boolean }): Cell {
   const banded = input.verdict === 'PASS' || input.verdict === 'NEUTRAL' || input.verdict === 'FAIL' ? input.verdict : null;
   return { kind: 'verdict', verdict: banded, lift: input.lift ?? null, partial: input.partial ?? null, stale: input.stale === true, from: input.from ?? null, invalid: input.invalid === true };
 }

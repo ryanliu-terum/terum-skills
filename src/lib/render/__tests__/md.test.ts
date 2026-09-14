@@ -11,7 +11,9 @@ describe('cells', () => {
     expect(renderCell(count(null), ctx)).toEqual({ text: '—', align: 'right' });
     expect(renderCell(count(12), ctx)).toEqual({ text: '12', align: 'right' });
     expect(renderCell(verdict({ verdict: 'PASS', lift: 33 }), ctx)).toEqual({ text: '✓ PASS +33%', tone: 'ok', align: 'left' });
-    expect(renderCell(verdict({ verdict: 'NEUTRAL', lift: 0, partial: [4, 6] }), ctx)).toEqual({ text: '● NEUTRAL ±0% (4/6 scored)', tone: 'muted', align: 'left' });
+    expect(renderCell(verdict({ verdict: 'NEUTRAL', lift: 0, partial: { scored: 4, expected: 6 } }), ctx)).toEqual({ text: '● NEUTRAL ±0% (4/6 scored)', tone: 'muted', align: 'left' });
+    // R6: an absent count renders — rather than a false 0.
+    expect(renderCell(verdict({ verdict: 'NEUTRAL', lift: 0, partial: { scored: null, expected: null } }), ctx)).toEqual({ text: '● NEUTRAL ±0% (—/— scored)', tone: 'muted', align: 'left' });
     expect(renderCell(verdict({ verdict: 'FAIL', lift: -20, stale: true, from: 'v2' }), ctx)).toEqual({ text: '✗ FAIL −20% ⚠ stale (v2)', tone: 'bad', align: 'left' });
     expect(renderCell(verdict({ verdict: null }), ctx)).toEqual({ text: '— not evaluated', tone: 'muted', align: 'left' });
     expect(renderCell(verdict({ verdict: null, stale: true }), ctx)).toEqual({ text: '⚠ stale — edited since the eval', tone: 'warn', align: 'left' });

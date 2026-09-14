@@ -1,0 +1,19 @@
+## Eval — queued
+**Queued 1 of 1; nothing was run.**
+
+### Requested
+
+| Skill |
+|---|
+| tdd |
+
+### Queued
+
+| Skill | Team | Digest | Window | Queued | Last error |
+|---|---|---|---|---|---|
+| tdd | acme | `dddddddddddd` | overnight | today | — |
+
+**Notes**
+- Queued 1 eval for overnight: the app runs them in parallel between 01:00 and 05:00 while it is open and idle. Run them now with `npx -y terum-skills@latest eval --drain`.
+
+**Next:** `/eval --drain` · `/eval-report tdd`
