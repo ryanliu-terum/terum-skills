@@ -3,9 +3,9 @@ import { useEvalRun, type EvalRunState } from '../../app/eval-run-context';
 import type { EvalManyArgs } from '../../backend/types';
 import { Button } from '../ui/Button';
 import { Dialog, DialogDescription, DialogPopup, DialogTitle } from '../ui/Dialog';
-import { TerminalHint } from './Primitives';
+import { CollapsibleCommand } from './Primitives';
 import { WorkflowDialog, WorkflowField } from './WorkflowControls';
-import { BULK_EVAL_MODES, evalManyCommand, evalManyLabel, evalManyStatus, type BulkEvalMode } from './bulk-eval';
+import { BULK_EVAL_MODES, evalManyCommand, evalManyCommandSummary, evalManyLabel, evalManyStatus, type BulkEvalMode } from './bulk-eval';
 
 /**
  * Several skills at once — the wizard's Now / In batches / Overnight question, asked past setup. Hosted from the URL
@@ -27,7 +27,7 @@ export function BulkEvalDialog({refs,pending,team,onClose}:{refs:string[];pendin
   {nothing?null:<>
    <div role="radiogroup" aria-label="When to run">{BULK_EVAL_MODES.map(option=><label key={option.mode} className="prompt-option"><input type="radio" name="bulk-eval-mode" aria-label={option.label} checked={mode===option.mode} onChange={()=>setMode(option.mode)}/><span>{option.label}<span className="prompt-option-description">{option.description}</span></span></label>)}</div>
    {mode==='batches'?<label style={{display:'flex',alignItems:'center',gap:8}}>Batch size<WorkflowField aria-label="Batch size" type="number" min={1} step={1} value={batch} onChange={event=>setBatch(event.target.value)} style={{width:72}}/>{validBatch?null:<span role="alert">A batch is a whole number of at least 1.</span>}</label>:null}
-   <TerminalHint command={evalManyCommand(args)}/>
+   <CollapsibleCommand command={evalManyCommand(args)} summary={evalManyCommandSummary(args)}/>
   </>}
   {error?<div role="alert">{error}</div>:null}
   <div className="skill-dialog-actions"><Button onClick={onClose}>{nothing?'Close':'Cancel'}</Button>{nothing?null:<Button kind="primary" disabled={mode==='batches'&&!validBatch} onClick={start}>{mode==='overnight'?'Queue for overnight':'Run evals'}</Button>}</div>
@@ -39,6 +39,7 @@ export function BulkEvalRunDialog({current,onClose,onStop}:{current:EvalRunState
  const args=current.many,busy=current.state==='running',queueing=args.mode==='overnight'||args.mode==='later';
  const title=`${queueing?'Queueing':'Evaluating'} ${evalManyLabel(args)}`;
  const body=args.mode==='now'?'All at once, four at a time. Receipts stay on this machine until you share them.':args.mode==='batches'?`${args.batch} at a time; a question comes before each further batch, and declining queues the rest for later.`:args.mode==='overnight'?'Queued for the app to run between 01:00 and 05:00 while it is open and idle.':'Queued for a later drain.';
- const status=busy?(current.progress?`${current.progress.done} of ${current.progress.total} evaluated`:'Running…'):current.state==='stopped'?'Stopped':current.result?evalManyStatus(current.result,args):'Finished';
- return <WorkflowDialog title={title} body={body} command={evalManyCommand(args)} primary={null} close={onClose} submit={()=>{}} busy={busy} onStop={onStop} dismissKeepsRunning lines={current.lines} status={status} closeLabel="Close"/>;
+ // UI policy §5: never a bare "Running…" for long — before the CLI has said anything the run is starting; once it prints, it is running; once it counts, the count.
+ const status=busy?(current.progress?`${current.progress.done} of ${current.progress.total} evaluated`:current.lines.length?'Running…':'Starting…'):current.state==='stopped'?'Stopped':current.result?evalManyStatus(current.result,args):'Finished';
+ return <WorkflowDialog title={title} body={body} command={evalManyCommand(args)} commandSummary={evalManyCommandSummary(args)} primary={null} close={onClose} submit={()=>{}} busy={busy} onStop={onStop} dismissKeepsRunning lines={current.lines} status={status} closeLabel="Close"/>;
 }

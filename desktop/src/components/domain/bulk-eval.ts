@@ -27,6 +27,18 @@ export function evalManyCommand(args: EvalManyArgs): string {
   return ['npx -y terum-skills@latest eval', ...args.refs.map(quote), ...flags].join(' ');
 }
 
+/**
+ * The short form of `evalManyCommand` for reading (UI policy §3): past two refs the folder list collapses to a count,
+ * the flags stay. `null` when the full command is already short, so callers draw the full line then.
+ */
+export function evalManyCommandSummary(args: EvalManyArgs): string | null {
+  if (args.refs.length <= 2) return null;
+  const full = evalManyCommand(args);
+  const flagsStart = full.indexOf(' --');
+  const flags = flagsStart === -1 ? '' : full.slice(flagsStart);
+  return `npx -y terum-skills@latest eval <${args.refs.length} skills>${flags}`;
+}
+
 export function isEvalManyResult(value: unknown): value is EvalManyResult {
   return typeof value === 'object' && value !== null && 'mode' in value && 'skills' in value && Array.isArray((value as { skills: unknown }).skills);
 }

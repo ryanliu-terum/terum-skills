@@ -28,11 +28,11 @@ it('keeps the eval alive across navigation and reopens its streamed output from 
  const {evalSpy}=await open();const {run,cancel}=longRun();evalSpy.mockReturnValue(run);start();
  await screen.findByText('preflight ok');
  await act(async()=>{location.hash='#/library/global';});
- await screen.findByText('Eval running · deploy-check');
+ await screen.findByText(/^(Starting eval|Evaluating) · deploy-check$/);
  fireEvent.keyDown(screen.getByRole('dialog'),{key:'Escape'});
  await waitFor(()=>expect(screen.queryByRole('dialog')).toBeNull());
  expect(cancel).not.toHaveBeenCalled();
- fireEvent.click(screen.getByRole('button',{name:'Eval running · deploy-check'}));
+ fireEvent.click(screen.getByRole('button',{name:/^(Starting eval|Evaluating) · deploy-check$/}));
  expect(await within(await screen.findByRole('dialog')).findByText('preflight ok')).toBeVisible();
  expect(cancel).not.toHaveBeenCalled();
 });

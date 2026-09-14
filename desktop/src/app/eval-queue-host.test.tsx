@@ -27,7 +27,7 @@ it('queued runs are visible, dismissible, reopenable and stoppable without needi
   const dialog = await screen.findByRole('dialog', { name: 'Queued eval · alpha' });
   expect(await within(dialog).findByRole('log')).toHaveTextContent('Evaluating alpha'); expect(readSkill).not.toHaveBeenCalled();expect(await within(dialog).findByText('1 of 2 evaluated')).toBeVisible();
   fireEvent.keyDown(dialog, { key: 'Escape' }); await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull()); expect(cancel).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByRole('button', { name: 'Eval running · alpha' }));
+  fireEvent.click(screen.getByRole('button', { name: /^(Starting eval · alpha|Evaluating · (\d+ of \d+ · )?alpha)$/ }));
   const reopened = await screen.findByRole('dialog', { name: 'Queued eval · alpha' });
   fireEvent.click(within(reopened).getByRole('button', { name: 'Stop' }));
   expect(await within(reopened).findByText('Stopped')).toBeVisible(); expect(cancel).toHaveBeenCalledTimes(1);

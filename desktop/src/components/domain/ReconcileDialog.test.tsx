@@ -1,5 +1,6 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { BackendContext, PrintContext, PromptContext } from '../../backend';
 import { createMockBackend, resetMockRemovals } from '../../backend/mock';
 import { createRun } from '../../backend/mock/run';
@@ -26,9 +27,9 @@ function renderDialog(value = result) {
   const publish = vi.spyOn(backend, 'publish');
   const close = vi.fn();
   const finished = vi.fn();
-  render(<BackendContext value={backend}><PromptContext value={async () => true}><PrintContext value={() => undefined}>
+  render(<BackendContext value={backend}><QueryClientProvider client={new QueryClient()}><PromptContext value={async () => true}><PrintContext value={() => undefined}>
     <ReconcileDialog result={value} onClose={close} onFinished={finished}/>
-  </PrintContext></PromptContext></BackendContext>);
+  </PrintContext></PromptContext></QueryClientProvider></BackendContext>);
   return { backend, install, publish, close, finished };
 }
 
@@ -39,8 +40,18 @@ it('defaults identical and same-id rows on, leaves name-only rows off with the r
   expect(boxes[0]).toBeChecked();
   expect(boxes[1]).toBeChecked();
   expect(boxes[2]).not.toBeChecked();
-  expect(screen.getByText(/To keep it separate from the team’s pr-review, rename it first:/)).toBeInTheDocument();
-  expect(screen.getByText('~/.claude/skills/old-deploy holds the bytes of deploy-check Version 5 under a different folder name; nothing is offered for it.')).toBeInTheDocument();
+  // Checking every differing row removes the footnote: nothing is left unchecked to rename.
+  fireEvent.click(boxes[2]!);
+  expect(screen.queryByText(/rename it first/)).toBeNull();
+  fireEvent.click(boxes[2]!);
+  // UI policy §6: the rename hint is said once under the group, as a copyable command, not under every unchecked row.
+  expect(screen.getByText(/Unchecked folders stay as they are\. To keep one separate from the team’s copy, rename it first:/)).toBeInTheDocument();
+  expect(screen.getAllByText(/rename it first/)).toHaveLength(1);
+  expect(document.querySelector('.reconcile-footnote .cli-box .board-mono')).toHaveTextContent('npx -y terum-skills@latest skill rename <path> --to <new-name>');
+  // UI policy §2: a path is a PathText (full path in the title, root label beside the name), never prose.
+  expect(screen.getByTitle('~/.claude/skills/old-deploy')).toBeInTheDocument();
+  expect(screen.getByText(/holds the bytes of deploy-check Version 5 under a different folder name; nothing is offered for it\./)).toBeInTheDocument();
+  expect(screen.getAllByText('· Global')).toHaveLength(3);
 });
 
 it('confirms only checked rows through install adopt and publish, then reports each outcome', async () => {
@@ -75,9 +86,9 @@ function ProjectAddHarness() {
 }
 
 function renderProjectAdd(backend = createMockBackend()) {
-  render(<BackendContext value={backend}><PromptContext value={async () => true}><PrintContext value={() => undefined}>
+  render(<BackendContext value={backend}><QueryClientProvider client={new QueryClient()}><PromptContext value={async () => true}><PrintContext value={() => undefined}>
     <ProjectAddHarness/>
-  </PrintContext></PromptContext></BackendContext>);
+  </PrintContext></PromptContext></QueryClientProvider></BackendContext>);
   return backend;
 }
 

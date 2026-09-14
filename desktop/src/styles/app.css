@@ -169,3 +169,23 @@ button:focus-visible,.button[data-state="focus"],[role="switch"]:focus-visible,[
 
 /* Text the user may want to copy is selectable (2026-09-14); the chrome, controls and card frames stay `user-select:none` from `.shell`. */
 .skill-md-tab,.detail-description,.detail-rail .detail-row>span:last-child,.detail-status>div>span,.board-error-line,.terminal-hint,.cli-box .board-mono,.settings-value,.setting-row>div:first-child,.settings-note,.settings-head>span,.placement-row>span,.placement-footer,.prune-list,.skill-card-desc,.inbox-document,.inbox-fields,.inbox-subject,.inbox-row-content,.member-identity,.market-project-desc,.market-person-lines,.search-page-row,.state-body,.copy-value,pre,code {user-select:text;-webkit-user-select:text;}
+/* A workflow dialog's error line: selectable and right-click copyable (UI policy §1); same metrics as the inline style it replaced. */
+.workflow-error {font-size:12px;color:var(--tk-bad);user-select:text;-webkit-user-select:text;}
+
+/* Eval status (UI policy §5, 2026-09-14): the top-bar chip carries the run's state and the card its dot. Neither renders without a run, so no board moves. */
+.eval-dot{display:inline-block;width:6px;height:6px;border-radius:3px;background:var(--tk-accent);margin-right:6px;vertical-align:middle;animation:eval-pulse 1.6s ease-in-out infinite;}
+.card-evaluating>.eval-dot{margin-right:0;}
+@keyframes eval-pulse{0%,100%{opacity:1;transform:scale(1);}50%{opacity:.35;transform:scale(.7);}}
+@media (prefers-reduced-motion:reduce){.eval-dot{animation:none;}}
+.eval-chip[data-tone="done"]{color:var(--tk-good);}
+.eval-chip[data-tone="failed"],.eval-chip[data-tone="stopped"]{color:var(--tk-bad);}
+
+/* Check against the team (UI policy §2/§6): a row is its title line over its path; the row's checkbox label may wrap the path on its own line but never the title. */
+.reconcile-row{display:flex;flex-direction:column;gap:2px;min-width:0;max-width:100%;line-height:18px;}
+.reconcile-row>span:first-child{text-wrap:pretty;}
+.checkbox-row:has(.reconcile-row){height:auto;min-height:28px;padding:6px 8px;align-items:flex-start;}
+.checkbox-row:has(.reconcile-row) .checkbox-label{min-width:0;flex:1 1 auto;align-items:flex-start;}
+.checkbox-row:has(.reconcile-row) .checkbox{margin-top:2px;}
+.checkbox-row:has(.reconcile-row) .checkbox-label>span:last-child{min-width:0;flex:1 1 auto;}
+.reconcile-footnote{display:flex;flex-direction:column;gap:6px;padding:8px 0 0;border-top:1px dashed var(--tk-border1);margin-top:4px;}
+.dialog-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:4px;}

@@ -19,8 +19,8 @@ function open(hash:string,answer=true){
  return {backend,spy,ask,print};
 }
 const question=()=>screen.findByRole('dialog',{name:/Evaluate .*\?/});
-// The terminal hint renders its command through CommandText, one span per token, so it is matched as a whole line.
-const hint=(root:HTMLElement)=>root.querySelector('.terminal-hint');
+// The command renders as a copyable CliBox (UI policy §1) through CommandText, one span per token, so it is matched as a whole line.
+const hint=(root:HTMLElement)=>root.querySelector('.cli-box .board-mono');
 
 it('lists the chosen skills, runs them now, and streams the CLI into one dialog the URL no longer names',async()=>{
  const {spy}=open('#/library/global?dialog=bulk-eval&ref=deploy-check&ref=migration-guard');
@@ -85,7 +85,7 @@ it('keeps streaming across navigation, names the run in the top bar, and refuses
  expect(await within(again).findByRole('alert')).toHaveTextContent('An eval is already running for deploy-check');
  expect(spy).toHaveBeenCalledTimes(1);
  fireEvent.click(within(again).getByRole('button',{name:'Cancel'}));
- fireEvent.click(await screen.findByRole('button',{name:'Eval running · 2 skills'}));
+ fireEvent.click(await screen.findByRole('button',{name:/^(Starting eval|Evaluating) · .*2 skills$|^Evaluating · \d+ of \d+$/}));
  const reopened=await screen.findByRole('dialog',{name:'Evaluating 2 skills'});
  fireEvent.click(within(reopened).getByRole('button',{name:'Stop'}));
  expect(await within(reopened).findByText('Stopped')).toBeVisible();expect(cancel).toHaveBeenCalledTimes(1);

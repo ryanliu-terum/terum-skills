@@ -102,3 +102,13 @@ export function useCopy(): (text: string, what: string) => Promise<void> {
   }, [backend, toast]);
 }
 
+
+/**
+ * A right-click menu with one row, "Copy <what>", for a block of text the user may want to take elsewhere — a
+ * log pane, an error line, an advice paragraph (UI policy §1: anything the app prints is copyable). `text`
+ * is read at click time so a streaming pane copies what is on screen then.
+ */
+export function useCopyMenu(text: () => string, what: string): (element: Element | null) => (() => void) | undefined {
+  const copy = useCopy();
+  return useContextMenu(() => [{ key: 'copy', label: `Copy ${what}`, icon: 'copy', onSelect: () => void copy(text(), what) }]);
+}

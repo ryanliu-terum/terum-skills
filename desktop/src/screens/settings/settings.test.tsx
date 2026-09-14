@@ -58,7 +58,11 @@ it('renders update advice verbatim from the DTO without opening a command in an 
  report.value.advice=['Running from a source checkout.','  custom build <command> & preserve spacing'];
  vi.spyOn(backend,'update').mockResolvedValue(report);const editor=vi.spyOn(backend,'openInEditor');
  open('#/settings/updates');fireEvent.click(await screen.findByRole('button',{name:'Show update command'}));
- const dialog=await screen.findByRole('dialog');await waitFor(()=>expect(dialog.querySelector('pre')?.textContent).toBe(report.value.advice.join('\n')));
+ // UI policy §1: the prose lines stay prose and each indented command becomes a copyable CliBox — the CLI's words verbatim, never re-derived.
+ const dialog=await screen.findByRole('dialog');await waitFor(()=>expect(dialog.querySelector('.advice-block')).not.toBeNull());
+ expect(dialog.querySelector('pre')).toBeNull();
+ expect(dialog).toHaveTextContent('Running from a source checkout.');
+ expect(dialog.querySelector('.cli-box .board-mono')).toHaveTextContent('custom build <command> & preserve spacing');
  expect(editor).not.toHaveBeenCalled();expect(location.hash).toContain('dialog=update');
  fireEvent.click(within(dialog).getByRole('button',{name:'Close'}));await waitFor(()=>expect(screen.queryByRole('dialog')).toBeNull());
 });
@@ -135,7 +139,7 @@ it('shows an update failure without substituting fixture advice',async()=>{
  open('#/settings/updates?dialog=update');const dialog=await screen.findByRole('dialog');
  await waitFor(()=>expect(dialog).toHaveTextContent('Cannot read release state.'));
  expect(within(dialog).getByRole('alert')).toHaveTextContent('Cannot read release state.');
- expect((await screen.findByRole('dialog')).querySelector('pre')).toBeNull();
+ expect((await screen.findByRole('dialog')).querySelector('.advice-block')).toBeNull();
 });
 
 it('waits for update data before declaring the Updates board ready',async()=>{
@@ -315,7 +319,9 @@ it('runs diagnostics once in a Status dialog and never opens a command path',asy
 it('routes About Check to the Updates dialog with verbatim advice and preserves mock mode',async()=>{
  const report=await backend.update();if(!report.ok)throw new Error(report.error);
  vi.spyOn(backend,'update').mockResolvedValue(report);open('#/settings/about?__mock=empty');fireEvent.click(await screen.findByRole('button',{name:'Check'}));
- const dialog=await screen.findByRole('dialog');await waitFor(()=>expect(dialog.querySelector('pre')?.textContent).toBe(report.value.advice.join('\n')));
+ const dialog=await screen.findByRole('dialog');await waitFor(()=>expect(dialog.querySelector('.advice-block')).not.toBeNull());
+ for(const line of report.value.advice)expect(dialog).toHaveTextContent(line.trim());
+ expect(dialog.querySelector('.cli-box .board-mono')).toHaveTextContent('npx -y terum-skills@latest <command>');
  expect(location.hash).toContain('/settings/updates?dialog=update&__mock=empty');
 });
 it('names the known latest CLI release on About',async()=>{
