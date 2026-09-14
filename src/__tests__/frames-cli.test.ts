@@ -26,7 +26,7 @@ const INVOCATIONS: Record<string, string[]> = {
   'team project create': ['team', 'project', 'create', 'Payments'],
   'app-update': ['app-update', '--check'],
   app: ['app'], profile: ['profile', '--role', 'Platform'],
-  login: ['login'], setup: ['setup'], 'team create': ['team', 'create', 'x'], 'team join': ['team', 'join', 'o/r'], 'team remove': ['team', 'remove', 'h'], 'team leave': ['team', 'leave', 'n'], 'team workflow-update': ['team', 'workflow-update'],
+  login: ['login'], setup: ['setup'], 'team create': ['team', 'create', 'x'], 'team join': ['team', 'join', 'o/r'], 'team remove': ['team', 'remove', 'h'], 'team leave': ['team', 'leave', 'n'], 'team move': ['team', 'move', 'o/r2'], 'team workflow-update': ['team', 'workflow-update'],
   invite: ['invite', 'u'], ls: ['ls'], status: ['status'], publish: ['publish', 'ref'], validate: ['validate', 'x'], eval: ['eval', 'x'], 'eval-report': ['eval-report', 'x'], install: ['install', 'ref'], 'uninstall-skill': ['uninstall-skill', 'ref'], uninstall: ['uninstall'], sync: ['sync'], prune: ['prune'], search: ['search', 't'], update: ['update'],
 };
 

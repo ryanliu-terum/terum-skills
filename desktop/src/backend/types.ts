@@ -125,13 +125,21 @@ export interface PublishResult {name:string;project:string;version:string|null;c
 export interface SyncArgs {team?:string}
 // The fetch-only sync result (§10). `detail` is the CLI's own reason for a state other than 'refreshed';
 // it is spelled the same here as in the CLI so the popup can render it.
-export interface SyncResult {notices:string[];changed:boolean;teams:{team:string;state:string;detail?:string}[]}
+/** Where a team whose repository no longer exists may have gone (CLI lib/successor.ts). */
+export interface SyncSuccessor {ownerRepo:string;source:'invitation'|'member';teamName:string|null;at:string|null}
+export interface SyncTeam {team:string;state:string;detail?:string;
+ /** The remote answered "repository not found"; `successors` are the replacements GitHub knows of, `summary` the CLI's one line about it. */
+ missing?:true;successors?:SyncSuccessor[];lookup?:string;summary?:string}
+export interface SyncResult {notices:string[];changed:boolean;teams:SyncTeam[]}
 // No `role`: GitHub's collaborator `permission` is "Only valid on organization-owned repositories" and
 // the CLI's invite verb takes only logins and --team, so an invitation cannot carry one (Ryan, 2026-09-10).
 export interface InviteArgs {team?:string;logins:string[];scope?:Scope}
 export interface InviteResult {invited:string[];already:string[];failed:{login:string;error:string}[]}
-export interface TeamArgs {kind:'create'|'join'|'remove'|'leave';name?:string;team?:string;remote?:string;handle?:string}
-export interface TeamResult {name:string;kind:TeamArgs['kind']}
+/** `move`: follow a team whose repository moved — `remote` is the new `<org>/<repo>`, `team` the configured team to leave; the dialog that offers it is the confirmation, so the CLI runs with --yes. */
+export interface TeamArgs {kind:'create'|'join'|'remove'|'leave'|'move';name?:string;team?:string;remote?:string;handle?:string}
+export interface TeamResult {name:string;kind:TeamArgs['kind'];
+ /** `move` only: what came back. */
+ restored?:string[];missing?:string[];failed?:{name:string;error:string}[]}
 export interface SetupArgs {target?:string}
 export const SETUP_STEP_KEYS = ['welcome','app','role','github','team','invite','projects','evals','community','hook','wrapper','done'] as const;
 export type SetupStep = typeof SETUP_STEP_KEYS[number];

@@ -37,6 +37,10 @@ export const cliRefresh = z.object({
     changed: z.boolean(),
     head: z.string().nullable(),
     detail: z.string().optional(),
+    missing: z.literal(true).optional(),
+    successors: z.array(z.object({ ownerRepo: z.string(), source: z.enum(['invitation', 'member']), teamName: z.string().nullable().optional(), at: z.string().nullable().optional() }).passthrough()).optional(),
+    lookup: z.string().optional(),
+    summary: z.string().optional(),
   })),
 }).passthrough();
 export type CliRefresh = z.infer<typeof cliRefresh>;

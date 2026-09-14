@@ -19,6 +19,7 @@ import { repositoryUrl, githubOwnerRepo, isGitHubRemote, normalizeRemote, stripR
 import { fromError, Result, success } from '../lib/result.js';
 import { Runner, systemRunner } from '../lib/runner.js';
 import { describeClone } from '../lib/teamRepo.js';
+import { repositoryIsGone } from '../lib/successor.js';
 import { readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -65,6 +66,8 @@ export interface SetupArgs extends WithForm {
   /** Where the bundled /terum-skills Claude Code skill is offered from and placed (test knob). */
   wrapper?: WrapperOptions;
   communityUrl?: string;
+  /** Test knob: whether the configured team's repository answers "not found"; defaults to lib/successor's git probe. */
+  gone?: (runner: Runner, remote: string) => Promise<boolean>;
   verbs?: Partial<SetupVerbs>;
 }
 export type StepOutcome = 'done' | 'skipped' | 'printed' | 'queued' | 'batched';
@@ -156,8 +159,25 @@ export async function run(args: SetupArgs, io: Prompter): Promise<Result<SetupRe
     if (decorated) { for (const line of MARK.split('\n')) output.print(style('dim', line)); output.print(''); output.print(welcome()); }
     for (const line of WELCOME) say(line);
     steps.welcome = args.quiet ? 'skipped' : 'printed';
-    const before = await store.read();
+    let before = await store.read();
     const target = args.target === undefined ? undefined : parseJoinTarget(args.target);
+    // A machine already on one team, handed a different target, is normally refused (one team per machine). When the
+    // team it is on has lost its repository — the owner recreated it elsewhere and posted the new setup command, which
+    // is exactly what this person just pasted (2026-09-13) — the refusal would send them to `team leave` by hand. Ask
+    // once and move instead. Only a clear "repository not found" qualifies; offline or denied keeps the refusal.
+    let movedFrom: string | undefined;
+    const bound = Object.entries(before.teams);
+    if (target && bound.length === 1 && !teamByRemote(before, target.remote) && await (args.gone ?? repositoryIsGone)(runner, bound[0]![1].remote)) {
+      const [current, binding] = bound[0]!;
+      section('team');
+      io.print(`Team ${current}'s repository ${repositoryUrl(binding.remote)} no longer exists on GitHub.`);
+      if (await io.confirm(`Move this machine from ${current} to ${repositoryUrl(target.remote)}?`, { detail: [`Skills placed from ${current} are removed and placed again from the new team where it shares them; nothing is written to the old repository.`] })) {
+        const moved = await verbs.team({ form: args.form, kind: 'move', target: args.target!, from: current, yes: true, config: store, runner, hook: args.hook }, io);
+        if (!moved.ok) return failed(moved, role, teamName, remote, steps);
+        movedFrom = current; teamName = moved.value.to; remote = moved.value.toRemote; steps.team = 'done';
+        before = await store.read();
+      }
+    }
     refuseSecondTeam(before, target ? { remote: target.remote } : {}, invocation(args.form, 'setup', ...(args.target === undefined ? [] : [args.target])), args.form);
 
     // The desktop app, first (D5, 2026-09-08). Where an app exists for this machine and a person is at an interactive
@@ -170,7 +190,7 @@ export async function run(args: SetupArgs, io: Prompter): Promise<Result<SetupRe
       section('app');
       const opened = await verbs.app({ form: args.form, config: store, runner, launch: args.launch, evidence: args.evidence, target: args.target, intent: 'setup', offer: false }, io);
       if (opened.ok && (opened.value.action === 'launched' || opened.value.action === 'installed-and-launched')) {
-        io.print(args.target === undefined ? 'Continuing in the app.' : `Continuing in the app. Join ${args.target} there.`);
+        io.print(args.target === undefined || movedFrom !== undefined ? 'Continuing in the app.' : `Continuing in the app. Join ${args.target} there.`);
         steps.app = 'done';
         return success({ role, team: teamName, remote, steps });
       }
@@ -222,6 +242,8 @@ export async function run(args: SetupArgs, io: Prompter): Promise<Result<SetupRe
         remote = 'remote' in result.value ? result.value.remote : (await store.read()).teams[teamName]!.remote;
         steps.team = 'done';
       }
+    } else if (movedFrom !== undefined) {
+      say(`Moved from ${movedFrom} to ${teamName}.`);
     } else {
       const target = parseJoinTarget(args.target!);
       const configured = teamByRemote(before, target.remote);
