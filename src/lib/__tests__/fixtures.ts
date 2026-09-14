@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import type { Launch } from '../launch.js';
 import lockfile from 'proper-lockfile';
 import { CommandResult, Runner, RunOptions, systemRunner } from '../runner.js';
-import { type AskOptions, Prompter, PromptClosedError } from '../prompt.js';
+import { type AskOptions, Prompter, PromptClosedError, type ProgressUpdate } from '../prompt.js';
 import { cloneLockPath } from '../teamRepo.js';
 
 /** Every temp dir created through `temporaryDirectory` — removed by setup.ts after each test. */
@@ -13,6 +13,12 @@ export const TEMP_DIRS: string[] = [];
 
 /** The one canonical /terum-skills skill (what `npm run build` bundles); from src/ the built copy does not exist, so tests point at this. */
 export const BUNDLED_SKILL_SOURCE = fileURLToPath(new URL('../../../.claude/skills/terum-skills/SKILL.md', import.meta.url));
+/** The canonical edit-hook script, for the same reason: from src/ the bundled copy under dist/ does not exist. */
+export const BUNDLED_EDIT_HOOK_SOURCE = fileURLToPath(new URL('../../../assets/claude/hooks/terum-skills-edit.mjs', import.meta.url));
+/** Edit-hook options rooted in a test state root, pointed at a settings file that is never the real ~/.claude/settings.json. */
+export function editHookFor(storeRoot: string, settingsFile: string): { storeRoot: string; source: string; settingsFile: string; backupDir: string } {
+  return { storeRoot, source: BUNDLED_EDIT_HOOK_SOURCE, settingsFile, backupDir: join(storeRoot, 'backups') };
+}
 /** Wrapper options that place under a test home's global Claude Code skills root — never the real ~/.claude. */
 export function wrapperFor(home: string): { skillsRoot: string; source: string } {
   return { skillsRoot: join(home, '.claude', 'skills'), source: BUNDLED_SKILL_SOURCE };
@@ -29,7 +35,11 @@ export class ScriptedPrompter implements Prompter {
   readonly asked: string[] = [];
   readonly offeredDefaults: (string | undefined)[] = [];
   readonly offered: (readonly string[])[] = [];
+  /** Every `io.progress?.()` a verb reported, in order. `steps` is the bare ladder, for readable assertions. */
+  readonly progressed: ProgressUpdate[] = [];
+  get steps(): string[] { return this.progressed.map((update) => update.step); }
   constructor(private readonly answers: string[] = [], private readonly confirms: boolean[] = [], readonly interactive = false) {}
+  progress(update: ProgressUpdate): void { this.progressed.push(update); }
   private next(question: string): string {
     this.asked.push(question);
     const answer = this.answers.shift();

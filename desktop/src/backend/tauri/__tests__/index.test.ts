@@ -27,12 +27,12 @@ function replay(value: unknown, ok = true, prints: string[] = []) {
 
 it('appends read diagnostics after the error and preserves a parsed partial value', async () => {
   const f = replay({ name: 'a', findings: 2, warnings: 1 }, false, ['First finding.', 'Second finding.']);
-  // A CLI that predates `skill fix` sends no `repairable`; the adapter reads 0 so the app draws no Fix.
-  expect(await createTauriBackend(f.bridge).validate({ ref: 'a' })).toEqual({ ok: false, error: 'CLI failure.\nFirst finding.\nSecond finding.', value: { name: 'a', findings: 2, warnings: 1, repairable: 0 } });
+  // A CLI that predates `skill fix` sends no `repairable` and no `repairs`; the adapter reads 0 and [] so the app draws no Fix.
+  expect(await createTauriBackend(f.bridge).validate({ ref: 'a' })).toEqual({ ok: false, error: 'CLI failure.\nFirst finding.\nSecond finding.', value: { name: 'a', findings: 2, warnings: 1, repairable: 0, repairs: [] } });
 });
 
 it('keeps successful reads unchanged despite print frames', async () => {
-  const value = { name: 'a', findings: 0, warnings: 1, repairable: 0 };
+  const value = { name: 'a', findings: 0, warnings: 1, repairable: 0, repairs: [] };
   expect(await createTauriBackend(replay(value, true, ['Warning.']).bridge).validate({ ref: 'a' })).toEqual({ ok: true, value });
 });
 
@@ -61,6 +61,7 @@ const teamCases: [string, (backend: Backend) => Promise<unknown>, string[], stri
   ['install project', b => b.install({ ref: '', kind: 'project', project: 'ops', team: 'acme' }).done, ['install', '--team', 'acme', '--', 'project', 'ops'], [LS_LOCAL]],
   ['uninstallSkill', b => b.uninstallSkill({ ref: 'a', team: 'acme' }).done, ['uninstall-skill', '--team', 'acme', '--', 'a']],
   ['publish', b => b.publish({ ref: 'a', team: 'acme' }).done, ['publish', '--team', 'acme', '--', 'a']],
+  ['publish --project --category', b => b.publish({ ref: 'a', project: 'Global', category: 'ops' }).done, ['publish', '--project', 'Global', '--category', 'ops', '--', 'a']],
   ['sync', b => b.sync({ team: 'acme' }).done, ['sync', '--team', 'acme']],
   ['prune', b => b.prune().done, ['prune']],
   ['invite', b => b.invite({ logins: ['mira', 'ravi'], team: 'acme' }).done, ['invite', '--team', 'acme', '--', 'mira', 'ravi']],
@@ -72,6 +73,37 @@ it.each(teamCases)('orders %s as verb, flags, separator, positionals', async (_n
   const f = replay(undefined, false);
   await call(createTauriBackend(f.bridge));
   expect(f.spawns.map(s => s.args)).toEqual([...reads, argv]);
+});
+
+it('runs reconcile --list once and preserves every result group', async () => {
+  const value = {
+    identical: [{ path: '/home/.claude/skills/a', name: 'a', team: 'acme', skillId: 'id-a', version: 'v2' }],
+    differing: [{ path: '/home/.claude/skills/b', name: 'b', team: 'acme', skillId: null, teamVersion: 'v3', nextVersion: 'v4', sameId: false, teamAuthor: 'mira' }],
+    renamed: [{ path: '/home/.claude/skills/old-a', name: 'old-a', team: 'acme', skillId: 'id-a', version: 'v2', teamName: 'a' }],
+    adopted: [], published: [],
+  };
+  const f = replay(value);
+  expect(await createTauriBackend(f.bridge).reconcile.list()).toEqual({ ok: true, value });
+  expect(f.spawns.map(spawn => spawn.args)).toEqual([['reconcile', '--list']]);
+});
+
+it('preserves an optional project-add reconcile result', async () => {
+  const reconcile = { identical: [{ path: '/work/.claude/skills/a', name: 'a', team: 'acme', skillId: 'id-a', version: 'v1' }], differing: [], renamed: [], adopted: [], published: [] };
+  const f = replay({ path: '/work', label: 'work', added: true, reconcile });
+  expect(await createTauriBackend(f.bridge).projects.add('/work').done).toEqual({ ok: true, value: { path: '/work', label: 'work', added: true, reconcile } });
+  expect(f.spawns.map(spawn => spawn.args)).toEqual([['project', 'add', '--', '/work']]);
+});
+
+it('adopts through the install flag and derives the returned scope and name from ls --local', async () => {
+  const path = '/home/.claude/skills/a';
+  const f = fakeBridge((args, emit) => {
+    const value = args[0] === 'ls'
+      ? { roster: [], skills: [], problems: [], local: [{ root: '/home/.claude/skills', scope: 'global', rows: [], problems: [] }] }
+      : { id: 'id-a', team: 'acme', path, version: 'v2', profiled: false, adopted: true };
+    emit({ kind: 'stdout', line: JSON.stringify({ t: 'result', verb: args[0], ok: true, exitCode: 0, value }) });
+  });
+  expect(await createTauriBackend(f.bridge).install({ team: 'acme', adopt: path }).done).toEqual({ ok: true, value: [{ id: 'id-a', name: 'a', scope: 'Global', path, version: 'v2', profiled: false }] });
+  expect(f.spawns.map(spawn => spawn.args)).toEqual([['ls', '--local'], ['install', '--team', 'acme', '--adopt', path]]);
 });
 
 it('passes the stored eval defaults as flags and omits the unset or sentinel ones', async () => {
@@ -189,6 +221,7 @@ describe('read-only calls preserve spawn rejection', () => {
       kill: vi.fn<Bridge['kill']>(),
       readAppState: async () => ({ schema: 1, node: '/usr/local/bin/node', entry: '/cli/index.js', version: '0.1.6', writtenAt: '2026-09-08T00:00:00Z' }),
       hostPlatform: async () => 'macos',
+      hostOsVersion: async () => '26.6.2',
       homeDirectory: async () => '/Users/teddy',
     };
     const backend = createTauriBackend(bridge);
@@ -243,10 +276,12 @@ it.each([false,true])('serves recorded status and settings with real team data (
  expect(status.value?.tools).toEqual(settings.value?.tools);
  expect(status.value?.tools.git).toBe(true);
  if(failed){expect(status).toMatchObject({error:expect.stringContaining('Unreadable team clone.')});expect(settings).toMatchObject({error:expect.stringContaining('Unreadable team clone.')});}
- // Reads are shared across status and settings (read cache); a failed status is not kept, so it is retried once. A single-team settings read adds `ls --team` whenever status yielded a value, partial or not.
  // The re-recorded hello advertises `refresh` and `serve`: the first hello is followed by one background `sync`, and every read after it is a request over one `serve` child (session.ts), not a spawn.
  expect(f.spawns.map(s=>s.args)).toEqual([['status'],['ls','--local'],['sync'],['serve']]);
- expect(f.requests.map(r=>r.argv)).toEqual(failed?[['status'],['ls','--team','acme']]:[['ls','--team','acme']]);
+ // That background fetch writes a fresh stamp, so it ends in notify('stamp') and empties the read cache: the settings read
+ // behind it re-reads status and `ls --local` rather than serving a board whose "Last fetched" is already stale, and adds
+ // `ls --team` because exactly one team is configured. Partial failure costs nothing extra — an unreadable status was never cached.
+ expect(f.requests.map(r=>r.argv)).toEqual([['status'],['ls','--local'],['ls','--team','acme']]);
  expect(f.writes.filter(line=>(JSON.parse(line) as {t:string}).t!=='request')).toEqual([]);
 });
 it.each([null,'old','current'])('only displays approvals joined to current grants (hash=%s)',async hash=>{
@@ -283,7 +318,7 @@ it.each(['global','checkout','trailing'] as const)('maps the %s library from loc
   const local={roster:[],skills:[],problems:[],local:[{root:'/home/.claude/skills',scope:'global',rows:[{name:'a',path:'/home/.claude/skills/a',state:'prose is not provenance',tracked:true,placement:{id:'id-a',team:'acme',version:'a'.repeat(40)},health:'up-to-date'}],notOffered:[],problems:[]},{root:'/work/ops/.claude/skills',repoRoot:'/work/ops',scope:'project',rows:[],problems:[]}]};
   const scope=mode==='global'?{kind:'global' as const}:{kind:'checkout' as const,root:'/work/ops'+(mode==='trailing'?'/':'')};
   const f=inventoryBridge({local});const result=await createTauriBackend(f.bridge).library({scope,team:'acme'});
-  expect(result).toMatchObject({ok:true,value:{title:mode==='global'?'1 skill':'0 skills',root:{id:mode==='global'?'global':'/work/ops',kind:scope.kind,label:mode==='global'?'Global':'ops',count:undefined},skills:mode==='global'?[{name:'a',desc:'',project:'Global',installs:'—',installsN:0,installed:'placed',placed:true,path:'/home/.claude/skills/a',updated:null,normalizedGrants:null,grantsHash:null,size:'—',tokensK:0,wlt:null,summary:null,favorite:false,favorites:null,enabled:true,flags:[]}]:[],overview:{skills:mode==='global'?'1':'0',installs:'—',evaluated:'0',attention:'0',meter:{pass_:0,neutral:0,fail:0,total:0},skills_note:'',installs_note:''}}});
+  expect(result).toMatchObject({ok:true,value:{title:mode==='global'?'1 skill':'0 skills',root:{id:mode==='global'?'global':'/work/ops',kind:scope.kind,label:mode==='global'?'Global':'ops',count:undefined},skills:mode==='global'?[{name:'a',desc:'',project:'Global',installs:'—',installsN:0,installed:'placed',placed:true,path:'/home/.claude/skills/a',updated:null,normalizedGrants:null,grantsHash:null,size:'—',tokensK:0,wlt:null,summary:null,favorite:false,favorites:null,enabled:true,flags:[]}]:[],overview:{skills:mode==='global'?'1':'0',installs:'—',evaluated:'0',attention:'0',meter:{pass_:0,neutral:0,fail:0,total:mode==='global'?1:0},skills_note:'',installs_note:''}}});
   expect(f.spawns.map(s=>s.args)).toEqual([['ls','--local']]);
 });
 it('abbreviates a Library card checkout projectRoots entry under the home directory', async () => {
@@ -395,7 +430,16 @@ function peopleReplay(change?: (frame: Record<string, unknown>, name: string) =>
   });
 }
 it('S7b replays rebuilt CLI roster/catalog with real handles, role, projects and installs', async () => {
-  const f = peopleReplay(), backend = createTauriBackend(f.bridge);
+  // The recording predates §8.5's amendment (2026-09-13) and carries `profile: []` for everyone, which
+  // under the one-list rule would make every member's page empty and prove nothing about the limb. Mira's
+  // profile is projected from her own recorded installs — the shape a machine that accepted install's
+  // profile prompt writes — so the assertion below still tests the join rather than the recording's age.
+  const f = peopleReplay((frame, name) => {
+    if (name !== 'ls' || frame.t !== 'result') return;
+    const value = frame.value as { people?: { handle: string; installed: { id: string }[]; profile: unknown[] }[]; skills?: { id: string; name: string; latest?: string | null }[] };
+    const mira = value.people?.find(person => person.handle === 'mira');
+    if (mira) mira.profile = mira.installed.map(entry => ({ id: entry.id, name: value.skills?.find(row => row.id === entry.id)?.name ?? 'unknown', version: value.skills?.find(row => row.id === entry.id)?.latest ?? 'v1', added: '2026-09-12', via: 'install' }));
+  }), backend = createTauriBackend(f.bridge);
   const roster = await backend.roster();
   expect(roster.ok).toBe(true);
   expect(roster.value?.members.map(member => member.handle)).toEqual(['mira', 'ravi', 'seed']);
@@ -432,9 +476,11 @@ it('S7b replays rebuilt CLI roster/catalog with real handles, role, projects and
   expect(f.spawns.some(spawn => spawn.args[1] === 'member')).toBe(false);
   // The roster() call earlier in this test spends its own status+ls; the CATALOG read adds one more
   // of each, and nothing per member. Only the first read is a process: its hello advertises `serve`,
-  // so the rest are requests over one session child (and `refresh` adds one background `sync`).
+  // so the rest are requests over one session child (and `refresh` adds one background `sync`). That
+  // fetch stamps every clone and ends in notify('stamp'), which empties the read cache once, so the
+  // catalog spends one extra `ls --team` rather than drawing a board fetched-at time has moved past.
   expect(f.spawns.map(spawn => spawn.args)).toEqual([['status', '--permissions'], ['sync'], ['serve']]);
-  expect(f.requests.map(request => request.argv)).toEqual([['ls', '--team', 'acme'], ['status'], ['ls', '--local']]);
+  expect(f.requests.map(request => request.argv)).toEqual([['ls', '--team', 'acme'], ['status'], ['ls', '--team', 'acme'], ['ls', '--local']]);
 });
 it('maps per-member admin to the permission status: true → admin, false → member, absent → unknown', async () => {
   const backend = createTauriBackend(peopleReplay((frame, name) => {
@@ -642,7 +688,10 @@ it('reports an unidentifiable same-named folder as unknown rather than absent',a
  const current=await createTauriBackend(installedReplay().bridge).skill({ref:'deploy-check'});
  expect(current.value).toMatchObject({installed:'placed',unidentifiedLocal:null});
 });
-it('copies recorded member installs rather than authored skills',async()=>{
+// §8.5 (amended 2026-09-13): the bulk copy follows the member's PROFILE list, not their authored set —
+// and not their raw `installed[]` either. The fixture projects the recorded installs into a profile,
+// which is what a machine that accepted install's profile prompt records.
+it('copies the member profile list rather than authored skills',async()=>{
  const none=await createTauriBackend(installedReplay('on-disk-only','none').bridge).catalog();
  expect(none.value?.people[0]).toMatchObject({skills:['deploy-check'],installable:[],onDisk:[0,0]});
  const installed=await createTauriBackend(installedReplay('on-disk-only','installed').bridge).catalog();
@@ -1097,7 +1146,7 @@ it.each([['v2','v3'],['v2',null],[null]])('does not invent a single installed ve
 it('reads profile versions separately from automatic installs and gets roster facts from people[]', async () => {
  const result = await createTauriBackend(versionedCatalog().bridge).catalog();
  if (!result.ok) throw new Error(result.error);
- expect(result.value.people[0]).toMatchObject({ name:'Profile reader',role:'Maintainer',projects:['Global'],profileVersions:{'deploy-check':'v2'},buckets:[['On their profile',['deploy-check']],['Installed',['deploy-check','tdd']]] });
+ expect(result.value.people[0]).toMatchObject({ name:'Profile reader',role:'Maintainer',projects:['Global'],profileVersions:{'deploy-check':'v2'},buckets:[['On their profile',['deploy-check']]], installable:['deploy-check'] });
 });
 it('keeps B4 marketplace annotations neutral on Library cards pending B5', async () => {
  const result = await createTauriBackend(versionedCatalog().bridge).library({scope:{kind:'global'}});
@@ -1127,7 +1176,7 @@ it('summarizes a Library card from the body, falling back to frontmatter, as the
  expect(library.value?.skills.map(card=>[card.name,card.desc])).toEqual([['bodied','Use this when a deploy needs a checklist.'],['bare','frontmatter only'],['broken','/library/broken · SKILL.md name x does not equal folder broken']]);
  expect(await backend.localSkill({path:'/library/bodied'})).toMatchObject({ok:true,value:{desc_long:'Use this when a deploy needs a checklist.'}});
 });
-it.each(['move','rename','delete','fix'] as const)('maps the skillFile.%s seam and invalidates local reads',async kind=>{
+it.each(['move','copy','rename','delete','fix'] as const)('maps the skillFile.%s seam and invalidates local reads',async kind=>{
  const bare=kind==='delete'||kind==='fix';
  const value={kind,path:'/library/a',destination:bare?null:'/library/b',quarantined:null,installed:false,notices:[]},f=replay(value),backend=createTauriBackend(f.bridge),changed=vi.fn();backend.subscribe(changed);
  const result=await (kind==='delete'||kind==='fix'?backend.skillFile[kind]({path:value.path}):backend.skillFile[kind]({path:value.path,to:'b'})).done;
@@ -1184,11 +1233,29 @@ it('a team receipt this machine ran carries no attribution, and the newer of own
 it.each([
   [{ matchedVersion: null, knownToTeam: true }, 'differs', null],
   [{ matchedVersion: null, knownToTeam: true, placement: { id: 'id-a', team: 'acme', version: 'v2' }, tracked: true, placed: true }, 'differs', 'v2'],
+  // Review walk D1: the bytes decide — a folder placed as v2 whose bytes are exactly v1 IS v1, and is not "edited".
+  [{ matchedVersion: 'v1', matchedName: 'a', matchedTeam: 'acme', knownToTeam: true, placement: { id: 'id-a', team: 'acme', version: 'v2' }, tracked: true, placed: true, edited: true, health: 'local-changed' }, 'identical', 'v1'],
   [{ matchedVersion: null, knownToTeam: false, skillId: null }, 'none', null],
   [{}, null, null],
 ] as [Record<string, unknown>, 'identical' | 'differs' | 'none' | null, string | null][])('classifies a Library folder by its byte match %j', async (row, localMatch, installedVersion) => {
   const { card } = await overlayCard({ teamEval: null, localEval: null, ...row });
   expect(card).toMatchObject({ localMatch, installedVersion });
+});
+// Review walk D3: install seeds the own store with a copy of the committed receipt, so the same run_id exists twice.
+// The team receipt wins that tie, and a runner is named exactly when the shown receipt's `mine` is false — the
+// card can never say "run by <your own handle>", and an own-store receipt from a pre-M1.1 CLI (no `mine`) keeps
+// D11's reading: a seeded copy (version set) names its runner, an own run (version null) does not.
+it('breaks a same-run tie toward the team receipt and names the runner only when the shown receipt is not mine', async () => {
+  // The own twin is given a different W so the assertion proves WHICH receipt won the tie, not just the attribution.
+  const twin = { ...teamReceipt, path: '/state/evals/local/abc/20260102T000000Z/receipt.json', comparisons: { 'candidate-vs-baseline': { win: 9, loss: 1, tie: 2, net_lift: 0.3, sign_p: 0.05 } } };
+  const seeded = await overlayCard({ matchedVersion: 'v3', matchedName: 'a', matchedTeam: 'acme', knownToTeam: true, teamEval: { ...teamReceipt, team: 'acme', mine: false }, localEval: { ...twin, mine: false } });
+  expect(seeded.card.localEval).toMatchObject({ w: 7, runnerHandle: 'mira', version: 'v3' });
+  const ranByMe = await overlayCard({ matchedVersion: 'v3', matchedName: 'a', matchedTeam: 'acme', knownToTeam: true, teamEval: { ...teamReceipt, team: 'acme', mine: true }, localEval: { ...twin, mine: true } });
+  expect(ranByMe.card.localEval).toMatchObject({ runnerHandle: null, version: 'v3' });
+  const ownNewer = { ...teamReceipt, path: '/state/evals/local/abc/20260109T000000Z/receipt.json', run_id: '20260109T000000Z', version: null };
+  expect((await overlayCard({ matchedVersion: 'v3', matchedName: 'a', matchedTeam: 'acme', knownToTeam: true, teamEval: { ...teamReceipt, team: 'acme', mine: false }, localEval: { ...ownNewer, mine: true } })).card.localEval).toMatchObject({ runnerHandle: null });
+  expect((await overlayCard({ matchedVersion: 'v3', matchedName: 'a', matchedTeam: 'acme', knownToTeam: true, teamEval: null, localEval: { ...ownNewer, mine: false, provenance: { ...ownNewer.provenance, runner_handle: 'zed' } } })).card.localEval).toMatchObject({ runnerHandle: 'zed' });
+  expect((await overlayCard({ matchedVersion: null, knownToTeam: true, teamEval: null, localEval: ownNewer })).card.localEval).toMatchObject({ runnerHandle: null });
 });
 // §3.2 — a Marketplace card sees a folder whose BYTES equal one of its versions even with no ledger row and no
 // uuid; a uuid match with no byte match is this skill, edited; a match belonging to another team is nothing.
@@ -1212,4 +1279,15 @@ it.each([
   const catalog = await createTauriBackend(byteMatchedCatalog(row).bridge).catalog();
   if (!catalog.ok) throw new Error(catalog.error);
   expect(catalog.value.skills.find(skill => skill.name === 'deploy-check')).toMatchObject(expected);
+});
+// Review walk D1, the Marketplace twin: the ledger says v2, the bytes are exactly v1 — the card says v1.
+it('prefers the byte match over the ledger version on the Marketplace card', async () => {
+  const f = detailReplay((name, value) => {
+    if (name === 'ls') Object.assign((value.skills as Record<string, unknown>[])[0]!, { latest: 'v10', latestVersion: 'v10', versionCount: 10 });
+    if (name === 'ls-local') Object.assign((value.local as { rows: Record<string, unknown>[] }[])[0]!.rows[0]!, { matchedTeam: 'acme', matchedName: 'deploy-check', matchedVersion: 'v1', teamEval: null });
+    if (name === 'status') { const ledger = value.ledger as { placements: Record<string, unknown>[] }; ledger.placements = [{ ...ledger.placements[0], version: 'v2' }]; }
+  });
+  const catalog = await createTauriBackend(f.bridge).catalog();
+  if (!catalog.ok) throw new Error(catalog.error);
+  expect(catalog.value.skills.find(skill => skill.name === 'deploy-check')).toMatchObject({ installed: 'placed', placed: true, installedVersion: 'v1', localMatch: 'identical' });
 });

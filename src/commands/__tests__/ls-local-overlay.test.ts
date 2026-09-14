@@ -88,12 +88,31 @@ describe('ls --local cross-mirror overlay', () => {
     ] }] } });
   });
 
-  it('a placed copy whose bytes equal an older version matches that version, whatever the ledger recorded', async () => {
+  // Review walk D1: the bytes decide the version on both mirrors — the card shows v1, no Edited chip.
+  it('a placed copy whose bytes equal an older version matches that version, whatever the ledger recorded; matched-and-edited is a reachable row', async () => {
     const { home, store, clone } = await fixture();
     const placed = await local(home, 'a', join(clone, 'skills', 'a', 'v1'));
     await store.update((config) => { config.placements[placed] = { id: ID, team: 'team', version: 'v2', fingerprint: '', scope: { kind: 'global' }, placed_at: '' }; });
     const result = await run({ local: true, home, config: store }, new ScriptedPrompter());
-    expect(result).toMatchObject({ ok: true, value: { local: [{ rows: [{ name: 'a', placement: { version: 'v2' }, matchedVersion: 'v1', teamEval: null, knownToTeam: true }] }] } });
+    expect(result).toMatchObject({ ok: true, value: { local: [{ rows: [{ name: 'a', placement: { version: 'v2' }, matchedVersion: 'v1', teamEval: null, knownToTeam: true, edited: true }] }], problems: [] } });
+  });
+
+  // Review walk D3: `mine` on BOTH receipts, computed here and nowhere else — for the own store, "ran by any
+  // handle this machine holds", because an own-store receipt names no team.
+  it('an own-store receipt says whether this machine ran it, so a seeded teammate copy is never attributed to you', async () => {
+    const { home, store, clone, v2 } = await fixture();
+    await local(home, 'a', join(clone, 'skills', 'a', 'v2'));
+    const ownRun = async (id: string, handle: string) => {
+      const runDir = join(store.root, 'evals', 'local', v2.slice('sha256:'.length), id);
+      await mkdir(runDir, { recursive: true });
+      await writeFile(join(runDir, 'receipt.json'), JSON.stringify(receipt({ content_digest: v2, run_id: id, version: 'v2', runner_handle: handle })));
+    };
+    await ownRun('20260109T000000Z', 'seed');
+    const byMe = await run({ local: true, home, config: store }, new ScriptedPrompter());
+    expect(byMe).toMatchObject({ ok: true, value: { local: [{ rows: [{ name: 'a', localEval: { run_id: '20260109T000000Z', mine: true } }] }] } });
+    await ownRun('20260110T000000Z', 'alice');
+    const seededByAlice = await run({ local: true, home, config: store }, new ScriptedPrompter());
+    expect(seededByAlice).toMatchObject({ ok: true, value: { local: [{ rows: [{ name: 'a', localEval: { run_id: '20260110T000000Z', mine: false }, teamEval: { mine: false } }] }] } });
   });
 
   it('a committed receipt run by this handle is marked mine, and the newest run for the digest wins', async () => {
@@ -138,6 +157,18 @@ describe('ls --local cross-mirror overlay', () => {
     await store.update((config) => { config.placements[copied] = { id: ID, team: 'other', version: 'v2', fingerprint: '', scope: { kind: 'global' }, placed_at: '' }; });
     const second = await run({ local: true, home, config: store }, new ScriptedPrompter());
     expect(second).toMatchObject({ ok: true, value: { local: [{ rows: [{ name: 'a', matchedVersion: 'v2', matchedTeam: 'other' }], problems: [] }] } });
+  });
+
+  it('an own run made with no team binding at all is still mine, so the card never reads "run by local"', async () => {
+    const home = await temporaryDirectory();
+    const store = createConfigStore(join(home, 'state'));
+    const path = await local(home, 'solo', undefined, skillMd('solo', OTHER));
+    const digest = await canonicalDigest(path);
+    const runDir = join(store.root, 'evals', 'local', digest.slice('sha256:'.length), '20260111T000000Z');
+    await mkdir(runDir, { recursive: true });
+    await writeFile(join(runDir, 'receipt.json'), JSON.stringify(receipt({ content_digest: digest, run_id: '20260111T000000Z', version: 'v1', runner_handle: 'local', skill_id: OTHER })));
+    const result = await run({ local: true, home, config: store }, new ScriptedPrompter());
+    expect(result).toMatchObject({ ok: true, value: { local: [{ rows: [{ name: 'solo', localEval: { run_id: '20260111T000000Z', mine: true }, teamEval: null }] }] } });
   });
 
   it('a team whose clone is missing contributes nothing and the Library still lists every folder', async () => {

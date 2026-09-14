@@ -1,1 +1,24 @@
 .library-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;padding:0 20px 16px;flex-grow:1;min-height:0;align-content:start;overflow:auto;scrollbar-width:none}
+/* Selection mode (batch E, 2026-09-13): the bar sits between the search row and the grid, on the grid's own
+   20px gutters, and only renders while `?select=1`, so no board draws it. The notice under the header is the
+   Library's one status line (`role="status"`), the shape SkillScreen's own notice uses. */
+.library-selection-bar{display:flex;align-items:center;gap:8px;padding:0 20px 12px;flex-shrink:0}
+.library-selection-count{font-size:13px;color:var(--tk-text2);font-variant-numeric:tabular-nums;margin-right:auto}
+.library-notice{padding:0 20px 12px;font-size:13px;color:var(--tk-text2)}
+.library-notice:focus{outline:none}
+.library-notice:focus-visible{outline:2px solid var(--tk-accent);outline-offset:-2px}
+.library-selection-note{padding:0 20px 12px;margin-top:-4px;font-size:12px;line-height:16px;color:var(--tk-text2)}
+/* The bulk publish dialog (BulkPublishDialog.tsx): the shared 440px popup; only the row list scrolls, with the
+   repo's hidden scrollbar, so a long selection never grows the dialog past the window. */
+.bulk-publish-rows{display:flex;flex-direction:column;max-height:240px;overflow:auto;scrollbar-width:none;border:1px solid var(--tk-border1);border-radius:6px}
+.bulk-publish-row{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:32px;padding:0 10px;font-size:13px;color:var(--tk-text1)}
+.bulk-publish-row+.bulk-publish-row{border-top:1px solid var(--tk-border1)}
+.bulk-publish-row>span:first-child{font-weight:510;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex-shrink:0;max-width:45%}
+.bulk-publish-row>span:last-child{font-size:12px;color:var(--tk-text3);text-align:right;min-width:0;overflow-wrap:anywhere}
+.bulk-publish-row>span[data-state="done"]{color:var(--tk-text2)}
+.bulk-publish-row>span[data-state="failed"]{color:var(--tk-bad)}
+.bulk-publish-row>span[data-state="publishing"]{color:var(--tk-text1)}
+.bulk-publish-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:4px}
+
+/* The OS-drag overlay (2026-09-14): shown only while a folder hovers the window, so no board draws it. */
+.library-drop{position:fixed;inset:12px;z-index:40;display:flex;align-items:center;justify-content:center;border:2px dashed var(--tk-accent);border-radius:10px;background:color-mix(in srgb,var(--tk-accent) 10%,var(--tk-chrome));color:var(--tk-text1);font-size:14px;font-weight:510;pointer-events:none}

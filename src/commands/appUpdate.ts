@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { createConfigStore, type ConfigStore } from '../lib/config.js';
-import { exists, mkdirPrivate, writeJsonPrivate, type TransientRetry } from '../lib/fs.js';
+import { exists, mkdirPrivate, retryTransient, writeJsonPrivate, type TransientRetry } from '../lib/fs.js';
 import { invocation, type WithForm } from '../lib/invocation.js';
 import type { Launch } from '../lib/launch.js';
 import { packageVersion } from '../lib/package.js';
@@ -141,6 +141,7 @@ export async function run(args: AppUpdateArgs, io: Prompter): Promise<Result<App
     catch (error) { return failure(`Could not start the installer: ${message(error)}`); }
     return success({ mode: 'apply', version, platform, awaitPid, handedOff: true });
   }
+  let installed = false;
   try {
     await mark('waiting');
     const alive = args.alive ?? ((pid: number) => { try { process.kill(pid, 0); return true; } catch (error) { return (error as NodeJS.ErrnoException).code === 'EPERM'; } });
@@ -170,15 +171,23 @@ export async function run(args: AppUpdateArgs, io: Prompter): Promise<Result<App
       }
       return result;
     }
-    await writeFile(join(versionDir, 'installed.json'), JSON.stringify({ schema: 1, version, platform, bundle: field === 'bundle' ? target : null, installedAt: new Date().toISOString() }, null, 2));
+    // The commit point: the installer returned 0, so the new version is on the machine and running (or about to be).
+    // Everything after this is bookkeeping and may no longer turn the update into a failure — the same Windows file
+    // hold `app` survives can make either write below fail once — so the marker the app reads goes first.
+    installed = true;
     await mark('launched');
+    try { await retryTransient(() => writeFile(join(versionDir, 'installed.json'), JSON.stringify({ schema: 1, version, platform, bundle: field === 'bundle' ? target : null, installedAt: new Date().toISOString() }, null, 2)), retry); }
+    catch (error) { io.print(`${APP_PRODUCT} ${version} is installed, but its record could not be written (${message(error)}); the next check treats it as not installed until a later apply writes it.`); }
     const versions = (await versionDirectories(appRoot)).sort(newestFirst);
     const keep = new Set([...versions.slice(0, 2), version, packageVersion()]);
     // A version directory that cannot be removed costs disk and nothing else; the next apply prunes again.
     for (const name of versions) if (!keep.has(name)) await removeRetrying(join(appRoot, name), retry).catch(() => undefined);
     return success({ mode: 'apply-now', version, platform, phase: 'launched', error: null });
   } catch (error) {
-    // Even a spawn or disk exception must leave an actionable marker when storage is writable.
+    // An exception after the commit point is bookkeeping (the prune, a marker rewrite): the update happened, and the
+    // marker already says 'launched' or is about to on the next check. Before it, even a spawn or disk exception
+    // must leave an actionable marker when storage is writable.
+    if (installed) return success({ mode: 'apply-now', version, platform, phase: 'launched', error: null });
     try { return await failed(message(error)); } catch { return failure(message(error)); }
   }
 }

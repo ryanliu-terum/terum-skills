@@ -23,7 +23,8 @@ async function openMove(backend:Backend,path='~/.claude/skills/deploy-check'){
  const dialog=await screen.findByRole('dialog',{name:'Move deploy-check'});
  await within(dialog).findByRole('option',{name:'SSM'});
  fireEvent.change(within(dialog).getByLabelText('Move to'),{target:{value:'/Users/you/code/ssm'}});
- fireEvent.change(within(dialog).getByLabelText('Skill name to confirm'),{target:{value:'deploy-check'}});
+ // No typed confirmation on move/copy/rename since 2026-09-14 — the picker alone arms the action.
+ expect(within(dialog).queryByLabelText('Skill name to confirm')).toBeNull();
  return dialog;
 }
 it('moves the local folder through skillFile.move without install or uninstall',async()=>{
@@ -31,6 +32,53 @@ it('moves the local folder through skillFile.move without install or uninstall',
  const dialog=await openMove(backend);fireEvent.click(within(dialog).getByRole('button',{name:'Move'}));
  await within(dialog).findByRole('button',{name:'Done'});
  expect(move).toHaveBeenCalledWith({path:'~/.claude/skills/deploy-check',to:'/Users/you/code/ssm'});expect(install).not.toHaveBeenCalled();expect(uninstall).not.toHaveBeenCalled();
+});
+// The picker opens on a destination, never on a "Choose destination" row, and never offers the root the
+// folder is already in — the CLI refuses that one as the same folder (Ryan, 2026-09-14).
+it('opens the move picker on the first other root, omits the root the folder sits in, and moves without a second choice',async()=>{
+ const backend=createMockBackend(),move=vi.spyOn(backend.skillFile,'move');
+ openWith('#/skill/local?path='+encodeURIComponent('~/.claude/skills/deploy-check')+'&dialog=file-move',backend);
+ const dialog=await screen.findByRole('dialog',{name:'Move deploy-check'});
+ await within(dialog).findByRole('option',{name:'SSM'});
+ const picker=within(dialog).getByLabelText<HTMLSelectElement>('Move to');
+ expect([...picker.options].map(option=>option.text)).toEqual(['Terum','SSM','MRF']);
+ expect(picker.value).toBe('/Users/you/code/terum');
+ const action=within(dialog).getByRole('button',{name:'Move'});expect(action).toBeEnabled();
+ fireEvent.click(action);await within(dialog).findByRole('button',{name:'Done'});
+ expect(move).toHaveBeenCalledWith({path:'~/.claude/skills/deploy-check',to:'/Users/you/code/terum'});
+});
+it('offers Global to a folder that sits in a checkout',async()=>{
+ const backend=createMockBackend(),path='/Users/you/code/ssm/.claude/skills/';
+ const card=(await backend.library({scope:{kind:'checkout',root:'/Users/you/code/ssm'}})).value!.skills[0]!.name;
+ openWith('#/skill/local?path='+encodeURIComponent(path+card)+'&dialog=file-copy',backend);
+ const dialog=await screen.findByRole('dialog',{name:'Copy '+card});
+ const picker=await within(dialog).findByLabelText<HTMLSelectElement>('Copy to');
+ expect([...picker.options].map(option=>option.text)).toEqual(['Global','Terum','MRF']);
+ expect(picker.value).toBe('global');
+});
+it('says there is nowhere to move a folder when Global is the only root, and keeps Move disabled',async()=>{
+ openWith('#/skill/local?path='+encodeURIComponent('~/.claude/skills/deploy-check')+'&dialog=file-move&__mock=no-projects',createMockBackend());
+ const dialog=await screen.findByRole('dialog',{name:'Move deploy-check'});
+ expect(await within(dialog).findByText(/Global is the only Library root on this machine/)).toBeVisible();
+ expect(within(dialog).queryByLabelText('Move to')).toBeNull();
+ expect(within(dialog).getByRole('button',{name:'Move'})).toBeDisabled();
+});
+it('copies the local folder into the other root through skillFile.copy, leaves the source listed, and lands on the copy',async()=>{
+ const backend=createMockBackend(),copy=vi.spyOn(backend.skillFile,'copy'),install=vi.spyOn(backend,'install'),uninstall=vi.spyOn(backend,'uninstallSkill');
+ openWith('#/skill/local?path='+encodeURIComponent('~/.claude/skills/deploy-check')+'&dialog=file-copy',backend);
+ const dialog=await screen.findByRole('dialog',{name:'Copy deploy-check'});
+ await within(dialog).findByRole('option',{name:'SSM'});
+ fireEvent.change(within(dialog).getByLabelText('Copy to'),{target:{value:'/Users/you/code/ssm'}});
+ expect(within(dialog).queryByLabelText('Skill name to confirm')).toBeNull();
+ fireEvent.click(within(dialog).getByRole('button',{name:'Copy'}));
+ expect(await within(dialog).findByText('Copied ~/.claude/skills/deploy-check to /Users/you/code/ssm/.claude/skills/deploy-check.')).toBeVisible();
+ expect(copy).toHaveBeenCalledWith({path:'~/.claude/skills/deploy-check',to:'/Users/you/code/ssm'});
+ expect(install).not.toHaveBeenCalled();expect(uninstall).not.toHaveBeenCalled();
+ fireEvent.click(within(dialog).getByRole('button',{name:'Done'}));
+ await waitFor(()=>expect(location.hash).toBe('#/skill/local?path='+encodeURIComponent('/Users/you/code/ssm/.claude/skills/deploy-check')));
+ // The source is still a card in the root it was copied from: a copy takes nothing away.
+ cleanup();openWith('#/library/global',backend);
+ expect(await screen.findByTestId('skill-card-deploy-check')).toBeInTheDocument();
 });
 it('shows a failed local move without running install or uninstall',async()=>{
  const backend=createMockBackend();vi.spyOn(backend.skillFile,'move').mockImplementation(()=>createRun(async()=>({ok:false,error:'Destination unavailable.'})));
@@ -96,7 +144,7 @@ it.each([
  ['#/skill/deploy-check?menu=files','3 files'],
  ['#/skill/deploy-check?tab=evals&rail=closed&full=1','Coverage and provenance'],
 ])('reaches the real board content at %s',async(route,text)=>{open(route);expect(await screen.findByText(text)).toBeInTheDocument();expect(screen.queryByText(/S1b builds this/)).toBeNull();await waitFor(()=>expect(document.documentElement.dataset.appReady).toBe('true'));});
-it('can reopen persisted collapsed overview and rail',async()=>{useUiStore.setState({overviewHidden:true});open('#/library/global');await screen.findByText('15 skills');fireEvent.click(screen.getByRole('button',{name:'Show overview'}));expect(await screen.findByText('Team installs')).toBeInTheDocument();cleanup();useUiStore.setState({railOpen:false});open('#/skill/deploy-check');await screen.findByRole('heading',{name:'deploy-check'});fireEvent.click(screen.getByRole('button',{name:'Open details rail'}));expect(await screen.findByText('Status')).toBeInTheDocument();});
+it('can reopen persisted collapsed overview and rail',async()=>{useUiStore.setState({overviewHidden:true});open('#/library/global');await screen.findByText('15 skills');fireEvent.click(screen.getByRole('button',{name:'Show overview'}));expect(await screen.findByText('Unpublished',{selector:'.stat-label'})).toBeInTheDocument();cleanup();useUiStore.setState({railOpen:false});open('#/skill/deploy-check');await screen.findByRole('heading',{name:'deploy-check'});fireEvent.click(screen.getByRole('button',{name:'Open details rail'}));expect(await screen.findByText('Status')).toBeInTheDocument();});
 it('binds the inbox placeholder to the share selection and clears unknown ids',async()=>{const view=open('#/inbox');await waitFor(()=>expect(view.container.querySelector('[data-selected-id="share-secret-scan"]')).not.toBeNull());cleanup();const unknown=open('#/inbox/unknown');await waitFor(()=>expect(document.documentElement.dataset.appReady).toBe('true'));expect(unknown.container.querySelector('[data-selected-id]')).toBeNull();});
 
 it('keeps the Library usable with no team',async()=>{open('#/library/global?__mock=no-team');expect(await screen.findByTestId('skill-card-deploy-check')).toBeVisible();expect(screen.queryByText('No team on this machine')).toBeNull();});
@@ -191,15 +239,16 @@ it('requires a checkout root before calling library',async()=>{
 // nothing about team membership, so these fixtures keep a realistic root label: a card that
 // routes by path only because the test typed the word 'local' into `project` would pass even
 // after the adapter stopped emitting it, which is how the route broke in the first place.
-it('opens a local card and its Open menu by folder path',async()=>{
+it('opens a local card by folder path — the title link, with no Open row left in the menu',async()=>{
  const backend=createMockBackend(),result=await backend.library({scope:{kind:'global'}});if(!result.ok)throw new Error(result.error);
  const path='/a folder/.claude/skills/deploy-check';result.value.skills=[{...result.value.skills[0]!,name:'deploy-check',project:'Global',teamed:false,path}];
  vi.spyOn(backend,'library').mockResolvedValue(result);openWith('#/library/global',backend);
  const card=await screen.findByTestId('skill-card-deploy-check');expect(within(card).getByRole('link')).toHaveAttribute('href','#/skill/local?path='+encodeURIComponent(path));
- fireEvent.click(within(card).getByRole('button',{name:'More actions for deploy-check'}));fireEvent.click(await screen.findByRole('menuitem',{name:'Open'}));
- await waitFor(()=>expect(location.hash).toBe('#/skill/local?path='+encodeURIComponent(path)));
+ fireEvent.click(within(card).getByRole('button',{name:'More actions for deploy-check'}));
+ expect(await screen.findByRole('menuitem',{name:'Move to…'})).toBeInTheDocument();
+ expect(screen.queryByRole('menuitem',{name:'Open'})).toBeNull();
 });
-it.each([['Run eval','&tab=evals&dialog=run-eval'],['Delete…','&dialog=file-delete'],['Move to…','&dialog=file-move']])('routes %s on a local card by path, not by name',async(item,query)=>{
+it.each([['Run eval','&tab=evals&dialog=run-eval'],['Delete…','&dialog=file-delete'],['Move to…','&dialog=file-move'],['Copy to…','&dialog=file-copy']])('routes %s on a local card by path, not by name',async(item,query)=>{
  const backend=createMockBackend(),result=await backend.library({scope:{kind:'global'}});if(!result.ok)throw new Error(result.error);
  const path='/a folder/.claude/skills/deploy-check';
  result.value.skills=[{...result.value.skills[0]!,name:'deploy-check',project:'Global',teamed:false,placed:true,path}];
@@ -322,7 +371,7 @@ it('preserves the mock breadcrumb and fixture hygiene caption',async()=>{
 });
 
 const terumOrigin='root=%2FUsers%2Fyou%2Fcode%2Fterum';
-it.each([['Open',''],['Run eval','tab=evals&dialog=run-eval'],['Delete…','dialog=file-delete'],['Move to…','dialog=file-move']])('carries the checkout root from a project card into its %s menu row',async(label,query)=>{
+it.each([['Run eval','tab=evals&dialog=run-eval'],['Delete…','dialog=file-delete'],['Move to…','dialog=file-move'],['Copy to…','dialog=file-copy']])('carries the checkout root from a project card into its %s menu row',async(label,query)=>{
  open('#/library/checkout?'+terumOrigin);
  const card=await screen.findByTestId('skill-card-deploy-check');
  expect(within(card).getAllByRole('link')).toHaveLength(1);
@@ -442,12 +491,15 @@ it.each(['report','empty'] as const)('keeps the Evals %s Run eval control disabl
  vi.spyOn(backend,'skill').mockResolvedValue({ok:true,value:{...result.value,path:null,...(state==='empty'?{receipt:null,summary:null}:{} )}});
  openWith('#/skill/deploy-check?tab=evals',backend);const button=await screen.findByRole('button',{name:'Run eval'});expect(button).toBeDisabled();expect(screen.getByText('Install it first — evals run against the copy on your machine.')).toBeVisible();
 });
-it.each(['rename','delete'] as const)('the file %s dialog explains consequences, requires the name, and calls only its seam',async kind=>{
+// Rename asks for the new name and nothing else; delete keeps the CLI's typed-name confirmation, which
+// is the one D6 mode that is not undone by running the same verb again (Ryan, 2026-09-14).
+it.each(['rename','delete'] as const)('the file %s dialog explains consequences, arms on its own field, and calls only its seam',async kind=>{
  const backend=createMockBackend(),method=vi.spyOn(backend.skillFile,kind);
  openWith('#/skill/local?path='+encodeURIComponent('~/.claude/skills/deploy-check')+'&dialog=file-'+kind,backend);
  const dialog=await screen.findByRole('dialog'),action=within(dialog).getByRole('button',{name:kind==='rename'?'Rename':'Delete'});expect(action).toBeDisabled();
- if(kind==='rename'){expect(dialog).toHaveTextContent('invocation name');expect(dialog).toHaveTextContent('Version 1');fireEvent.change(within(dialog).getByLabelText('New name'),{target:{value:'new-name'}});}else expect(dialog).toHaveTextContent('removes it from your installs');
- fireEvent.change(within(dialog).getByLabelText('Skill name to confirm'),{target:{value:'deploy-check'}});fireEvent.click(action);await within(dialog).findByRole('button',{name:'Done'});expect(method).toHaveBeenCalledWith({path:'~/.claude/skills/deploy-check',...(kind==='rename'?{to:'new-name'}:{})});
+ if(kind==='rename'){expect(dialog).toHaveTextContent('invocation name');expect(dialog).toHaveTextContent('Version 1');expect(within(dialog).queryByLabelText('Skill name to confirm')).toBeNull();fireEvent.change(within(dialog).getByLabelText('New name'),{target:{value:'new-name'}});}
+ else {expect(dialog).toHaveTextContent('removes it from your installs');fireEvent.change(within(dialog).getByLabelText('Skill name to confirm'),{target:{value:'deploy-check'}});}
+ expect(action).toBeEnabled();fireEvent.click(action);await within(dialog).findByRole('button',{name:'Done'});expect(method).toHaveBeenCalledWith({path:'~/.claude/skills/deploy-check',...(kind==='rename'?{to:'new-name'}:{})});
 });
 
 it.each([false,true])('shows local receipt attribution or the stale-score explanation on the card (edited %s)',async edited=>{
@@ -456,7 +508,7 @@ it.each([false,true])('shows local receipt attribution or the stale-score explan
  const card={...library.value.skills[0]!,name:'deploy-check',teamed:false,edited,summary:edited?null:detail.value.summary,localEval:edited?null:{...detail.value.summary,runnerHandle:'mira',version:'v4'},localEvalStale:edited};
  vi.spyOn(backend,'library').mockResolvedValue({ok:true,value:{...library.value,skills:[card]}});openWith('#/library/global',backend);
  const face=await screen.findByTestId('skill-card-deploy-check');
- expect(face).toHaveTextContent(edited?'Not evaluated · evaluated before your last edit':'run by mira · Version 4');
+ expect(face).toHaveTextContent(edited?'Not evaluated · evaluated before your last edit':'run by mira · v4');
  if(edited)expect(within(face).getByText('Edited')).toBeVisible();
 });
 it.each(['evals','run-eval','publish'])('excludes an inspected-invalid local folder from %s while keeping its reason visible',async entry=>{

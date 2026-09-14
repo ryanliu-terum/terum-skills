@@ -8,6 +8,7 @@ import { packageVersion } from './lib/package.js';
 import { Command, Option } from 'commander';
 import { run as login } from './commands/login.js';
 import { run as runProject } from './commands/project.js';
+import { run as runReconcile } from './commands/reconcile.js';
 import { run as runTeam, type TeamCommand } from './commands/team.js';
 import { run as install } from './commands/install.js';
 import { run as uninstall } from './commands/uninstall.js';
@@ -35,10 +36,10 @@ import { failure, Result } from './lib/result.js';
  * to it. `execute` is injected so the mapping and the exit code are testable without a terminal.
  */
 export type Execute = (invoke: (io: Prompter) => Promise<Result<unknown>>, meta: { verb: string; notices: boolean }) => Promise<void>;
-export interface CliVerbs { skill?: typeof runSkill; project?: typeof runProject; profile?: typeof profile; app?: typeof runApp; appUpdate?: typeof runAppUpdate; update?: typeof runUpdate; login: typeof login; team: TeamCommand; setup?: typeof runSetup; install?: typeof install; uninstall?: typeof uninstall; uninstallMachine?: typeof runUninstallMachine; sync?: typeof sync; prune?: typeof prune; search?: typeof search; invite?: typeof invite; ls?: typeof runLs; status?: typeof status; readme?: typeof readme; publish?: typeof runPublish; leave?: typeof runLeave; guardPush?: typeof runGuardPush; validate?: typeof runValidate; eval?: typeof runEval; evalReport?: typeof runEvalReport; }
+export interface CliVerbs { skill?: typeof runSkill; project?: typeof runProject; reconcile?: typeof runReconcile; profile?: typeof profile; app?: typeof runApp; appUpdate?: typeof runAppUpdate; update?: typeof runUpdate; login: typeof login; team: TeamCommand; setup?: typeof runSetup; install?: typeof install; uninstall?: typeof uninstall; uninstallMachine?: typeof runUninstallMachine; sync?: typeof sync; prune?: typeof prune; search?: typeof search; invite?: typeof invite; ls?: typeof runLs; status?: typeof status; readme?: typeof readme; publish?: typeof runPublish; leave?: typeof runLeave; guardPush?: typeof runGuardPush; validate?: typeof runValidate; eval?: typeof runEval; evalReport?: typeof runEvalReport; }
 
 export function buildProgram(execute: Execute, verbs: CliVerbs = { login, team: runTeam }, context: { form?: InvocationForm; launch?: Launch; noUpdateCheck?: boolean; frames?: boolean; serve?: () => Promise<void> } = {}): Command {
-  const active: Required<CliVerbs> = { skill: verbs.skill ?? runSkill, project: verbs.project ?? runProject, profile: verbs.profile ?? profile, app: verbs.app ?? runApp, appUpdate: verbs.appUpdate ?? runAppUpdate, update: verbs.update ?? runUpdate, login: verbs.login, team: verbs.team, setup: verbs.setup ?? runSetup, install: verbs.install ?? install, uninstall: verbs.uninstall ?? uninstall, uninstallMachine: verbs.uninstallMachine ?? runUninstallMachine, sync: verbs.sync ?? sync, prune: verbs.prune ?? prune, search: verbs.search ?? search, invite: verbs.invite ?? invite, ls: verbs.ls ?? runLs, status: verbs.status ?? status, readme: verbs.readme ?? readme, publish: verbs.publish ?? runPublish, leave: verbs.leave ?? runLeave, guardPush: verbs.guardPush ?? runGuardPush, validate: verbs.validate ?? runValidate, eval: verbs.eval ?? runEval, evalReport: verbs.evalReport ?? runEvalReport };
+  const active: Required<CliVerbs> = { skill: verbs.skill ?? runSkill, project: verbs.project ?? runProject, reconcile: verbs.reconcile ?? runReconcile, profile: verbs.profile ?? profile, app: verbs.app ?? runApp, appUpdate: verbs.appUpdate ?? runAppUpdate, update: verbs.update ?? runUpdate, login: verbs.login, team: verbs.team, setup: verbs.setup ?? runSetup, install: verbs.install ?? install, uninstall: verbs.uninstall ?? uninstall, uninstallMachine: verbs.uninstallMachine ?? runUninstallMachine, sync: verbs.sync ?? sync, prune: verbs.prune ?? prune, search: verbs.search ?? search, invite: verbs.invite ?? invite, ls: verbs.ls ?? runLs, status: verbs.status ?? status, readme: verbs.readme ?? readme, publish: verbs.publish ?? runPublish, leave: verbs.leave ?? runLeave, guardPush: verbs.guardPush ?? runGuardPush, validate: verbs.validate ?? runValidate, eval: verbs.eval ?? runEval, evalReport: verbs.evalReport ?? runEvalReport };
   const program = new Command();
   program.version(packageVersion() ?? 'version unknown', '-v, --version');
   program.name('terum-skills').description('Share private Claude Code skills through a team git repository.').exitOverride();
@@ -69,11 +70,16 @@ export function buildProgram(execute: Execute, verbs: CliVerbs = { login, team: 
     .option('--app', 'open the desktop app (the default wherever one exists)')
     .option('--no-app', 'keep setup in the terminal; do not open the desktop app')
     .option('--no-projects', 'do not offer to add a project to your library')
+    .option('--no-existing', 'do not check existing Library skills against the team')
     .option('--no-evals', 'do not offer to evaluate the shared skills that have no receipt')
-    .action(async (target: string | undefined, options: { app?: boolean; projects?: boolean; evals?: boolean }) => execute((io) => active.setup({ form: context.form, target, app: options.app, projects: options.projects, evals: options.evals, cwd: process.cwd() }, io), { verb: 'setup', notices: true }));
+    .action(async (target: string | undefined, options: { app?: boolean; projects?: boolean; existing?: boolean; evals?: boolean }) => execute((io) => active.setup({ form: context.form, target, app: options.app, projects: options.projects, ...(options.existing === false ? { existing: false } : {}), evals: options.evals, cwd: process.cwd() }, io), { verb: 'setup', notices: true }));
 
-  const skill = program.command('skill').description('Move, rename, delete, or fix a folder in your Library');
-  for (const kind of ['move', 'rename'] as const) skill.command(`${kind} <path>`).requiredOption('--to <destination>', kind === 'move' ? 'global or a registered project root' : 'new skill name')
+  const skill = program.command('skill').description('Move, copy, rename, delete, or fix a folder in your Library');
+  for (const kind of ['move', 'copy', 'rename'] as const) skill.command(`${kind} <path>`)
+    .description(kind === 'move' ? 'Move a Library folder to another root; the original is gone'
+      : kind === 'copy' ? 'Copy a Library folder into another root; the original stays where it is'
+      : 'Rename a Library folder; the folder name is the invocation name')
+    .requiredOption('--to <destination>', kind === 'rename' ? 'new skill name' : 'global or a registered project root')
     .action(async (path: string, options: { to: string }) => execute(io => active.skill({ form: context.form, kind, path, to: options.to }, io), { verb: `skill ${kind}`, notices: true }));
   skill.command('delete <path>').description('Remove a Library folder after typing its name')
     .action(async (path: string) => execute(io => active.skill({ form: context.form, kind: 'delete', path }, io), { verb: 'skill delete', notices: true }));
@@ -87,6 +93,11 @@ export function buildProgram(execute: Execute, verbs: CliVerbs = { login, team: 
     .action(async (path: string) => execute(io => active.project({ form: context.form, kind: 'remove', path, cwd: process.cwd() }, io), { verb: 'project remove', notices: true }));
   project.command('list').description('List the projects in your library')
     .action(async () => execute(io => active.project({ form: context.form, kind: 'list' }, io), { verb: 'project list', notices: true }));
+
+  program.command('reconcile').description('Check Library folders against published team skills')
+    .option('--list', 'list matches without asking or writing')
+    .addOption(new Option('--team <team>', 'configured team (required when more than one exists)').hideHelp())
+    .action(async (options: { list?: boolean; team?: string }) => execute(io => active.reconcile({ form: context.form, ...options }, io), { verb: 'reconcile', notices: true }));
 
   const team = program.command('team').description(`Create, join, leave, and admin settings for a team; run \`${invocation(context.form, 'team')}\` to see all options`);
   team.command('migrate')
@@ -163,21 +174,26 @@ export function buildProgram(execute: Execute, verbs: CliVerbs = { login, team: 
   program.command('receipt-check', { hidden: true }).action(async () => execute(async (io) => { io.print('receipt-check is retired; publish records receipts when it mints a version.'); return { ok: true, value: undefined }; }, { verb: 'receipt-check', notices: false }));
   program.command('share [ref]', { hidden: true }).action(async () => execute(async () => failure(`\`share\` is retired; run \`${invocation(context.form, 'publish <skill>')}\` to publish a skill explicitly.`), { verb: 'share', notices: false }));
   program.command('eval-report <skill>').description("Show a skill's committed eval receipts and this machine's local runs (read-only, no fetch)").option('--team <team>', 'configured team (required when more than one exists)').action(async (ref: string, options: { team?: string }) => execute((io) => active.evalReport({ form: context.form, ref, ...options }, io), { verb: 'eval-report', notices: false }));
-  program.command('eval [skill]').description("Evaluate a skill on this machine; its receipt is published to the team when these exact bytes are already a published version").option('--k <n>', 'repetitions per execution case (default 1; --k 3 or more for a receipt you intend to gate on)', Number).option('--no-commit', 'keep the receipt on this machine instead of publishing it to the team').option('--triggers-only').option('--execution-only').option('--case <stem>').option('--model <model>').option('--judge-model <model>').option('--no-gen', 'do not generate missing eval assets').option('--team <team>').option('--parallel <n>', 'queued evals to run at a time (default: 4)', Number).option('--queue-list', 'list queued evals').option('--drain', 'run queued evals').option('--window <window>', 'drain only overnight items').option('--max <n>', 'maximum queued items to attempt', Number).option('--dequeue <skill>', 'remove a skill from the queue (<skill> or <team>/<skill>)').action(async (ref: string | undefined, options: { parallel?: number; queueList?: boolean; drain?: boolean; window?: string; max?: number; dequeue?: string; k?: number; triggersOnly?: boolean; executionOnly?: boolean; case?: string; model?: string; judgeModel?: string; gen?: boolean; commit?: boolean; team?: string }) => {
+  program.command('eval [skills...]').description("Evaluate local skills; several at once run as a batch, --window queues them for the app or a later drain; a receipt is published to the team when the skill's exact bytes are already a published version").option('--k <n>', 'repetitions per execution case (default 1; --k 3 or more for a receipt you intend to gate on)', Number).option('--no-commit', 'keep the receipt on this machine instead of publishing it to the team').option('--triggers-only').option('--execution-only').option('--case <stem>').option('--model <model>').option('--judge-model <model>').option('--no-gen', 'do not generate missing eval assets').option('--team <team>').option('--parallel <n>', 'evals to run at a time (default: 4)', Number).option('--batch <n>', 'run this many at a time and ask before each further batch; declining queues the rest for later', Number).option('--pending', 'every shared skill with no receipt for its current version (what setup offers)').option('--queue-list', 'list queued evals').option('--drain', 'run queued evals').option('--window <window>', 'with skills: queue them for that window (overnight | later) instead of running; with --drain: drain only that window').option('--max <n>', 'maximum queued items to attempt', Number).option('--dequeue <skill>', 'remove a skill from the queue (<skill> or <team>/<skill>)').action(async (refs: string[], options: { parallel?: number; batch?: number; pending?: boolean; queueList?: boolean; drain?: boolean; window?: string; max?: number; dequeue?: string; k?: number; triggersOnly?: boolean; executionOnly?: boolean; case?: string; model?: string; judgeModel?: string; gen?: boolean; commit?: boolean; team?: string }) => {
     // commander models `--no-gen` as `gen: false`; with `--gen` deleted (D29) false is the only
     // value it can carry, and `use what is there, generate what is missing` is the default.
     // commander models `--no-X` as a default of `true`, so `commit` is dropped unless it was actually
     // typed: publishing a matching receipt is the default, and only an explicit `--no-commit` opts out.
     const { gen, commit, ...rest } = options;
     const args = { form: context.form, ...rest, ...(gen === false ? { noGen: true } : {}), ...(commit === false ? { commit: false } : {}) };
-    if (ref === undefined || options.queueList || options.drain || options.dequeue !== undefined || options.window !== undefined || options.max !== undefined || options.parallel !== undefined) {
+    // Three shapes share the verb: the queue modes (no skills), one skill (the ordinary run), and several skills
+    // or the wizard's batch/window/pending choices as flags (runMany). Queue-mode validation stays in runQueue.
+    const queueMode = options.queueList || options.drain || options.dequeue !== undefined || options.max !== undefined;
+    if (queueMode || (refs.length === 0 && !options.pending)) {
       const { runQueue } = await import('./commands/eval.js');
-      return execute(io => runQueue({ ...args, ref }, io), { verb: 'eval', notices: true });
+      return execute(io => runQueue({ ...args, ...(refs[0] === undefined ? {} : { ref: refs[0] }) }, io), { verb: 'eval', notices: true });
     }
-    return execute(io => active.eval({ ...args, ref }, io), { verb: 'eval', notices: true });
+    if (refs.length === 1 && !options.pending && options.batch === undefined && options.window === undefined && options.parallel === undefined) return execute(io => active.eval({ ...args, ref: refs[0]! }, io), { verb: 'eval', notices: true });
+    const { runMany } = await import('./commands/eval.js');
+    return execute(io => runMany({ ...args, refs }, io), { verb: 'eval', notices: true });
   });
 
-  program.command('install <ref> [value]').description('Install the latest version: <ref>, `member <handle>`, or `project <name>`').addOption(new Option('--team <team>').hideHelp()).option('--yes-profile', 'add the installed skill to your profile').option('--into <global|root>').action(async (ref: string, value: string | undefined, options: { team?: string; yesProfile?: boolean; into?: string }) => execute((io) => active.install(ref === 'member' ? { kind: 'member', member: value, ...options, form: context.form } : ref === 'project' ? { kind: 'project', project: value, ...options, form: context.form } : { ref, ...options, form: context.form }, io), { verb: 'install', notices: true }));
+  program.command('install [ref] [value]').description('Install the latest version, or adopt a matching folder already in your Library').addOption(new Option('--team <team>').hideHelp()).option('--yes-profile', 'add the installed skill to your profile').option('--into <global|root>').option('--adopt <path>', 'record this existing Library folder as installed without copying it').action(async (ref: string | undefined, value: string | undefined, options: { team?: string; yesProfile?: boolean; into?: string; adopt?: string }) => execute((io) => active.install(ref === 'member' ? { kind: 'member', member: value, ...options, form: context.form } : ref === 'project' ? { kind: 'project', project: value, ...options, form: context.form } : { ref, ...options, form: context.form }, io), { verb: 'install', notices: true }));
   program.command('uninstall-skill <ref> [value]').description('Remove a placed skill: <ref>, `member <handle>`, or `project <name>`').addOption(new Option('--team <team>').hideHelp()).option('--from <global|root>').action(async (ref: string, value: string | undefined, options: { team?: string; from?: string }) => execute((io) => active.uninstall(ref === 'member' ? { kind: 'member', member: value, ...options, form: context.form } : ref === 'project' ? { kind: 'project', project: value, ...options, form: context.form } : { ref, ...options, form: context.form }, io), { verb: 'uninstall-skill', notices: true }));
   program.command('uninstall').description('Remove terum-skills from this machine: your team (placed skills, local clone, cache), the session-start hook and the /terum-skills Claude Code skill if present, and ~/.terum/skills except recovery data; then prints the package-manager step').allowExcessArguments().action(async (_options: Record<string, never>, command: Command) => execute(async (io) => command.args.length ? failure(`To remove a skill, use \`${invocation(context.form, 'uninstall-skill <ref>')}\`.`) : active.uninstallMachine({ launch: context.launch, form: context.form }, io), { verb: 'uninstall', notices: true }));
   program.command('sync').description('Fetch each team clone and reset it to origin/main. Nothing on this machine is changed: no placement, no upload, no edit to your skills.').option('--hook', 'session-start mode').addOption(new Option('--team <team>', 'configured team (required when more than one exists)').hideHelp()).action(async (options: { hook?: boolean; team?: string }) => execute((io) => active.sync({ ...options, form: context.form }, io), { verb: 'sync', notices: !options.hook }));
@@ -195,6 +211,7 @@ export function buildProgram(execute: Execute, verbs: CliVerbs = { login, team: 
   program.command('profile').description('Update your own team profile')
     .option('--name <display>').option('--bio <text>').option('--role <role>')
     .option('--project <name>', 'project membership (repeat for each project)', (value: string, previous: string[]) => [...previous, value], [])
+    .option('--remove <skill>', 'take a skill off your profile (publishing adds it)')
     .addOption(new Option('--team <team>').hideHelp())
     .action(async (options: Omit<ProfileArgs, 'projects'> & { project?: string[] }) => {
       const { project, ...rest } = options;

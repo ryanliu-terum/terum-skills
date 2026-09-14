@@ -1,10 +1,15 @@
 import { useContext, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { useNavigate } from 'react-router';
+import { useQuery } from '@tanstack/react-query';
 import { PromptContext, setupSession, useBackend, SETUP_STEP_TO_BOARD } from '../../backend';
 import { SETUP_STEP_KEYS } from '../../backend/types';
 import type { LaunchContext, Onboarding, SetupStep } from '../../backend/types';
 import { ScreenFrame } from '../../components/domain/ScreenFrame';
 import { OnboardingActions, OnboardingColumn, OnboardingFrame, OnboardingPara, OnboardingTile, OnboardingTitle, ProgressCard } from './OnboardingParts';
+import { ReconcileDialog } from '../../components/domain/ReconcileDialog';
+import { SectionLabel } from '../../components/domain/Primitives';
+import { WorkflowField } from '../../components/domain/WorkflowControls';
+import { reconcileHasRows } from '../../components/domain/reconcile';
 
 const rows: readonly [SetupStep, string][] = [
  ['github','Checking GitHub access'], ['team','Configuring the team'],
@@ -29,6 +34,16 @@ export function SetupBoot({launch,restart=false}:{launch:LaunchContext;restart?:
  useEffect(()=>{if(!restart&&state.outcome==='cancelled'&&!navigated.current){navigated.current=true;navigate('/library/global');}},[restart,state.outcome,navigate]);
  const result=state.result, failed=result?.ok===false&&!result.cancelled&&!result.refused, refused=result?.ok===false&&result.refused===true;
  const steps=result?.value?.steps;
+ const [reconcileDismissed,setReconcileDismissed]=useState(false);
+ // `handoff` is the CLI's "you picked Join and named no repository" exit. It used to end the screen with
+ // "Ask your team owner to invite you" and a single Back button, which is wrong for the common joiner: one
+ // who accepted the invitation days ago and now has nothing pending to accept. Naming the repository is the
+ // whole of what setup still needs, so the screen asks for it and re-enters the wizard with it as the target.
+ const [joinTarget,setJoinTarget]=useState('');
+ const join=()=>{const target=joinTarget.trim();if(target)navigate(`/onboarding/boot?start=1&target=${encodeURIComponent(target)}`);};
+ const reconcileQuery=useQuery({queryKey:['setup-reconcile',launch.writtenAt],enabled:state.outcome==='finished'&&steps?.existing==='printed'&&!reconcileDismissed,queryFn:()=>backend.reconcile.list(),retry:false});
+ // Disabling the query keeps its cached data, so the dismissed flag must gate the render too or Done/Cancel/Escape leave the modal open.
+ const reconcile=!reconcileDismissed&&reconcileQuery.data?.ok&&reconcileHasRows(reconcileQuery.data.value)?reconcileQuery.data.value:null;
  const progress=state.progress, progressRow=progress?rows.find(([key])=>key===progress.label):undefined;
  const cardRows:Onboarding['bootRows']=rows.map(([key,label])=>{
   const outcome=steps?.[key];
@@ -43,13 +58,14 @@ export function SetupBoot({launch,restart=false}:{launch:LaunchContext;restart?:
  const current=state.activeStep?SETUP_STEP_TO_BOARD[state.activeStep]:null;
  return <ScreenFrame><OnboardingFrame steps={[]} current={null} skipped={[]}><OnboardingColumn>
   <OnboardingTile icon={TILE[state.outcome]}/>
-  <OnboardingTitle>{{running:'Setting up your workspace',finished:'Setup finished',handoff:'Ask your team owner to invite you',cancelled:'Setup cancelled',refused:'Setup not started',failed:"Couldn't finish setup"}[state.outcome]}</OnboardingTitle>
+  <OnboardingTitle>{{running:'Setting up your workspace',finished:'Setup finished',handoff:'Join an existing team',cancelled:'Setup cancelled',refused:'Setup not started',failed:"Couldn't finish setup"}[state.outcome]}</OnboardingTitle>
   {launch.target&&<OnboardingPara>{launch.target}</OnboardingPara>}
   <ProgressCard label="Setup progress" rows={cardRows} placed={progress?.done??null} total={progress?.total??null} failed={failed}/>
-  <div role="status" aria-live="polite">{result?(result.ok?state.outcome==='handoff'?'Ask your team owner to invite you.':'Setup finished.':result.error):progressRow?.[1]??progress?.label??current??'Setup is running.'}</div>
+  <div role="status" aria-live="polite">{result?(result.ok?state.outcome==='handoff'?"Enter your team's repository, or ask the team owner to invite you.":'Setup finished.':result.error):progressRow?.[1]??progress?.label??current??'Setup is running.'}</div>
   <div aria-label="Setup output" className="onboarding-error-line">{(state.outcome==='handoff'?state.lines.slice(-5):state.lines).map((line,index)=><div key={index} className={line.startsWith('✓ ')?'setup-output-ok':line.startsWith('✗ ')?'setup-output-bad':undefined}>{line}</div>)}</div>
+  {state.outcome==='handoff'&&<div className="onboarding-fields"><div><SectionLabel>Your team&#39;s repository</SectionLabel><WorkflowField aria-label="Team repository" placeholder="org/repo" value={joinTarget} onChange={e=>setJoinTarget(e.target.value)} onKeyDown={e=>{if(e.key==='Enter')join();}}/><span>If you already have access — you accepted the invitation, or the owner added you directly — setup joins from here. Nothing needs to be pending.</span></div></div>}
   {failed&&<div role="alert" className="onboarding-error-line">{result.error}</div>}
   {state.persistenceError&&<div role="alert">{state.persistenceError}</div>}
-  {refused?<OnboardingActions primary="Open Settings ▸ Team" onPrimary={()=>navigate('/settings/teams')}/>:state.outcome==='running'?<OnboardingActions primary="Stop" onPrimary={()=>void session.stop()}/>:state.outcome==='failed'||state.outcome==='cancelled'?<OnboardingActions primary="Retry" onPrimary={()=>void session.retry()} secondary="Back" onSecondary={()=>navigate('/library/global')}/>:<OnboardingActions primary={state.outcome==='handoff'?'Back to the Library':'Open the Library'} onPrimary={()=>navigate('/library/global')}/>}
- </OnboardingColumn></OnboardingFrame></ScreenFrame>;
+  {refused?<OnboardingActions primary="Open Settings ▸ Team" onPrimary={()=>navigate('/settings/teams')}/>:state.outcome==='running'?<OnboardingActions primary="Stop" onPrimary={()=>void session.stop()}/>:state.outcome==='failed'||state.outcome==='cancelled'?<OnboardingActions primary="Retry" onPrimary={()=>void session.retry()} secondary="Back" onSecondary={()=>navigate('/library/global')}/>:state.outcome==='handoff'?<OnboardingActions primary="Join" secondary="Back to the Library" onPrimary={join} onSecondary={()=>navigate('/library/global')}/>:<OnboardingActions primary="Open the Library" onPrimary={()=>navigate('/library/global')}/>}
+ </OnboardingColumn></OnboardingFrame>{reconcile?<ReconcileDialog result={reconcile} title="Your skills" onClose={()=>setReconcileDismissed(true)}/>:null}</ScreenFrame>;
 }

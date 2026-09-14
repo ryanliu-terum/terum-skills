@@ -43,8 +43,8 @@ it('does not advertise a release before checking',async()=>{
  open('#/settings/about');expect(await screen.findByText('terum-skills CLI')).toBeVisible();
  expect(screen.queryByText(/available/)).toBeNull();expect(screen.getByRole('button',{name:'Check'})).toBeVisible();
 });
-it('does not offer or describe unknown eval defaults',async()=>{
- open('#/settings/evals');expect(await screen.findByText('terum-skills keeps no default k; the CLI decides per run.')).toBeVisible();
+it('names the CLI default k and offers no unknown-k choice',async()=>{
+ open('#/settings/evals');expect(await screen.findByText('terum-skills runs k = 1 unless a run passes --k, and the app passes none from here yet; k = 3 or more for a receipt you intend to gate on.')).toBeVisible();
  expect(screen.queryByRole('option',{name:'—'})).toBeNull();expect(screen.queryByText(/k = —/)).toBeNull();
  expect(screen.getByText('The app passes no eval flags; terum-skills uses its own defaults.')).toBeVisible();
 });
@@ -91,6 +91,7 @@ it('counts tracked and pinned placements separately when the complete ledger is 
    value.local[0]!.rows.push({...value.local[0]!.rows[0]!,name:'pinned',path:'/Users/teddy/.claude/skills/pinned',tracked:false});
   }
  });
- expect(await screen.findByText(/Re-placed at sync.*1 placement on this machine/)).toBeVisible();
+ // The Tracked row's copy describes the fetch-only sync (a fetch only tells; install places), so the count is read after that sentence.
+ expect(await screen.findByText(/running install again is what places it\. 1 placement on this machine/)).toBeVisible();
  expect(screen.getByText(/Installed at a version.*1 on this machine/)).toBeVisible();
 });

@@ -2,12 +2,14 @@ import { isUnderRoot, normalizeSeparators } from '../../lib/skill-path';
 import { z } from 'zod';
 import { browserPrefs } from '../prefs';
 import { FEATURE_KEYS } from '../types';
-import type { Settings, SyncResult, ChangeSource, Features, Identity, Library, Project, Root, LibraryScope, SkillDetail ,TeamResult} from '../types';
+import type { Settings, SyncResult, ChangeSource, Features, Identity, Project, Root, LibraryScope, SkillDetail, TeamResult, ReconcileResult } from '../types';
 import { decodeText } from '../../lib/fixture-text';
 import { overviewCopy } from '../../lib/overview-copy';
+import { unpublishedOverview } from '../../lib/overview-counts';
 import { abbreviateHome } from '../paths';
 import type { Backend } from '../Backend';
-import type { InviteResult, Result, Roster, Run, SearchHit, SetupResult, SkillCard } from '../types';
+import type { EvalManyResult, FileDropEvent, InviteResult, Result, Roster, Run, SearchHit, SetupResult, SkillCard, Subscription } from '../types';
+import type { EvalQueueItem } from '../eval-queue';
 import { design, inboxItems, skillByRef, cardOf, detailOf, catalogData, remoteSlugsOf, MOCK_ORIGIN } from './data';
 import { cli, roster_by_adoption, statusLines } from './derive';
 import { onboardingData, replaySetupEvals } from './onboarding';
@@ -46,9 +48,32 @@ const cancelled=(error:string):Result<never>=>({ok:false,error,cancelled:true});
 const fatal=decodeText(design.ONBOARD_FETCH_ERROR);
 const errors={status:"Could not read ~/.terum/skills/config.json.",library:"EACCES: permission denied, scandir '~/.terum/skills'",settings:"Invalid ~/.terum/skills/config.json: Expected property name or '}' in JSON at position 412 (line 14 column 3)",inbox:fatal,marketplace:"fatal: unable to access 'https://github.com/terum/team-skills.git/': Could not resolve host: github.com",share:"ENOENT: no such file or directory, scandir '~/.terum/skills/teams/terum/people'",skill:(ref:string)=>`ENOENT: no such file or directory, open '~/.claude/skills/${ref}/SKILL.md'`,onboarding:design.ONBOARD_FETCH_ERROR.replaceAll("&#39;", "'")};
 const ok=<T>(value:T):Result<T>=>({ok:true,value});
+/** The paths an HTML5 drop carries: one per non-empty `text/plain` line. A browser never exposes a dropped folder's real path, so a folder dropped from the OS yields none. */
+export function dropPathsFrom(data:Pick<DataTransfer,'getData'>|null):string[]{
+ if(!data)return [];
+ try{return data.getData('text/plain').split(/\r?\n/).map(line=>line.trim()).filter(Boolean);}catch{return [];/* getData throws for a protected store; that is the same as carrying nothing. */}
+}
+/** HTML5 drag events on the window, folded to the seam's three kinds; `dragover` is cancelled so the drop reaches the page. */
+function listenHtmlDrops(listener:(event:FileDropEvent)=>void):Subscription{
+ if(typeof window==='undefined')return ()=>{};
+ let inside=false;
+ const enter=(event:DragEvent)=>{event.preventDefault();if(!inside){inside=true;listener({kind:'enter',paths:[]});}};
+ const over=(event:DragEvent)=>{event.preventDefault();};
+ const leave=(event:DragEvent)=>{if(event.relatedTarget===null&&inside){inside=false;listener({kind:'leave'});}};
+ const drop=(event:DragEvent)=>{event.preventDefault();inside=false;listener({kind:'drop',paths:dropPathsFrom(event.dataTransfer)});};
+ window.addEventListener('dragenter',enter);window.addEventListener('dragover',over);window.addEventListener('dragleave',leave);window.addEventListener('drop',drop);
+ return ()=>{window.removeEventListener('dragenter',enter);window.removeEventListener('dragover',over);window.removeEventListener('dragleave',leave);window.removeEventListener('drop',drop);};
+}
 const fail=(error:string):Result<never>=>({ok:false,error:abbreviateHome(decodeText(error),'')});
 const zeroCopy=overviewCopy;
-const zeroOverview={skills:'0',skills_note:zeroCopy.skills,evaluated:'—',meter:{pass_:0,neutral:0,fail:0,total:0},meter_text:zeroCopy.evaluated,installs:'0',installs_note:zeroCopy.installs,attention:'0',attention_lines:[zeroCopy.attention],attention_link:design.LIBRARY_OVERVIEW.attention_link,zero:zeroCopy};
+const zeroOverview={skills:'0',skills_note:zeroCopy.skills,evaluated:'—',meter:{pass_:0,neutral:0,fail:0,total:0},meter_text:zeroCopy.evaluated,installs:'0',installs_note:zeroCopy.installs,unpublished:'0',unpublished_note:'',attention:'0',attention_lines:[zeroCopy.attention],attention_link:design.LIBRARY_OVERVIEW.attention_link,zero:zeroCopy};
+const reconcileFixture=():ReconcileResult=>({
+ identical:[{path:'~/.claude/skills/deploy-check',name:'deploy-check',team:design.TEAMS[0]!.key,skillId:'mock-deploy-check',version:'v5'}],
+ differing:[
+  {path:'~/.claude/skills/release-notes',name:'release-notes',team:design.TEAMS[0]!.key,skillId:'mock-release-notes',teamVersion:'v2',nextVersion:'v3',sameId:true,teamAuthor:'teddy'},
+  {path:'~/.claude/skills/pr-review',name:'pr-review',team:design.TEAMS[0]!.key,skillId:null,teamVersion:'v4',nextVersion:'v5',sameId:false,teamAuthor:'ajayw36'},
+ ],renamed:[],adopted:[],published:[],
+});
 function removalState<T extends SkillCard>(skill:T):T { return removed.has(skill.name)?{...skill,installed:'absent',placed:false,onDiskOnly:false,paths:[]}:skill; }
 export function createMockBackend(opts:{latencyMs?:number}={}):Backend & {readonly quitRequested:boolean;readonly appUpdateCalls:readonly (readonly ['armOnClose',string] | readonly ['disarmOnClose'])[]} {
  const identity:Identity=structuredClone({...design.ME,initials:'TZ',footerLabel:design.MACHINE.gh_login});
@@ -69,15 +94,27 @@ export function createMockBackend(opts:{latencyMs?:number}={}):Backend & {readon
   return createRun(async ctx=>{if(scenario==='error')return fail(errors[family]);if(scenario==='loading'){while(true)await ctx.sleep(60_000);}if(scenario==='slow'||latency)await ctx.sleep(scenario==='slow'?2000:latency);return structuredClone(await script(ctx));});
  }
  const fileChanges=new Map<string,{path:string|null;name:string;original:string}>();
+ /** The CLI's `eval` takes a skill, never a URL segment: a by-path ref names the folder, whose name is the skill's unless this session moved or renamed it. */
+ const localName=(ref:string)=>[...fileChanges.values()].find(change=>change.path===ref)?.original??ref.split(/[\\/]/).filter(Boolean).at(-1)??ref;
  function folderOf(root:Root):string{return root.kind==='global'?'~/.claude/skills':root.root+'/.claude/skills';}
  /** The fixture skills natively under a root: Global holds every SKILLS entry, a checkout the ones LIST_OF puts there. */
  function fixtureSkillsAt(root:Root){const scopes:Record<string,readonly string[]>=design.LIST_OF,canonical=root.label;return canonical==='Global'?design.SKILLS:design.SKILLS.filter(skill=>skill.project!=='local'&&scopes[skill.name]?.includes(canonical));}
  /** Whether a Library card sits at `path` right now: a fixture skill not moved away (its change is keyed by its native path), or a moved/renamed one that landed there. */
  function occupied(path:string):boolean{const folder=path.slice(0,path.lastIndexOf('/')),name=path.slice(folder.length+1),root=mockRoots().find(r=>folderOf(r)===folder);return (root!==undefined&&fixtureSkillsAt(root).some(s=>s.name===name)&&!fileChanges.has(path))||[...fileChanges.values()].some(change=>change.path===path);}
+ /** §3.1 states 1–5 for the `overlays` scenario, applied by position to the Library's fixture cards. State 1 carries a teammate's receipt for its bytes (the `run by ajayw36 · v3` line). */
+ const LIBRARY_OVERLAY_STATES:((card:SkillCard)=>Partial<SkillCard>)[]=[
+  card=>({installedVersion:'v3',localMatch:'identical',placed:true,installed:'placed',onDiskOnly:false,edited:false,knownToTeam:true,localEval:card.summary?{...card.summary,runnerHandle:'ajayw36',version:'v3'}:card.localEval}),
+  ()=>({installedVersion:'v3',localMatch:'differs',placed:true,installed:'placed',onDiskOnly:false,edited:true,knownToTeam:true,localEval:null,localEvalStale:true}),
+  ()=>({installedVersion:null,localMatch:'differs',placed:true,installed:'placed',onDiskOnly:false,edited:true,knownToTeam:true,localEval:null}),
+  ()=>({installedVersion:null,localMatch:'differs',placed:false,installed:'placed',onDiskOnly:true,edited:false,knownToTeam:true,localEval:null}),
+  ()=>({installedVersion:null,localMatch:'none',placed:false,installed:'placed',onDiskOnly:true,edited:false,knownToTeam:false}),
+ ];
  function localProjection<T extends SkillCard>(card:T):T {return {...card,teamed:false,installs:'—',installsN:0,teamState:'unknown',latestVersion:null,installedVersion:null,localMatch:card.flags.includes('local')?'none':null,knownToTeam:!card.flags.includes('local'),evalVersion:null,evalStale:false,latestEvalState:null,profileVersion:null,edited:card.flags.includes('local'),flags:card.flags.filter(flag=>flag!=='update'),localEval:card.summary?{...card.summary,runnerHandle:null,version:null}:null};}
- function fileRun(kind:'move'|'rename'|'delete',path:string,to?:string){return long('library',async ctx=>{
+ function fileRun(kind:'move'|'copy'|'rename'|'delete',path:string,to?:string){return long('library',async ctx=>{
   const name=path.split('/').at(-1)!;
-  if(await ctx.ask('text',`Type ${name} to ${kind} this folder`)!==name)return cancelled('The name did not match; nothing changed.');
+  // Only `delete` asks, as the CLI does since 2026-09-14 (src/commands/skill.ts): the other three are
+  // reversible by a second run and the typed name bought friction, not safety.
+  if(kind==='delete'&&await ctx.ask('text',`Type ${name} to ${kind} this folder`)!==name)return cancelled('The name did not match; nothing changed.');
   const destination=kind==='delete'?null:kind==='rename'?path.slice(0,path.lastIndexOf('/')+1)+to:(to==='global'?'~':to)+'/.claude/skills/'+name;
   const notices:string[]=[];
   // §7.5 / §9.1.1 (hybrid review r1, high): this used to evict whatever card already sat at the destination,
@@ -92,9 +129,11 @@ export function createMockBackend(opts:{latencyMs?:number}={}):Backend & {readon
    notices.push('Your previous copy is kept at '+kept+'.');
   }
   const prior=[...fileChanges.entries()].find(([,change])=>change.path===path),original=prior?.[1].original??name;
-  fileChanges.set(prior?.[0]??path,{path:destination,name:kind==='rename'?to!:name,original});
+  // A copy adds a second card and leaves the source's entry untouched; every other kind relocates the one card.
+  if(kind==='copy')fileChanges.set(destination!,{path:destination,name,original});
+  else fileChanges.set(prior?.[0]??path,{path:destination,name:kind==='rename'?to!:name,original});
   for(const listener of listeners)listener('config');
-  notices.push(kind==='delete'?'Moved to quarantine.':`${kind==='rename'?'Renamed':'Moved'} ${path} to ${destination}.`);
+  notices.push(kind==='delete'?'Moved to quarantine.':`${kind==='rename'?'Renamed':kind==='copy'?'Copied':'Moved'} ${path} to ${destination}.`);
   return ok({kind,path,destination,quarantined:kind==='delete'?'~/.terum/skills/quarantine/'+name:null,installed:false,notices});
  });}
 
@@ -122,15 +161,16 @@ export function createMockBackend(opts:{latencyMs?:number}={}):Backend & {readon
   async launchContext(){return null;},
   async refreshLaunch(){return null;},
   onLaunchRequest(){return ()=>{};},
+  onFileDrop(listener){return listenHtmlDrops(listener);},
   async features(){return Object.fromEntries(FEATURE_KEYS.map(key=>[key,true])) as Features;},
   async windowAction(){return ok(undefined);},
   async openUrl(url){try{window.open(url,'_blank','noopener');return ok(undefined);}catch(error){return fail(error instanceof Error?error.message:String(error));}},
   async revealPath(){return ok(undefined);},
   async pickFolder(){return ok('/Users/you/code/new-project');},
-  async capabilities(){return {appVersion:design.APP_VERSION,windowChrome:'cosmetic',disablePerMachine:true,inboxEventLog:true,offtargetKind:true,machineRegistry:true,perCaseEvalTables:true,openInEditor:true,clipboard:true};},
+  async capabilities(){return {appVersion:design.APP_VERSION,windowChrome:'cosmetic',windowControlsEnd:null,disablePerMachine:true,inboxEventLog:true,offtargetKind:true,machineRegistry:true,perCaseEvalTables:true,openInEditor:true,clipboard:true};},
   async surfaces(){return {divergence:true,status:true,settings:true,onboarding:true,library:true,skill:true,receipts:true,inbox:true,catalog:true,roster:true,update:true,libraryProjects:false,appUpdate:false};},
   async status(){return structuredClone(ok({machine:{...design.MACHINE,hostname:design.MACHINE.name},me:identity,teams:readScenario()==='no-team'?[]:mockTeams(),tools:{git:true,gh:true},roots:mockRoots(),counts:statusCounts(location.hash,readScenario())}));},
-  settings:async()=>{const result=await read<Settings>('settings',()=>ok({INVITE_TIP:design.INVITE_TIP,JOIN_BLOCK_NOTE:design.JOIN_BLOCK_NOTE,INVITEE:design.INVITEE,K:design.K,MACHINE:{...design.MACHINE,hostname:design.MACHINE.name},ME:identity,TEAMS:mockTeams(),TEAM_POLICY:{...design.TEAM_POLICY,categories:design.CATEGORIES.map(([name])=>name),projects:design.PROJECTS.map(project=>project.name),categoriesNote:'From SKILL.md frontmatter; the list is admin-extendable.'},tools:{git:true,gh:true},syncNote:null,PLACEMENTS:design.PLACEMENTS,PLACEMENTS_N:design.PLACEMENTS_N,PINNED_N:design.PINNED_N,APPROVALS:design.APPROVALS,QUARANTINE:design.QUARANTINE,HOOK:design.HOOK,APP_VERSION:design.APP_VERSION,AGENT_CLI:design.AGENT_CLI,AGENT_CLI_AUTH:'signed-in',COMMUNITY:design.COMMUNITY,STORAGE:design.STORAGE,SETTINGS_NAV:design.SETTINGS_NAV,SHORTCUTS:design.SHORTCUTS,INBOX_KIND_TEXT:design.INBOX_KIND_TEXT,THEME_OPTIONS:design.THEME_OPTIONS,CLI_VERSION:design.CLI_VERSION,CLI_LATEST:design.CLI_LATEST,FOLLOWING:design.FOLLOWING,SHARED_SPECIMEN:design.SHARED_SPECIMEN}));return result.ok?result:{...result,reason:result.error.includes('Invalid')&&result.error.includes('config.json')?'invalid-config':'unreadable'};},
+  settings:async()=>{const result=await read<Settings>('settings',()=>ok({INVITE_TIP:design.INVITE_TIP,JOIN_BLOCK_NOTE:design.JOIN_BLOCK_NOTE,INVITEE:design.INVITEE,K:design.K,MACHINE:{...design.MACHINE,hostname:design.MACHINE.name},ME:identity,TEAMS:mockTeams(),TEAM_POLICY:{...design.TEAM_POLICY,categories:design.CATEGORIES.map(([name])=>name),projects:design.PROJECTS.map(project=>project.name),categoriesNote:'From SKILL.md frontmatter; the list is admin-extendable.'},tools:{git:true,gh:true},syncNote:null,lastAutomatic:null,PLACEMENTS:design.PLACEMENTS,PLACEMENTS_N:design.PLACEMENTS_N,PINNED_N:design.PINNED_N,APPROVALS:design.APPROVALS,QUARANTINE:design.QUARANTINE,HOOK:design.HOOK,APP_VERSION:design.APP_VERSION,AGENT_CLI:design.AGENT_CLI,AGENT_CLI_AUTH:'signed-in',COMMUNITY:design.COMMUNITY,STORAGE:design.STORAGE,SETTINGS_NAV:design.SETTINGS_NAV,SHORTCUTS:design.SHORTCUTS,INBOX_KIND_TEXT:design.INBOX_KIND_TEXT,THEME_OPTIONS:design.THEME_OPTIONS,CLI_VERSION:design.CLI_VERSION,CLI_LATEST:design.CLI_LATEST,FOLLOWING:design.FOLLOWING,SHARED_SPECIMEN:design.SHARED_SPECIMEN}));return result.ok?result:{...result,reason:result.error.includes('Invalid')&&result.error.includes('config.json')?'invalid-config':'unreadable'};},
   onboarding:async()=>{const result=await read('onboarding',()=>ok(onboardingData()));return result.ok?result:{...result,value:onboardingData()};},
   library:({scope})=>read('library',scenario=>{
    const roots=mockRoots(),root=roots.find(r=>scope.kind==='global'?r.kind==='global':r.id===scope.root);
@@ -139,22 +179,28 @@ export function createMockBackend(opts:{latencyMs?:number}={}):Backend & {readon
    const source=scenario==='empty'?[]:fixtureSkillsAt(root);
    const cardFor=(s:typeof design.SKILLS[number],path:string,name=s.name)=>localProjection(removalState(withInstall({...cardOf(s),name,path,project:canonical,enabled:backend.prefs.get('enabled:'+name,s.enabled??true),favorite:backend.prefs.get('favorite:'+name,s.favorite??false),...(scenario==='on-disk-only'&&name==='deploy-check'?{installed:'placed' as const,placed:false,onDiskOnly:true,paths:[[path,'global']] as [string,string][]}:{})})));
    const skills=source.filter(s=>!fileChanges.has(folder+'/'+s.name)).map(s=>cardFor(s,folder+'/'+s.name));
+   // Cross-mirror overlays spec §5 M1.7: `?__mock=overlays` puts the first five Library cards, in fixture order, into §3.1
+   // states 1–5 so a board and a test can point at each state by position.
+   if(scenario==='overlays')LIBRARY_OVERLAY_STATES.forEach((state,index)=>{const card=skills[index];if(card)Object.assign(card,state(card));});
    for(const change of fileChanges.values())if(change.path?.slice(0,change.path.lastIndexOf('/'))===folder){
     const original=design.SKILLS.find(s=>s.name===change.original);if(!original)continue;
     const card=cardFor(original,change.path,change.name);if(change.name!==change.original)Object.assign(card,{edited:true,summary:null,localEval:null,localEvalStale:card.localEval!==null});skills.push(card);
    }
-   const overview=scenario==='empty'?zeroOverview:(Object.hasOwn(design.OVERVIEW_BY_SCOPE,canonical)?(design.OVERVIEW_BY_SCOPE as Record<string,Library['overview']>)[canonical]!:zeroOverview);
-   return ok({roots,scanned:null,root,skills,overview:{...overview,skills:String(skills.length),installs:'—'},title:`${skills.length} skill${skills.length===1?'':'s'}`});
+   const overview=scenario==='empty'?zeroOverview:(Object.hasOwn(design.OVERVIEW_BY_SCOPE,canonical)?(design.OVERVIEW_BY_SCOPE as Record<string,typeof design.LIBRARY_OVERVIEW>)[canonical]!:zeroOverview);
+   // The fixture's overview predates the Unpublished tile, so its two strings and its zero caption
+   // are derived from the cards this scope actually draws rather than read from design.json.
+   return ok({roots,scanned:null,root,skills,overview:{...overview,skills:String(skills.length),installs:'—',...unpublishedOverview(skills),zero:{...overview.zero,unpublished:overviewCopy.unpublished}},title:`${skills.length} skill${skills.length===1?'':'s'}`});
   }),
   localSkill:({path})=>read('skill',()=>{const change=[...fileChanges.values()].find(change=>change.path===path),name=path.split(/[\\/]/).filter(Boolean).at(-1)??'';
    // A card that landed here (a move onto the evicted resident's path) wins; only a path nothing occupies any more is gone.
    if(change===undefined&&fileChanges.has(path))return {ok:false,error:path+' is no longer in the Library.',reason:'not-in-library'};const detail=skillByRef(change?.original??name);return detail.ok?ok({...localProjection(detail.value),name,team:null,repo:null,installs_n:0,used_by:[],users:[],versions:null,version:'—',version_full:null,history:[],activity:[],...(change&&name!==change.original?{edited:true,localEval:null,summary:null,receipt:null,reportNumbers:null,skillMd:{...detail.value.skillMd,frontmatter:detail.value.skillMd.frontmatter.replace(/^name: .*$/m,'name: '+name)}}:{}),skillRef:'local:'+path,path,pathLabel:path,repoPath:path,owningRoot:mockOwningRoot(path)}):{ok:false,error:path+' is not in any Library root.',reason:'not-in-library'};}),
   skillFile:{
-   move:({path,to})=>fileRun('move',path,to),rename:({path,to})=>fileRun('rename',path,to),delete:({path})=>fileRun('delete',path),
+   move:({path,to})=>fileRun('move',path,to),copy:({path,to})=>fileRun('copy',path,to),rename:({path,to})=>fileRun('rename',path,to),delete:({path})=>fileRun('delete',path),
    // No fixture folder is broken, so the mock has nothing to rewrite: it answers as the CLI does for a file that already parses.
    fix:({path})=>long('library',async ctx=>{const line=path.split('/').at(-1)+': SKILL.md frontmatter is already valid YAML; nothing changed.';ctx.print(line);return ok({kind:'fix' as const,path,destination:null,quarantined:null,installed:false,notices:[line]});}),
   },
-  projects:{add:(path:string)=>long('settings',async ctx=>{ctx.print('Added '+path+' to your library.');for(const listener of listeners)listener('config');return ok({path,label:path.split(/[\\/]/).filter(Boolean).at(-1)??path,added:true});}),remove:(path:string)=>long('settings',async ctx=>{ctx.print('Removed '+path+' from your library.');for(const listener of listeners)listener('config');return ok({path,placementsRemaining:0});})},
+  projects:{add:(path:string)=>long('settings',async ctx=>{ctx.print('Added '+path+' to your library.');for(const listener of listeners)listener('config');return ok({path,label:path.split(/[\\/]/).filter(Boolean).at(-1)??path,added:true,reconcile:reconcileFixture()});}),remove:(path:string)=>long('settings',async ctx=>{ctx.print('Removed '+path+' from your library.');for(const listener of listeners)listener('config');return ok({path,placementsRemaining:0});})},
+  reconcile:{list:async()=>ok(reconcileFixture())},
   teamProjects:{create:({name,remote}:{name:string;remote?:string})=>long('marketplace',async ctx=>{if(catalogData().projects.some(p=>p.name.toLowerCase()===name.toLowerCase())||created.some(p=>p.name.toLowerCase()===name.toLowerCase()))return fail(`team already has a project named ${name}.`);created.push({name,remote:remote??null});ctx.print('Created project '+name);for(const listener of listeners)listener('clone');return ok({team:'team',name,remotes:remote?[remote]:[],skills:0});})},
   skill:({ref,at})=>read('skill',scenario=>{if(scenario==='not-installed'&&ref==='deploy-check')return ok(scopedDetail(removalState(detailOf(design.DETAIL_NOT_INSTALLED)),at));const result=skillByRef(ref);
    if(result.ok&&scenario==='invalid-newest')Object.assign(result.value,{latestState:'invalid',receipt:null,summary:null,reportNumbers:null,invalidReceiptFile:`evals/deploy-check/${design.DETAIL.version_full}/20260829T221500Z.json`});
@@ -168,13 +214,15 @@ export function createMockBackend(opts:{latencyMs?:number}={}):Backend & {readon
   evalReport:async({ref})=>{const detail=await backend.skill({ref});if(!detail.ok)return detail;const {receipt,summary,incumbentLift,reportNumbers,history,versions,latestState,invalidReceiptFile,localRuns,evalEstimate,evalEstimateText,evalEstimateTip,scoreFractions,wlt}=detail.value;return ok({receipt,summary,incumbentLift,reportNumbers,history,versions,latestState,invalidReceiptFile,localRuns,evalEstimate,evalEstimateText,evalEstimateTip,scoreFractions,wlt});},
   receipts:({skillId,version})=>read('library',()=>{const detail=skillByRef(skillId);if(!detail.ok)return fail(detail.error);return ok(detail.value.version===version?detail.value.receipt??null:null);}),
   inbox:()=>read('inbox',scenario=>ok(scenario==='empty'?[]:inboxItems())),
-  catalog:(query)=>read('marketplace',scenario=>{const catalog=catalogData();catalog.projects=[...catalog.projects,...created.map(asProject)];catalog.projects=catalog.projects.map(project=>{const added=endorsed.filter(row=>row.project===project.key).map(row=>row.name).filter(name=>!project.skillsIn.includes(name));return added.length?{...project,skills:project.skills+added.length,skillsIn:[...project.skillsIn,...added]}:project;});catalog.projectsByMembers=[...catalog.projectsByMembers,...created.map(q=>q.name)];if(scenario==='on-disk-only')catalog.skills=catalog.skills.map(skill=>skill.name==='deploy-check'?{...skill,installed:'placed' as const,placed:false,onDiskOnly:true,paths:[['~/.claude/skills/deploy-check','global']] as [string,string][]}:skill);catalog.skills=catalog.skills.map(skill=>removalState(withInstall(skill)));catalog.extras=catalog.extras.map(skill=>removalState(withInstall(skill)));
-   // D65 (2026-09-13 ledger): the stale-eval overlay reads `placed` only after this session's installs and removals are applied above, so "you have Version 2" follows a mid-session install or removal instead of the page-load fixture flag.
+  catalog:(query)=>read('marketplace',scenario=>{const catalog=catalogData();catalog.projects=[...catalog.projects,...created.map(asProject)];catalog.projects=catalog.projects.map(project=>{const added=endorsed.filter(row=>row.project===project.key).map(row=>row.name).filter(name=>!project.skillsIn.includes(name));return added.length?{...project,skills:project.skills+added.length,skillsIn:[...project.skillsIn,...added]}:project;});catalog.projectsByMembers=[...catalog.projectsByMembers,...created.map(q=>q.name)];if(scenario==='on-disk-only')catalog.skills=catalog.skills.map(skill=>skill.name==='deploy-check'?{...skill,installed:'placed' as const,placed:false,onDiskOnly:true,paths:[['~/.claude/skills/deploy-check','global']] as [string,string][],path:'~/.claude/skills/deploy-check',latestVersion:'v5',installedVersion:null,localMatch:'differs' as const}:skill);catalog.skills=catalog.skills.map(skill=>removalState(withInstall(skill)));catalog.extras=catalog.extras.map(skill=>removalState(withInstall(skill)));
+   // D65 (2026-09-13 ledger): the stale-eval overlay reads `placed` only after this session's installs and removals are applied above, so "v5 · you have v2" follows a mid-session install or removal instead of the page-load fixture flag.
    if(scenario==='stale-eval')catalog.skills=catalog.skills.map(skill=>({...skill,latestVersion:'v5',installedVersion:skill.placed?'v2':null,evalVersion:skill.summary?3:null,evalStale:skill.summary!==null,latestEvalState:'invalid'}));
+   // §5 M1.7: under `overlays` the Marketplace's placed cards are §3.2 state 3, except the first placed card in fixture order (state 3b, an edited install) and the second (state 2, on the latest); unplaced cards are state 1.
+   if(scenario==='overlays'){let placedSeen=0;catalog.skills=catalog.skills.map(skill=>{if(!skill.placed)return {...skill,latestVersion:'v5',installedVersion:null,localMatch:null};const index=placedSeen++;return {...skill,latestVersion:'v5',installedVersion:index===1?'v5':'v2',localMatch:index===0?'differs':'identical'};});}
    catalog.people=catalog.people.map(person=>person.handle===design.ME.handle?{...person,...profileValues,teamsLine:profileValues.projects?.join(' · ')??person.teamsLine}:person);return ok({...catalog,skills:catalog.skills.filter(s=>!query?.q||(s.name+' '+s.desc).toLowerCase().includes(query.q.toLowerCase()))});}),
   roster:()=>read('share',scenario=>{const all=roster();return ok(scenario==='empty'?{byAdoption:all.byAdoption.filter(h=>h===design.ME.handle),members:all.members.filter(m=>m.handle===design.ME.handle),invited:[],member:Object.fromEntries(Object.entries(all.member).filter(([h])=>h===design.ME.handle))}:all);}),
   search:args=>read('marketplace',()=>{const hits:SearchHit[]=[...design.CATALOG.map(s=>({kind:'skill' as const,ref:s.name,name:s.name,description:s.desc})),...design.PEOPLE.map(p=>({kind:'member' as const,ref:p.handle,name:p.name,description:p.role})),...design.PROJECTS.map(p=>({kind:'project' as const,ref:p.key,name:p.name,description:p.desc}))].map(hit=>({...hit,team:null,category:null,author:null,installs:null,latest:null}));return ok(hits.filter(h=>(!args.kinds||args.kinds.includes(h.kind))&&(h.name+' '+h.description).toLowerCase().includes(args.q.toLowerCase())));}),
-  install:args=>long('library',async ctx=>{ctx.print(`Installing ${args.ref}…`);if(!args.ref.trim())return fail('A ref is required.');const detail=skillByRef(args.ref);if((args.kind??'skill')==='skill'&&!detail.ok)return fail(detail.error);if(!await ctx.ask('confirm',`Approve these tools for ${args.ref}?`))return cancelled('Install was declined.');ctx.progress(1,1,'Installed');if((args.kind??'skill')==='skill'){const name=args.ref.split('/').at(-1)??args.ref;installedRefs.add(name);removed.delete(name);for(const listener of listeners)listener('placed');}return ok([{id:args.ref,name:args.ref,scope:args.scope??'Global',path:detail.ok?detail.value.path:null,version:detail.ok?detail.value.latestVersion:null,profiled:args.yesProfile??false}]);}),
+  install:args=>long('library',async ctx=>{const ref=args.adopt??args.ref;if(!ref?.trim())return fail('A ref or adopt path is required.');const name=localName(ref),detail=skillByRef(name);ctx.print(args.adopt?`Recording ${name} as installed…`:`Installing ${ref}…`);if((args.kind??'skill')==='skill'&&!detail.ok)return fail(detail.error);if(!await ctx.ask('confirm',`Approve these tools for ${name}?`))return cancelled('Install was declined.');ctx.progress(1,1,'Installed');if((args.kind??'skill')==='skill'){installedRefs.add(name);removed.delete(name);for(const listener of listeners)listener('placed');}const root=args.adopt?mockOwningRoot(args.adopt):null;return ok([{id:name,name,scope:args.scope??root?.label??'Global',path:args.adopt??(detail.ok?detail.value.path:null),version:detail.ok?detail.value.latestVersion:null,profiled:args.yesProfile??false}]);}),
   uninstallSkill:args=>long('library',async ctx=>{
    const catalog=catalogData(),cards=[...catalog.skills,...catalog.extras];
    let names:string[],question:string;
@@ -187,7 +235,7 @@ export function createMockBackend(opts:{latencyMs?:number}={}):Backend & {readon
     const person=catalog.people.find(p=>p.handle===args.member);
     if(!person)return fail(`Unknown member ${args.member}.`);
     names=person.installable.filter(name=>!removed.has(name));
-    question=args.member===design.ME.handle?`Remove everything you installed (${names.length} skills)?`:`Remove ${args.member}'s ${names.length} skills from this machine?`;
+    question=args.member===design.ME.handle?`Remove the ${names.length} skills on your profile from this machine?`:`Remove ${args.member}'s ${names.length} skills from this machine?`;
    }else{
     const skill=skillByRef(args.ref);
     if(!skill.ok)return fail(skill.error);
@@ -198,7 +246,7 @@ export function createMockBackend(opts:{latencyMs?:number}={}):Backend & {readon
    const detail=[`Folders removed (${paths.length}):`,...paths.map(([path,scope])=>`  ${path}  ·  ${scope==='global'?'Global':`project ${scope}`}`),
     'Local changes are moved to ~/.terum/skills/quarantine, never deleted.',
     `Install records dropped from your people file (${names.length}): ${names.join(', ')}`,
-    ...(args.kind==='member'?[`Targets are ${args.member}'s current installed list, not what you installed from them.`]:args.kind==='project'?['Copies installed to Global stay.']:[])];
+    ...(args.kind==='member'?[`Targets are ${args.member}'s current profile list, not what you installed from them.`]:args.kind==='project'?['Copies installed to Global stay.']:[])];
    if(!await ctx.ask('confirm',question,{detail}))return cancelled('Remove was declined.');
    for(const name of names)removed.add(name);
    for(const listener of listeners){listener('placed');listener('config');}
@@ -234,12 +282,46 @@ export function createMockBackend(opts:{latencyMs?:number}={}):Backend & {readon
   prune:()=>long('settings',async ctx=>{const names=design.QUARANTINE.map(q=>q[1]??'');if(!await ctx.ask('confirm',`Delete ${names.length} quarantined item(s)?`)){ctx.print('Prune cancelled; nothing deleted.');return cancelled('Prune was cancelled.');}return ok(undefined);}),
   invite:args=>long<InviteResult>('share',async ctx=>{if(!args.logins.length||args.logins.some(login=>!login.trim()))return fail('At least one GitHub login is required.');ctx.print(`Inviting ${args.logins.join(', ')}…`);if(readScenario()==='partial'){const [first,...rest]=args.logins;const failed=rest.map(login=>({login,error:`Could not invite @${login} (GitHub status 422). gh: Validation Failed (HTTP 422)`}));return {ok:false,error:failed.map(f=>f.error).join('\n'),value:{invited:first?[first]:[],already:[],failed}};}return ok({invited:[...args.logins],already:[],failed:[]});}),
   team:args=>long<TeamResult>('share',async ctx=>{const name=args.team??args.name??design.TEAMS[0]?.name??'Terum';ctx.print(`${args.kind}: ${name}`);if(args.kind==='leave'&&!await ctx.ask('confirm',`Leave ${name}? This removes ${design.PLACEMENTS_N} placed skill(s) from this machine.`))return cancelled('Leave was declined.');if(args.kind==='move'){const to=(args.remote??'').split('/').at(-1)??'';if(!to)return fail('A target <org>/<repo> is required.');ctx.print(`Moved to ${to}: ${design.PLACEMENTS_N} skill(s) placed again.`);return ok({name:to,kind:'move' as const,restored:design.PLACEMENTS.map(row=>String(row[1])).slice(0,design.PLACEMENTS_N),missing:[],failed:[]});}return ok({name,kind:args.kind});}),
-  setup:args=>long('share',async ctx=>{ctx.print('Setting up terum-skills…');const choice=await ctx.ask('select','Create a team or join one?',{choices:['Create a new team','Join an existing team'],descriptions:['Creates a private GitHub repository under your account.','Uses an invitation from the team owner.']});const role=choice==='Create a new team'?'creator' as const:'joiner' as const;const team=args.target??design.TEAM_REPO;const steps:NonNullable<SetupResult['steps']>={role:'done',team:'done'};ctx.print('Looking for skill folders on this machine…');if(await ctx.ask('confirm','Add a project?')){const folder=await ctx.ask('path','Which folder?',{default:'~/code/terum'});ctx.print('Added '+folder+' to your library.');steps.projects='done';}else steps.projects='skipped';steps.evals=await replaySetupEvals(ctx);return ok({team,role,steps});}),
-  eval:args=>long('library',async ctx=>{const detail=skillByRef([...fileChanges.values()].find(change=>change.path===args.ref)?.original??args.ref.split(/[\\/]/).filter(Boolean).at(-1)??args.ref);if(!detail.ok)return fail(detail.error);ctx.print(`Evaluating ${args.ref}…`);ctx.progress(1,1,'Complete');return ok({name:args.ref,runDir:`~/.terum/skills/evals/local/${'0'.repeat(64)}/20260906T120000Z`,executionStatus:'complete' as const,team:detail.value.team??null,id:null,shareHint:true});}),
-  validate:args=>read('library',()=>{const name=args.ref??design.DETAIL.name;const detail=skillByRef(name);return detail.ok?ok({name,findings:0,warnings:0,repairable:0}):fail(detail.error);}),
+  setup:args=>long('share',async ctx=>{ctx.print('Setting up terum-skills…');const choice=await ctx.ask('select','Create a team or join one?',{choices:['Create a new team','Join an existing team'],descriptions:['Creates a private GitHub repository under your account.','Uses an invitation from the team owner.']});const role=choice==='Create a new team'?'creator' as const:'joiner' as const;const team=args.target??design.TEAM_REPO;const steps:NonNullable<SetupResult['steps']>={role:'done',team:'done'};ctx.print('Looking for skill folders on this machine…');if(await ctx.ask('confirm','Add a project?')){const folder=await ctx.ask('path','Which folder?',{default:'~/code/terum'});ctx.print('Added '+folder+' to your library.');steps.projects='done';}else steps.projects='skipped';ctx.print('Checking your library against the team…');ctx.print("1 of your skills match the team's exactly; 2 share a name with a team skill but differ.");steps.existing='printed';steps.evals=await replaySetupEvals(ctx);return ok({team,role,steps});}),
+  eval:args=>long('library',async ctx=>{const detail=skillByRef(localName(args.ref));if(!detail.ok)return fail(detail.error);ctx.print(`Evaluating ${args.ref}…`);ctx.progress(1,1,'Complete');return ok({name:args.ref,runDir:`~/.terum/skills/evals/local/${'0'.repeat(64)}/20260906T120000Z`,executionStatus:'complete' as const,team:detail.value.team??null,id:null,shareHint:true});}),
+  // Several skills in one run, the CLI's `eval <skill>… [--batch n] [--window w] [--pending]`: every ref is resolved before
+  // any paid work, batches are separated by the CLI's own question, and a declined batch queues the rest for later.
+  // The two requests the CLI refuses on sight throw before a run exists, exactly as the real adapter does.
+  evalMany:args=>{
+   if(args.refs.length===0&&!args.pending)throw new Error('Provide at least one skill, or --pending.');
+   if(args.mode==='batches'&&(!Number.isSafeInteger(args.batch)||(args.batch??0)<1))throw new Error('--batch must be a positive integer.');
+   return long('library',async ctx=>{
+    const team=args.team??(readScenario()==='no-team'?null:design.TEAMS[0]?.key??null);
+    if(args.pending&&team===null)return fail('--pending needs a team; this machine has none.');
+    const skills:{ref:string;name:string}[]=[];
+    const add=(ref:string,name:string)=>{if(!skills.some(skill=>skill.name===name))skills.push({ref,name});};
+    for(const ref of args.refs){const detail=skillByRef(localName(ref));if(!detail.ok)return fail(`No local skill folder named \`${ref}\` in your library; install it from the marketplace first, or pass the folder's path.`);add(ref,detail.value.name);}
+    if(args.pending){const pending=catalogData().skills.filter(skill=>skill.summary===null);for(const skill of pending)add(skill.name,skill.name);if(pending.length===0)ctx.print('Every shared skill already has an eval receipt for its current version.');}
+    const names=skills.map(skill=>skill.name);
+    const queue=(refs:readonly string[],window:'overnight'|'later'):EvalQueueItem[]=>{
+     const items=refs.map(ref=>({skill:ref,path:`~/.claude/skills/${ref}`,contentHash:`sha256:${'0'.repeat(64)}`,requestedAt:new Date().toISOString(),window,...(team===null?{}:{team})}));
+     const count=`${items.length} eval${items.length===1?'':'s'}`,drain='`npx -y terum-skills@latest eval --drain`';
+     ctx.print(window==='overnight'?`Queued ${count} for overnight: the app runs them in parallel between 01:00 and 05:00 while it is open and idle. Run them now with ${drain}.`:`Queued ${count} for later. Run ${items.length===1?'it':'them'} with ${drain}.`);
+     return items;
+    };
+    if(args.mode==='overnight'||args.mode==='later')return ok<EvalManyResult>({mode:'queued',team,skills:names,ok:0,failed:0,queued:queue(names,args.mode)});
+    if(skills.length===0)return ok<EvalManyResult>({mode:'ran',team,skills:[],ok:0,failed:0,queued:[]});
+    const width=args.mode==='batches'?args.batch??skills.length:skills.length,parallel=Math.min(4,width);
+    ctx.print(`Evaluating ${skills.length} skill${skills.length===1?'':'s'}, ${parallel} at a time…`);
+    let done=0,queued:EvalQueueItem[]=[],stoppedAfter:number|undefined;
+    for(let offset=0;offset<skills.length;offset+=width){
+     if(offset>0){const remaining=skills.length-offset;if(!await ctx.ask('confirm',`Continue with the next ${Math.min(width,remaining)}? (${offset} of ${skills.length} done, ${remaining} left)`)){queued=queue(names.slice(offset),'later');stoppedAfter=offset;break;}}
+     for(const skill of skills.slice(offset,offset+width)){ctx.print(`Evaluating ${skill.name}…`);done++;ctx.progress(done,skills.length,'evaluated');}
+    }
+    ctx.print(`Evaluated ${done} of ${skills.length}; 0 failed.`);
+    return ok<EvalManyResult>({mode:'ran',team,skills:names,ok:done,failed:0,queued,...(stoppedAfter===undefined?{}:{stoppedAfter})});
+   });
+  },
+  // A folder path names the skill by its last segment, as publish does above: the Fix dialog validates by path.
+  validate:args=>read('library',()=>{const name=args.ref?.split(/[\\/]/).filter(Boolean).at(-1)??design.DETAIL.name;const detail=skillByRef(name);return detail.ok?ok({name,findings:0,warnings:0,repairable:0,repairs:[]}):fail(detail.error);}),
   update:()=>read('settings',()=>ok({running:design.CLI_VERSION,latest:design.CLI_LATEST,observation:'newer',launch:'npx',description:`${design.CLI_VERSION} installed · ${design.CLI_LATEST} available`,advice:updateAdvice,lines:[`terum-skills ${design.CLI_VERSION}`,`Latest advertised release: ${design.CLI_LATEST}`,...updateAdvice]})),
   appUpdate:{
-   check:()=>read('settings',()=>ok({appVersion:design.APP_VERSION,supported:false,cliVersion:design.CLI_VERSION,latest:design.CLI_LATEST,latestAt:null,probe:'skipped' as const,probeError:null,staged:null,installed:[],lastApply:null,newer:false,ppid:0})),
+   check:()=>read('settings',()=>ok({appVersion:design.APP_VERSION,supported:false,cliVersion:design.CLI_VERSION,latest:design.CLI_LATEST,latestAt:null,probe:'skipped' as const,probeError:null,staged:null,installed:[],lastApply:null,newer:false,ppid:0,platform:'unsupported'})),
    stage:()=>long('settings',async()=>fail('The mock backend does not download or install anything.')),
    apply:async()=>fail('The mock backend does not download or install anything.'),
    armOnClose:async version=>{appUpdateCalls.push(['armOnClose',version]);return ok(undefined);},

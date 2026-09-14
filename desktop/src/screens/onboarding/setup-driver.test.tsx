@@ -11,9 +11,10 @@ const launch={target:'https://github.com/terum/team-skills.git',writtenAt:'2026-
 afterEach(()=>{cleanup();localStorage.clear();location.hash='';vi.restoreAllMocks();});
 function backend(){const b=createMockBackend();vi.spyOn(b,'launchContext').mockResolvedValue(launch);vi.spyOn(b,'refreshLaunch').mockResolvedValue(launch);return b;}
 function open(b:ReturnType<typeof backend>,route='#/'){location.hash=route;return render(<StrictMode><Providers><BackendContext value={b}><App/></BackendContext></Providers></StrictMode>);}
-it('maps every reached CLI step to one of the five drawn tour steps',()=>{
+it('maps every reached CLI step to one of the six drawn tour steps',()=>{
  expect(Object.keys(SETUP_STEP_TO_BOARD)).toEqual(SETUP_STEP_KEYS);
- expect(new Set(Object.values(SETUP_STEP_TO_BOARD))).toEqual(new Set(['Welcome','Style','Team','Feedback','Done']));
+ // Cross-mirror overlays spec §4.6: the `existing` step has its own board, `Your skills` (oracle owed — FIDELITY.md).
+ expect(new Set(Object.values(SETUP_STEP_TO_BOARD))).toEqual(new Set(['Welcome','Style','Team','Feedback','Done','Your skills']));
 });
 it('routes a fresh target to Boot, waits for the human, renders prints/progress, and consumes a typed decline once',async()=>{
  const b=backend(),answered=vi.fn(),set=vi.spyOn(b.prefs,'set');
@@ -40,6 +41,21 @@ it('uses five result-driven rows without inventing a progress counter',async()=>
  const view=open(b);await screen.findByRole('heading',{name:'Setup finished'});expect(view.container.querySelectorAll('.onboarding-progress-row')).toHaveLength(5);
  expect(screen.queryByLabelText('Onboarding progress')).toBeNull();expect(screen.getByRole('progressbar',{name:'Setup progress'})).not.toHaveAttribute('aria-valuenow');expect(screen.getByRole('progressbar')).not.toHaveAttribute('aria-valuemax');
  expect(b.prefs.get('launch:consumedWrittenAt','')).toBe(launch.writtenAt);
+});
+it('opens the Your skills board after frame setup prints the existing-skill summary',async()=>{
+ const b=backend(),list=vi.spyOn(b.reconcile,'list');
+ vi.spyOn(b,'setup').mockImplementation(()=>createRun(async ctx=>{
+  ctx.print('Checking your library against the team…');
+  ctx.print("1 of your skills match the team's exactly; 1 share a name with a team skill but differ.");
+  return {ok:true,value:{team:'team',role:'joiner',steps:{projects:'skipped',existing:'printed',evals:'skipped'}}};
+ }));
+ open(b);
+ expect(await screen.findByRole('dialog',{name:'Your skills'})).toBeInTheDocument();
+ expect(SETUP_STEP_TO_BOARD.existing).toBe('Your skills');
+ expect(list).toHaveBeenCalled();
+ // The dialog is modal over the onboarding screen; dismissing it must actually close it (the list query keeps its cached data).
+ fireEvent.click(screen.getByRole('button',{name:'Cancel'}));
+ await waitFor(()=>expect(screen.queryByRole('dialog',{name:'Your skills'})).toBeNull());
 });
 it('consumes an ordinary setup failure and renders the CLI line as an error',async()=>{
  const b=backend();vi.spyOn(b,'setup').mockImplementation(()=>createRun(async()=>({ok:false,error:'Could not read the team.'})));
@@ -81,9 +97,13 @@ it('requires an explicit select choice and renders a consumed join hand-off',asy
  expect(select).not.toBeChecked();expect(within(dialog).getAllByRole('radio')).toHaveLength(2);
  expect(within(dialog).getByRole('button',{name:'Continue'})).toBeDisabled();
  fireEvent.click(select);fireEvent.click(within(dialog).getByRole('button',{name:'Continue'}));
- await screen.findByRole('heading',{name:'Ask your team owner to invite you'});
- expect(screen.queryByText('Setup finished')).toBeNull();expect(screen.queryByRole('textbox')).toBeNull();
+ // The hand-off no longer asserts the person was never invited: an accepted invitation leaves nothing
+ // pending, so the screen asks for the repository it still needs instead of sending them to their owner.
+ await screen.findByRole('heading',{name:'Join an existing team'});
+ expect(screen.queryByText('Setup finished')).toBeNull();
+ expect(screen.getByLabelText('Team repository')).toBeInTheDocument();
  expect(b.prefs.get('launch:consumedWrittenAt','')).toBe(launch.writtenAt);
+ expect(screen.getByRole('button',{name:'Join'})).toBeInTheDocument();
  expect(screen.getByRole('button',{name:'Back to the Library'})).toBeInTheDocument();
 });
 it('select Cancel is a typed cancellation consumed before navigation',async()=>{

@@ -22,7 +22,7 @@ specs; the maintainers write the specs, run every gate themselves, and do all gi
    (there is no `secret()`).
 2. **Flags come from the CLI, and every flag has exactly one consumer.** `capabilities()` carries
    `disablePerMachine`, `inboxEventLog`, `offtargetKind`, `machineRegistry`, `perCaseEvalTables` (plus the
-   platform-shaped `windowChrome`, `openInEditor`, `clipboard`); `features()` carries the CLI's twelve
+   platform-shaped `windowChrome`, `windowControlsEnd`, `openInEditor`, `clipboard`); `features()` carries the CLI's twelve
    `hello.features` switches plus `memberRole`. The real adapter fills both from the `hello` frame it caches
    from any run (`disablePerMachine` straight across, `perCaseEvalTables` from `perCase`, a missing key
    `false`; `inboxEventLog`, `offtargetKind`, `machineRegistry` stay hard `false` until a mechanism exists).

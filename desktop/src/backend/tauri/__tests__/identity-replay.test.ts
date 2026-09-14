@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { expect, it } from 'vitest';
+import { expect, it, vi } from 'vitest';
 import { createTauriBackend } from '../index';
 import { fakeBridge } from './fake-bridge';
 
@@ -26,8 +26,11 @@ it('replays the real login write and proves that only display_name bytes changed
       notice: 'This changes the author line (Seed2 <seed@example.com>) that publish writes into the skills you publish from this machine; versions already published keep their recorded author.',
     },
   });
-  // The write's hello advertises `refresh`, so the adapter follows it with one background `sync` (index.ts onHello).
-  expect(f.spawns.map(spawn => spawn.args)).toEqual([['login', '--set', 'name=Seed2'], ['sync']]);
+  // The write's hello advertises `refresh`, so the adapter owes one background `sync` (index.ts onHello) — but
+  // `login` is a foreground write verb, so the policy's busy gate holds that fetch back rather than running a
+  // second child alongside the write. It is the workflow gate going idle that releases it, right after.
+  expect(f.spawns.map(spawn => spawn.args)).toEqual([['login', '--set', 'name=Seed2']]);
+  await vi.waitFor(() => expect(f.spawns.map(spawn => spawn.args)).toEqual([['login', '--set', 'name=Seed2'], ['sync']]));
 });
 
 it.each([['status-before', 'Seed'], ['status-after', 'Seed2']])('replays %s through the served status (S7k) and shows the identity the CLI recorded', async (name, displayName) => {

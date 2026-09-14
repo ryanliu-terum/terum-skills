@@ -32,18 +32,23 @@ export const cliEvalReport = z.object({
 type CliReceipt = z.infer<typeof receipt>;
 type Comparison = z.infer<typeof comparison>;
 function wlt(c:Comparison):[number,number,number] { return [c.win,c.loss,c.tie]; }
+/** Display precision for a receipt's own fractions: two decimals, the form Figure 1's arm bars and
+ *  the per-case table already show. Rendering only — the receipt's stored value is never rounded. */
+function fixed2(value:number|null|undefined):string { return value==null?'—':value.toFixed(2); }
+/** A sign-test p in the form every surface states it (§12), so prose and Figure 2 cannot disagree. */
+function fixed3(value:number|null|undefined):string { return value==null?'—':value.toFixed(3); }
 function mapReceipt(r:CliReceipt):Receipt {
- const p=r.provenance,c=r.comparisons['candidate-vs-baseline'],inc=r.comparisons['candidate-vs-incumbent'],t=r.triggers;
+ const p=r.provenance,c=r.comparisons['candidate-vs-baseline'],inc=r.comparisons['candidate-vs-incumbent'],t=r.triggers,signP=fixed3(c?.sign_p);
  const eff=(arm:string):string[]=>{const e=r.efficiency[arm];return [String(e?.turns??'—'),e?.duration_ms==null?'—':`${Math.round(e.duration_ms/1000)} s`,e?.cost_usd==null?'—':`$${e.cost_usd.toFixed(2)}`];};
  return {
  when:p.timestamp.slice(0,10),date:p.timestamp.slice(0,10),timestamp:p.timestamp.slice(0,16).replace('T',' ')+' UTC',runner:p.runner_handle,run_id:r.run_id,catalog:0,
- incumbent:inc?{wlt:wlt(inc),version:'—'}:null,sign_p:c?.sign_p.toFixed(3)??'—',inc_p:inc?.sign_p.toFixed(3)??'—',
+ incumbent:inc?{wlt:wlt(inc),version:'—'}:null,sign_p:signP,inc_p:fixed3(inc?.sign_p),
  arm:{candidate:r.arm_scores.candidate??0,incumbent:r.arm_scores.incumbent??null,baseline:r.arm_scores.baseline??0},
- triggers:{tp:t?.tp??0,fn:t?.fn??0,fp:t?.fp??0,tn:t?.tn??0,recall:t?.recall?.toFixed(2)??'—',precision:t?.precision?.toFixed(2)??'—',misses:[]},
+ triggers:{tp:t?.tp??0,fn:t?.fn??0,fp:t?.fp??0,tn:t?.tn??0,recall:fixed2(t?.recall),precision:fixed2(t?.precision),misses:[]},
  eff:{candidate:eff('candidate'),incumbent:r.efficiency.incumbent?eff('incumbent'):null,baseline:eff('baseline')},
  attribution:r.attribution,model:p.model,judge:p.judge_model,cc:p.cc_version,k:p.k,engine:p.engine_version,per_case:[],
- abstract:c?`${p.cases.length} cases at k=${p.k}. Candidate vs baseline: ${c.win}W–${c.loss}L–${c.tie}T, net lift ${c.net_lift}, sign p ${c.sign_p}. Verdict ${r.verdict}.`:'No baseline comparison in this receipt.',
- results:`Arm scores: ${Object.entries(r.arm_scores).map(([arm,score])=>`${arm} ${score??'—'}`).join(', ')}.`,
+ abstract:c?`${p.cases.length} cases at k=${p.k}. Candidate vs baseline: ${c.win}W–${c.loss}L–${c.tie}T, net lift ${fixed2(c.net_lift)}, sign p ${signP}. Verdict ${r.verdict}.`:'No baseline comparison in this receipt.',
+ results:`Arm scores: ${Object.entries(r.arm_scores).map(([arm,score])=>`${arm} ${fixed2(score)}`).join(', ')}.`,
  trigger_text:t?`Trigger counts: ${t.tp} true positives, ${t.fn} false negatives, ${t.fp} false positives, ${t.tn} true negatives.`:'No trigger evaluation in this receipt.',
  efficiency_text:'Per-task means by arm are in Table 2.',
  coverage:`${r.scored_rows} of ${r.expected_rows} rounds scored; execution ${r.execution_status}. Run ${r.run_id} by ${p.runner_handle}, engine ${p.engine_version} (${p.engine_commit}), agent CLI ${p.cc_version}.`,

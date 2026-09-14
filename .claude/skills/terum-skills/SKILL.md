@@ -14,6 +14,12 @@ This file ships inside the `terum-skills` npm package and is placed at
 Terum's copy. Setup can refresh it; `sync --hook` also refreshes an outdated managed copy and
 announces `Updated your /terum-skills manual for this CLI.` A foreign copy is left alone.
 
+Setup also offers a Write/Edit hook, separately and with its own y/N. Where the user accepted it, a
+note beginning *"You edited <name>, a skill in this machine's terum-skills Library"* appears after an
+edit inside a `.claude/skills/` folder, once per skill per session. It is this tool talking, not the
+user: treat it as the reminder it is, finish what you were asked to do first, and then offer the
+publish hand-off it names. A skill edited and never published is a skill only that machine has.
+
 ## The one rule that shapes everything
 
 Claude Code's Bash tool has no TTY. The terminal Prompter refuses a question with
@@ -63,10 +69,12 @@ The user's terminal answers the CLI's questions; the skill answers none of them.
 | `sync --hook` | do not run by hand; this is the SessionStart entry | stdout is the reload directive, notices go to stderr; only Terum's managed manual may be refreshed |
 | `install <ref> [--into global\|<project root>]`, `install member <h> [--into global\|<project root>]`, `install project <n> [--into global\|<project root>]` | confirm the skill/list and destination: this places files and writes install records. Use an explicitly chosen `--into`; an unregistered project path refuses and needs `project add` first | installs the highest numbered version in the clone. A tool-grant question or replace question needs a terminal; report any completed work before handing off |
 | `invite <github-login…>` | confirm with the user: sends GitHub collaborator invitations | show stdout and the teammate join block |
-| `profile [--name <display>] [--bio <text>] [--role <role>] [--project <name>]…` | confirm the profile changes; project membership names team projects | show stdout |
+| `profile [--name <display>] [--bio <text>] [--role <role>] [--project <name>]… [--remove <skill>]` | confirm the profile changes; project membership names team projects; `--remove` takes one skill off the profile list | show stdout |
 | `login --set <key=value>` | confirm the identity change; keys are `name`, `email`, `default-handle`; repeat the flag for multiple fields | show the identity notice; published versions keep their recorded author |
 | `team workflow-update --print` | nothing | show the workflow scaffold and its manual migration instruction; this does not migrate the team's skill layout |
 | `eval <skill> [--k <n>] [--triggers-only] [--execution-only] [--case <stem>] [--model <m>] [--judge-model <m>] [--no-gen]` | see the eval section | see the eval section |
+| `eval <skill> <skill>… [--batch <n>] [--parallel <n>]`, `eval --pending` | confirm the paid runs: several skills run as one batch after one agent probe; `--pending` means every shared skill with no receipt for its current version; `--batch <n>` asks before each further batch | show ✓/✗ per skill and the `Evaluated X of N` line; a declined continuation queues the rest for later |
+| `eval <skill…> --window overnight\|later`, `eval --pending --window overnight` | confirm queueing; nothing is paid for now | show the queued count; overnight items run in the desktop app between 01:00 and 05:00, later items wait for `eval --drain` |
 | `eval-report <skill> [--team <team>]` | nothing | show committed receipts and local run history for a skill in the team clone; no fetch |
 | `eval --queue-list` | nothing | show the local queue |
 | `eval --dequeue <skill>` | confirm removal from the queue | show remaining items; a team-qualified selector is also accepted |
@@ -91,7 +99,7 @@ Output handling for every verb in Table A:
 - Show stdout in a fenced code block, verbatim, subject to the inventory summarising rule above.
 - Quote stderr failures and explain them in one sentence. Hook notices also use stderr.
 - Exit 1 is a failed operation, not a broken wrapper. Do not automatically retry it, and do not
-  claim earlier steps were rolled back. Publish can succeed even if its later profile offer fails.
+  claim earlier steps were rolled back. Publish can succeed even if its later profile write fails.
 - No update-notice tail appears when stderr has no TTY.
 
 ## Table B: verbs that are handed to the user
@@ -105,6 +113,7 @@ the CLI will ask you questions the session cannot answer.*
 | `project add` (no path) | none | `npx -y terum-skills@latest project add` — asks for a folder |
 | `publish <ref> [--project <p>] [--category <c>]` | none; confirm the local skill and team with the user | `npx -y terum-skills@latest publish <ref> --project <p> --category <c>` — omit optional flags the user has not chosen |
 | `skill move <abs-path> --to global\|<project root>` | none | `npx -y terum-skills@latest skill move <abs-path> --to <destination>` |
+| `skill copy <abs-path> --to global\|<project root>` | none | `npx -y terum-skills@latest skill copy <abs-path> --to <destination>` — the source folder stays where it is |
 | `skill rename <abs-path> --to <new-name>` | none | `npx -y terum-skills@latest skill rename <abs-path> --to <new-name>` |
 | `skill delete <abs-path>` | none | `npx -y terum-skills@latest skill delete <abs-path>` |
 | `prune` | none; an empty quarantine simply returns | `npx -y terum-skills@latest prune` |
@@ -122,7 +131,8 @@ main and attaches matching local eval receipts. Identical bytes reuse the existi
 Publish resolves category from the declared frontmatter first, then `--category`, then a model
 suggestion, falling back to `misc`. A declared category makes no model call and prints no category
 line. Otherwise the CLI discloses the source before writing. It writes managed frontmatter back
-locally after its refusal-capable checks, then publishes, then asks about adding to your profile.
+locally after its refusal-capable checks, then publishes, then records the skill on your profile
+without asking — publishing is the endorsement (`profile --remove <name>` takes it back).
 A failed team write can leave that frontmatter on disk. Do not treat publish as a dry run.
 
 The three `skill` operations require a direct child of Global or an added project's skills root
@@ -159,11 +169,20 @@ Rules:
   bill their account. Explain cases × k × arms, and suggest `--triggers-only` or `--case <stem>` for
   a first look. Missing assets can add generation calls.
 - Use `run_in_background`; a full matrix takes minutes.
+- **The report's last line may be the next step; act on it.** When the evaluated bytes are not a
+  published version, the run ends with either *To share these results, publish the skill again:*
+  and the command, or — on a FAIL verdict — the same command with the reason not to use it yet.
+  Publishing is Table B: prepare that command for the user's terminal and say why it goes there.
+  Offer it after a PASS or NEUTRAL; after the FAIL line, report the verdict and stop.
 - `--no-gen` uses only existing assets. To regenerate cases, the user deletes `evals/cases/` and
   re-runs eval. Generating assets changes content identity and can mint a version on the next publish.
 - Editing bytes changes the digest used for the Library's score. Installed receipts keep their
   original runner attribution; they are not proof this user ran the eval.
 - Model flags pass through unchanged (`--model`, `--judge-model`; default `sonnet`).
+- Several skills at once: `eval <a> <b>…` runs them as one batch after one preflight (`--parallel <n>`, default
+  four); `--batch <n>` asks before each further batch, and a declined continuation queues the rest for later.
+  `--window overnight|later` queues instead of running (no paid work) and `--pending` selects every shared skill
+  with no receipt for its current version. Confirm the paid runs once for the whole batch, the same way.
 
 ## What this skill never does
 

@@ -12,6 +12,8 @@ describe('CLI wiring (§3: commander wiring only)', () => {
       login: async (args) => { calls.push({ verb: 'login', ...args }); return success({ gh: { installed: true, authenticated: true }, handle: 'me', updated: [], notice: null }); },
       team: async (args) => { calls.push({ verb: 'team', ...args }); return args.kind === 'join' && args.target === 'fail/fail' ? failure('nope') : success({ team: 't', remote: 'r' }); },
       setup: async (args) => { calls.push({ verb: 'setup', ...args }); return success({ role: args.target ? 'joiner' : 'creator', team: 't', remote: 'r', steps: {} as never }); },
+      reconcile: async (args) => { calls.push({ verb: 'reconcile', ...args }); return success({ identical: [], differing: [], renamed: [], adopted: [], published: [] }); },
+      install: async (args) => { calls.push({ verb: 'install', ...args }); return success([]); },
       invite: async (args) => { calls.push({ verb: 'invite', ...args }); return success({ team: 't', invited: [], already: [] }); },
       status: async (args) => { calls.push({ verb: 'status', ...args }); return success({ version: '0.1.1', teams: [], ledger: { placements: [], approvals: [], shared: [] }, identity: null, tools: { git: true, gh: false }, hostArch: 'arm64', processArch: 'arm64' }); },
       ls: async (args) => { calls.push({ verb: 'ls', ...args }); return success({ roster: [], skills: [], problems: [] }); },
@@ -97,6 +99,21 @@ describe('CLI wiring (§3: commander wiring only)', () => {
     ]);
   });
 
+  it('wires the M2 reconcile, adopt, and setup opt-out arguments without exposing a root flag', async () => {
+    const { program, calls } = harness();
+    await program.parseAsync(['reconcile', '--list', '--team', 'alpha'], { from: 'user' });
+    await program.parseAsync(['install', '--adopt', '/library/a', '--team', 'alpha'], { from: 'user' });
+    await program.parseAsync(['setup', '--no-existing'], { from: 'user' });
+    expect(calls).toEqual([
+      { verb: 'reconcile', list: true, team: 'alpha' },
+      { verb: 'install', ref: undefined, adopt: '/library/a', team: 'alpha' },
+      { verb: 'setup', cwd: process.cwd(), target: undefined, projects: true, existing: false, evals: true },
+    ]);
+    const reconcile = program.commands.find((command) => command.name() === 'reconcile');
+    expect(reconcile?.options.map((option) => option.long)).toEqual(['--list', '--team']);
+    expect(reconcile?.helpInformation()).not.toContain('--root');
+  });
+
   it('routes a failing Result to execute, and login takes no team or remote (rev 9, Decision 4)', async () => {
     const { program, outcomes } = harness();
     await program.parseAsync(['team', 'join', 'fail/fail'], { from: 'user' });
@@ -179,7 +196,7 @@ describe('CLI wiring (§3: commander wiring only)', () => {
     const calls: unknown[] = [];
     const program = buildProgram(async (invoke) => { await invoke(new ScriptedPrompter()); }, {
       login: async () => success({ gh: { installed: true, authenticated: true }, handle: 'me', updated: [], notice: null }), team: async () => success({ team: 't', remote: 'r' }),
-      validate: async (args) => { calls.push(args); return success({ name: args.target, findings: 0, warnings: 0, repairable: 0 }); },
+      validate: async (args) => { calls.push(args); return success({ name: args.target, findings: 0, warnings: 0, repairable: 0, repairs: [] }); },
     });
     program.configureOutput({ writeErr: () => undefined, writeOut: () => undefined });
     await program.parseAsync(['validate', 'sample', '--team', 't'], { from: 'user' });

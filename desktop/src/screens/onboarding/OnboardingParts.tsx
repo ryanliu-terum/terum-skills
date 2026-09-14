@@ -7,7 +7,7 @@ import { Icon } from '../../components/ui/Icon';
 import type { IconName } from '../../components/ui/icon-paths';
 import { Kbd } from '../../components/ui/Kbd';
 import { RichText } from '../../components/domain/Primitives';
-import { TrafficLights } from '../../components/domain/TrafficLights';
+import { WindowControls } from '../../components/domain/WindowControls';
 import { TerumMark } from '../../components/domain/TerumMark';
 
 export function OnboardingFrame({children,steps,current,skipped}:{children:ReactNode;steps:readonly string[];current:string|null;skipped:readonly string[]}){
@@ -15,7 +15,7 @@ export function OnboardingFrame({children,steps,current,skipped}:{children:React
   const capabilities=useQuery({queryKey:['capabilities'],queryFn:()=>backend.capabilities()});
   const mode=capabilities.data?.windowChrome??'cosmetic';
   const reached=current?steps.indexOf(current):-1;
-  return <div className="onboarding-frame"><div className="onboarding-bar">{mode==='cosmetic'?<TrafficLights/>:mode==='mac-overlay'?<div style={{width:52,flexShrink:0}}/>:null}<div className="mark-slot"><TerumMark/></div></div><div className="onboarding-map-band">{current&&<div className="onboarding-map" aria-label="Onboarding progress">{steps.map((name,index)=><span key={name} aria-label={name} aria-current={name===current?'step':undefined} data-skipped={skipped.includes(name)||undefined} data-state={skipped.includes(name)?'skipped':index<reached?'done':index===reached?'current':'pending'} title={name+(skipped.includes(name)?' (skipped)':'')}/>)}</div>}</div><main className="onboarding-main">{children}</main></div>;
+  return <div className="onboarding-frame"><div className="onboarding-bar"><WindowControls mode={mode} controlsEnd={capabilities.data?.windowControlsEnd??null}/><div className="mark-slot"><TerumMark/></div></div><div className="onboarding-map-band">{current&&<div className="onboarding-map" aria-label="Onboarding progress">{steps.map((name,index)=><span key={name} aria-label={name} aria-current={name===current?'step':undefined} data-skipped={skipped.includes(name)||undefined} data-state={skipped.includes(name)?'skipped':index<reached?'done':index===reached?'current':'pending'} title={name+(skipped.includes(name)?' (skipped)':'')}/>)}</div>}</div><main className="onboarding-main">{children}</main></div>;
 }
 export function OnboardingColumn({children}:PropsWithChildren){return <div className="onboarding-column">{children}</div>;}
 export function OnboardingTile({icon,mark=false,good=false}:{icon?:IconName;mark?:boolean;good?:boolean}){return <div className="onboarding-tile-slot">{(icon||mark)&&<div className="onboarding-tile">{mark?<TerumMark size={18} color="var(--tk-text3)"/>:icon?<Icon name={icon} size={18} color={good?'var(--tk-good)':'currentColor'}/>:null}</div>}</div>;}

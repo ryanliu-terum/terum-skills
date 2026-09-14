@@ -4,7 +4,9 @@ import { createMockBackend } from '../backend/mock';
 import type { LibraryScope } from '../backend/types';
 import { overviewCopy } from './overview-copy';
 
-it('keeps app zero copy identical to the locked fixture',()=>{expect(overviewCopy).toEqual(design.LIBRARY_OVERVIEW.zero);});
+// `unpublished` is app copy with no fixture counterpart: the Unpublished tile replaced the board's
+// Team installs tile, and design.json is generated (AGENTS.md invariant 3) so it cannot carry the string.
+it('keeps app zero copy identical to the locked fixture',()=>{const {unpublished,...locked}=overviewCopy;expect(locked).toEqual(design.LIBRARY_OVERVIEW.zero);expect(unpublished).toBeTruthy();});
 
 // L8 hides the evaluation meter only when `meter.total === 0`; every locked Library board must keep its meter.
 it.each([

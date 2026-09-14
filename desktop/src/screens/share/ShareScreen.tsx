@@ -1,11 +1,12 @@
 import { useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router';
+import { Link, useNavigate, useSearchParams } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
 import { useBackend, useFeatures } from '../../backend';
 import type { Member, Roster, TeamStatus } from '../../backend/types';
 import { useUrlState } from '../../app/url-state';
 import { Shell } from '../../components/domain/Shell';
 import { ScreenFrame } from '../../components/domain/ScreenFrame';
+import { useContextMenu, useCopy } from '../../components/domain/context-menu';
 import { Avatar, BoardSkeleton, CenteredState, ErrorLine, HoverTip, IconButton, TerminalHint } from '../../components/domain/Primitives';
 import { WorkflowHeader } from '../../components/domain/WorkflowControls';
 import { useSyncAction } from '../../components/domain/useSyncAction';
@@ -75,7 +76,15 @@ function StatusHelp(){
 }
 // The identity sub-line: the handle (dropped when it just repeats the display name) and the role, without dangling separators around missing data.
 function sub(m:{name:string;handle:string;role:string|null},memberRole:boolean|undefined){return [m.handle===m.name?'':m.handle,memberRole?m.role:''].filter(Boolean).join(' · ');}
+// The name links to that member's marketplace profile (`/marketplace/people/<handle>`), the one page
+// this app has about a person. Every roster member has one: `catalog()` builds `people[]` from the same
+// `rosterModel` members this table draws, so the link never lands on "No teammate named …". Only the
+// name is the target, not the row — the row is a data grid, and a whole-row link would swallow the
+// text selection a reader uses to copy a handle. Invitations get no link (see InvitedRow).
 function MemberRow({member:m,index}:{member:Member;index:number}){
+  const copy=useCopy(),navigate=useNavigate();
+  // Right-click a member (2026-09-14): copy the handle a `team` verb takes, or open the marketplace profile.
+  const menu=useContextMenu(()=>[{key:'profile',label:'Open profile',icon:'user',onSelect:()=>navigate('/marketplace/people/'+encodeURIComponent(m.handle))},{key:'sep',kind:'separator'},{key:'handle',label:'Copy handle',icon:'copy',onSelect:()=>void copy(m.handle,'handle')},{key:'name',label:'Copy name',icon:'copy',onSelect:()=>void copy(m.name,'name')}]);
   const features=useFeatures();
   // Read-only permission chip: `m.status` is host truth from the CLI ('admin' | 'member' | 'unknown').
   // There is no CLI write path for granting admin, so no menu — and 'unknown' (gh unavailable) renders
@@ -84,12 +93,14 @@ function MemberRow({member:m,index}:{member:Member;index:number}){
   // nothing, so the button sat there doing nothing at all. `terum-skills team remove <handle>` is the
   // way to remove a member until the confirmation is driven end to end from this screen.
   const status=m.status==='admin'||m.status==='member'?m.status:null;
-  return <div role="row" className="member-row" data-testid={'member-row-'+index}>
-    <div role="cell" className="member-name"><Avatar initials={m.initials} size={28}/><div className="member-identity"><span>{m.name}</span><span>{sub(m,features?.memberRole)}</span></div></div>
+  return <div role="row" className="member-row" ref={menu} data-testid={'member-row-'+index}>
+    <div role="cell" className="member-name"><Avatar initials={m.initials} size={28}/><div className="member-identity"><Link to={'/marketplace/people/'+encodeURIComponent(m.handle)}>{m.name}</Link><span>{sub(m,features?.memberRole)}</span></div></div>
     <div role="cell">{features?.roles?status?<span className={'member-role '+status}>{status==='admin'?'Admin':'Member'}</span>:'—':null}</div>
     {/* Skills is what that member's machine last reported having, so '—' means nobody has reported one — never 0. */}
     <div role="cell">{m.joined??'—'}</div><div role="cell">{m.skillsTotal===null?'—':m.skillsTotal}</div><div key={features?.lastSeen?'seen':'hidden'} role="cell" style={features?.lastSeen?undefined:{visibility:'hidden'}}>{features?.lastSeen?m.lastSeen:'—'}</div>
   </div>;
 }
+// An invitation has no profile to open: the person is not a member yet, so no people file and no
+// `catalog().people` entry exists for them, and a link would reach the marketplace's "Not found".
 function InvitedRow({member:m}:{member:NonNullable<Roster['invited']>[number]}){const features=useFeatures();return <div role="row" className="member-row" data-testid="invited-row"><div role="cell" className="member-name"><Avatar initials={m.initials} size={28}/><div className="member-identity"><span>{m.name}</span><span>{[sub(m,features?.memberRole),`invited ${m.invited} by ${m.by}`].filter(Boolean).join(' · ')}</span></div></div><div role="cell">Invited</div><div role="cell">—</div><div role="cell">—</div><div key={features?.lastSeen?'seen':'hidden'} role="cell" style={features?.lastSeen?undefined:{visibility:'hidden'}}>—</div></div>;}
 function MemberSkeleton(){return <div className="member-row" data-testid="member-skeleton"><div className="member-name"><BoardSkeleton width={28} height={28} radius={14}/><div style={{flexGrow:1}}><div style={{height:18,display:'flex',alignItems:'center'}}><BoardSkeleton width="40%" height={12}/></div><div style={{height:16,marginTop:1,display:'flex',alignItems:'center'}}><BoardSkeleton width="28%" height={10}/></div></div></div><div><BoardSkeleton width={68} height={20}/></div><div><BoardSkeleton width={76} height={10}/></div><div><BoardSkeleton width={24} height={10}/></div><div><BoardSkeleton width={60} height={10}/></div></div>;}

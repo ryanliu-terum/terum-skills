@@ -14,9 +14,9 @@ import { run, type AppUpdateArgs } from '../appUpdate.js';
 
 vi.mock('node:fs/promises', async importOriginal => {
   const original = await importOriginal<typeof import('node:fs/promises')>();
-  return { ...original, rename: vi.fn(original.rename), rm: vi.fn(original.rm) };
+  return { ...original, rename: vi.fn(original.rename), rm: vi.fn(original.rm), writeFile: vi.fn(original.writeFile) };
 });
-afterEach(() => { vi.restoreAllMocks(); vi.mocked(fs.rename).mockReset(); vi.mocked(fs.rm).mockReset(); });
+afterEach(() => { vi.restoreAllMocks(); vi.mocked(fs.rename).mockReset(); vi.mocked(fs.rm).mockReset(); vi.mocked(fs.writeFile).mockReset(); });
 const real = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises');
 const held = () => Object.assign(new Error('EPERM: operation not permitted, rename'), { code: 'EPERM' });
 const ok: CommandResult = { code: 0, stdout: '', stderr: '' };
@@ -212,6 +212,13 @@ describe('app-update', () => {
     expect(await run({...h.args,applyNow:true,awaitPid:42,alive,pollMs:1},io())).toMatchObject({ok:true,value:{phase:'launched'}});
     expect(alive).toHaveBeenCalledTimes(3); expect(h.calls).toEqual([{command:join(h.root,'app',V,WIN),args:['/S','/UPDATE','/R'],options:undefined}]);
     expect(await exists(join(h.root,'app',V,'installed.json'))).toBe(true); expect(await marker(h.root)).toMatchObject({phase:'launched'}); expect(await fs.readFile(join(h.root,'run','app.json'),'utf8')).toBe(before);
+  });
+  it('--apply-now keeps phase launched when the version record cannot be written after the installer succeeded', async () => {
+    const h = await stageFixture(true), output = io();
+    vi.mocked(fs.writeFile).mockImplementation(async (path, data, options) => { if (String(path).endsWith('installed.json')) throw Object.assign(new Error('EPERM: operation not permitted, open'), { code: 'EPERM' }); return real.writeFile(path, data, options); });
+    expect(await run({ ...h.args, applyNow: true, sleep: async () => undefined }, output)).toMatchObject({ ok: true, value: { phase: 'launched', error: null } });
+    expect(await marker(h.root)).toMatchObject({ phase: 'launched', error: null }); expect(await exists(join(h.root, 'app', V, 'installed.json'))).toBe(false);
+    expect(output.lines).toContain(`${APP_PRODUCT} ${V} is installed, but its record could not be written (EPERM: operation not permitted, open); the next check treats it as not installed until a later apply writes it.`);
   });
   it('--apply-now on macOS opens the bundle without -n', async () => {
     const h = await stageFixture(), before=await fs.readFile(join(h.root,'run','app.json'),'utf8'); await run({...h.args,applyNow:true},io());

@@ -14,20 +14,10 @@ export function rawGrants(skill: Card): string[] {
   return skill.grants.filter((grant: unknown): grant is string => typeof grant === 'string' && grant !== 'none');
 }
 
-/**
- * Badge count for the marketplace filters. `raw` is the committed `active` search param, which the
- * filter popover writes in lockstep with the facet params (serializeFacets in market-facets.ts
- * derives it from the committed selection via activeFacetCount) — no longer a dead placeholder.
- * `fallback` covers the popover-open-but-uncommitted state, whose default selection has 4 active
- * facets, keeping the drawn default board intact.
- */
-export function activeFacets(raw: string | null | undefined, fallback: number): number {
-  if (raw == null) return fallback;
-  const value = Number(raw);
-  return /^\d+$/.test(raw) && Number.isSafeInteger(value) ? value : 0;
-}
-
 export function personStatus(person: Person): [string, string] {
- if (person.onDisk[1] === 0) return ['Nothing to install', `${person.handle} has no recorded installs to copy`];
+ // §8.5 (amended 2026-09-13): the page and `install member` read `profile[]`, so an empty page means an
+ // empty PROFILE — not an empty install record. Saying "no recorded installs" of someone whose machine is
+ // full of skills they never added to their profile is the same mislabel this amendment set out to remove.
+ if (person.onDisk[1] === 0) return ['Nothing to install', `${person.handle} has nothing on their profile yet`];
  return person.onDisk[0] === person.onDisk[1] ? ['Installed', `${person.onDisk[0]} of ${person.onDisk[1]} skills on this machine`] : ['Not installed', person.placeNote];
 }

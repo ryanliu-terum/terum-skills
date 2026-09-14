@@ -36,7 +36,7 @@ it('reports the CLI error verbatim when the driving CLI has no such verb',async(
 });
 it('surfaces appUpdate true on the real adapter and capabilities are unchanged',async()=>{
  const h=harness();expect((await h.backend.surfaces()).appUpdate).toBe(true);
- expect(await h.backend.capabilities()).toEqual({appVersion:import.meta.env.VITE_APP_VERSION,windowChrome:'mac-overlay',disablePerMachine:false,inboxEventLog:false,offtargetKind:false,machineRegistry:false,perCaseEvalTables:false,openInEditor:true,clipboard:true});
+ expect(await h.backend.capabilities()).toEqual({appVersion:import.meta.env.VITE_APP_VERSION,windowChrome:'mac-overlay',windowControlsEnd:76,disablePerMachine:false,inboxEventLog:false,offtargetKind:false,machineRegistry:false,perCaseEvalTables:false,openInEditor:true,clipboard:true});
 });
 it('reads features.appUpdate from the hello frame and defaults a missing key to false',async()=>{
  expect((await harness(check,{appUpdate:true}).backend.features()).appUpdate).toBe(true);expect((await harness(check,{}).backend.features()).appUpdate).toBe(false);
@@ -92,4 +92,18 @@ it('sends the explicit manual reason to the CLI',async()=>{
 it('accepts the exact native pending marker contract',async()=>{
  const h=harness({...check,lastApply:{schema:1,version:'0.12.2',phase:'waiting',at:'1970-01-01T00:00:00.000Z',error:null,reason:'on-close'}});
  expect(await h.backend.appUpdate.check()).toMatchObject({ok:true,value:{reason:'on-close',lastApply:{phase:'waiting',error:null}}});
+});
+
+it('reads a marker for the running version that never reached launched as the update it evidently was', async () => {
+ // The install happened (this binary IS that version); only the bookkeeping after the installer failed. Read as
+ // launched it goes through the acknowledge-once path instead of standing in front of every later update.
+ // "The running version" is whatever this build reports (vite defines it from package.json), never a literal a release bump would strand; the guard keeps an undefined env from matching an undefined version.
+ const running = import.meta.env.VITE_APP_VERSION; expect(running).toMatch(/^\d+\.\d+\.\d+/);
+ const stuck = { ...check, lastApply: { schema: 1, version: running, phase: 'installing', at: '2026-09-13T23:12:14Z', error: null } };
+ const h = harness(stuck);
+ const first = await h.backend.appUpdate.check(); expect(first).toMatchObject({ ok: true, value: { lastApply: { version: running, phase: 'launched', error: null } } });
+ // Like any launched marker it stays visible for the session; the next launch acknowledges it through the same path.
+ const again = await h.backend.appUpdate.check({ force: true }); expect(again).toMatchObject({ ok: true, value: { lastApply: { phase: 'launched' } } });
+ const other = harness({ ...check, lastApply: { schema: 1, version: '0.0.1', phase: 'failed', at: '2026-09-13T23:12:14Z', error: 'boom' } });
+ expect(await other.backend.appUpdate.check()).toMatchObject({ ok: true, value: { lastApply: { version: '0.0.1', phase: 'failed', error: 'boom' } } });
 });

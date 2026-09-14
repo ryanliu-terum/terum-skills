@@ -314,15 +314,40 @@ describe('W-02 parallel folder scan', () => {
     await candidate(root,'invalid','---\nname: [\n---\n'); await symlink(join(root,'a'),join(root,'linked'));
     const inventory = await localSkills(root,emptyConfig(),{scope:'global',stateRoot:join(root,'.state')});
     expect(inventory.entries.map(e=>e.name)).toEqual((await fs.readdir(root)).sort());
-    const expected = names.sort().map(name=>({body:'',frontmatter:`---\nname: ${name}\ndescription: skill\n---`,skillId:null,category:null,name,path:join(root,name),characters:`---\nname: ${name}\ndescription: skill\n---\n`.length,inspection: name==='B'||name==='Z'?{kind:'rejected',reason:'illegal-name',detail:'folder name is not a legal skill name (1–64 lowercase alphanumerics or single hyphens)'}:{kind:'candidate',description:'skill',privileged:false}}));
+    // `updated` is SKILL.md's mtime, so its value is the clock, not the fixture — but it must still be a
+    // real ISO-8601 instant (the app's sort and relativeTime both Date.parse it), never merely a string.
+    const isoInstant = expect.stringMatching(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/) as unknown as string;
+    const expected = names.sort().map(name=>({body:'',frontmatter:`---\nname: ${name}\ndescription: skill\n---`,skillId:null,category:null,name,path:join(root,name),updated:isoInstant,characters:`---\nname: ${name}\ndescription: skill\n---\n`.length,inspection: name==='B'||name==='Z'?{kind:'rejected',reason:'illegal-name',detail:'folder name is not a legal skill name (1–64 lowercase alphanumerics or single hyphens)'}:{kind:'candidate',description:'skill',privileged:false}}));
     expect(inventory).toEqual({root,scope:'global',rootState:'scanned',problems:[],entries:[...expected,
       {frontmatter:null,skillId:null,category:null,name:'empty',path:join(root,'empty'),inspection:{kind:'rejected',reason:'skill-md-missing',detail:'SKILL.md missing'}},
       {frontmatter:null,skillId:null,category:null,name:'plain',path:join(root,'plain'),inspection:{kind:'rejected',reason:'not-a-directory',detail:'not a directory'}},
       {frontmatter:null,skillId:null,category:null,name:'directory',path:join(root,'directory'),inspection:{kind:'rejected',reason:'skill-md-not-a-file',detail:'SKILL.md is not a regular file'}},
-      {body:'',frontmatter:'---\nname: [\n---',skillId:null,category:null,name:'invalid',path:join(root,'invalid'),characters:'---\nname: [\n---\n'.length,inspection:{kind:'rejected',reason:'invalid-yaml',detail:`SKILL.md frontmatter is not valid YAML: ${YAML.parseDocument('name: [').errors[0]!.message}`}},
+      {body:'',frontmatter:'---\nname: [\n---',skillId:null,category:null,name:'invalid',path:join(root,'invalid'),updated:isoInstant,characters:'---\nname: [\n---\n'.length,inspection:{kind:'rejected',reason:'invalid-yaml',detail:`SKILL.md frontmatter is not valid YAML: ${YAML.parseDocument('name: [').errors[0]!.message}`}},
       {frontmatter:null,skillId:null,category:null,name:'linked',path:join(root,'linked'),inspection:{kind:'rejected',reason:'symlink',detail:'symbolic link'}},
     ].sort((a,b)=>a.name<b.name?-1:a.name>b.name?1:0)});
   });
+  // RM-38: the app's Library sorts local folders by "recently updated", so a local row needs an honest
+  // last-changed stamp. It is SKILL.md's own mtime and nothing else — no folder walk, no synthesised now().
+  it('stamps each readable SKILL.md with its own mtime and leaves every other entry unstamped', async () => {
+    const root = await temporaryDirectory();
+    const fresh = await candidate(root, 'fresh');
+    const stale = await candidate(root, 'stale');
+    await mkdir(join(root, 'empty'));
+    await mkdir(join(root, 'directory', 'SKILL.md'), { recursive: true });
+    await writeFile(join(root, 'plain'), 'file');
+    await symlink(join(root, 'fresh'), join(root, 'linked'));
+    const staleTime = new Date('2024-03-04T05:06:07.000Z');
+    await fs.utimes(join(stale, 'SKILL.md'), staleTime, staleTime);
+    const inventory = await localSkills(root, emptyConfig(), { scope: 'global', stateRoot: join(root, '.state') });
+    const updatedOf = (name: string) => inventory.entries.find((entry) => entry.name === name)?.updated;
+    expect(updatedOf('stale')).toBe('2024-03-04T05:06:07.000Z');
+    const freshStamp = updatedOf('fresh');
+    expect(freshStamp).toBe((await fs.stat(join(fresh, 'SKILL.md'))).mtime.toISOString());
+    expect(Number.isFinite(Date.parse(freshStamp ?? ''))).toBe(true);
+    // No SKILL.md file to stat: the field is absent, never a fabricated date.
+    for (const name of ['empty', 'directory', 'plain', 'linked']) expect(updatedOf(name)).toBeUndefined();
+  });
+
   it('reports a folder whose lstat fails as failed without aborting its siblings', async () => {
     const root=await temporaryDirectory(); for(let i=0;i<12;i++)await candidate(root,`skill-${i}`);
     const original=fs.lstat; const spy=vi.spyOn(fs,'lstat').mockImplementation(async (...args)=>{if(args[0]===join(root,'skill-5'))throw Object.assign(new Error('EACCES: permission denied'),{code:'EACCES'});return original(...args);});

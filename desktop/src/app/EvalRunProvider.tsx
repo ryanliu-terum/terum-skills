@@ -2,9 +2,10 @@ import { useContext, useRef, useState, type PropsWithChildren } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { driveRun, PrintContext, PromptContext, useBackend } from '../backend';
 import { evalQueueFor, type EvalQueueItem } from '../backend/eval-queue';
-import type { Result, Run } from '../backend/types';
+import type { EvalManyArgs, Result, Run } from '../backend/types';
 import { affects } from './invalidation';
 import { EvalRunContext, type EvalRunApi, type EvalRunState, type EvalRunValue } from './eval-run-context';
+import { evalManyLabel } from '../components/domain/bulk-eval';
 
 /** App lifetime, independent of routes. Only explicit Stop or native quit cancels an eval. */
 export function EvalRunProvider({children}:PropsWithChildren){
@@ -13,7 +14,7 @@ export function EvalRunProvider({children}:PropsWithChildren){
  const live=useRef<EvalRunState|null>(null),inFlight=useRef(false);
  function update(next:EvalRunState|null){live.current=next;setCurrent(next);}
  function assertAvailable(){if(inFlight.current)throw new Error(`An eval is already running for ${live.current?.ref??'another skill'}`);}
- async function track<T extends EvalRunValue>(run:Run<T>,args:{ref:string;name:string;team?:string;queue?:boolean}):Promise<Result<T>> {
+ async function track<T extends EvalRunValue>(run:Run<T>,args:{ref:string;name:string;team?:string;queue?:boolean;many?:EvalManyArgs}):Promise<Result<T>> {
   inFlight.current=true;
   update({...args,team:args.team,run,lines:[],startedAt:Date.now(),state:'running'});setDialogOpen(true);
   let result:Result<T>;
@@ -33,6 +34,12 @@ export function EvalRunProvider({children}:PropsWithChildren){
   const run=backend.eval({ref:args.ref,...(args.team===undefined?{}:{team:args.team})});
   void track(run,args);
  };
+ // The chip and the dialog name the request, not a skill: there may be none (pending only) or many.
+ const startMany:NonNullable<EvalRunApi['startMany']>=args=>{
+  assertAvailable();
+  const run=backend.evalMany(args);
+  void track(run,{ref:args.refs[0]??'pending',name:evalManyLabel(args),...(args.team===undefined?{}:{team:args.team}),many:args});
+ };
  async function startQueued(item:EvalQueueItem){
   assertAvailable();
   const service=evalQueueFor(backend);
@@ -43,5 +50,5 @@ export function EvalRunProvider({children}:PropsWithChildren){
  }
  async function stop(){const active=live.current;if(!active||active.state!=='running')return;update({...active,state:'stopped'});try{await active.run.cancel();}catch(error){if(live.current?.run===active.run)update({...live.current,result:{ok:false,error:String(error)}});}}
  function dismiss(){setDialogOpen(false);if(live.current?.state!=='running')update(null);}
- return <EvalRunContext value={{current,dialogOpen,start,startQueued,isRunning:()=>inFlight.current,stop,dismiss,show:()=>setDialogOpen(true)}}>{children}</EvalRunContext>;
+ return <EvalRunContext value={{current,dialogOpen,start,startMany,startQueued,isRunning:()=>inFlight.current,stop,dismiss,show:()=>setDialogOpen(true)}}>{children}</EvalRunContext>;
 }

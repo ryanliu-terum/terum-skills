@@ -11,6 +11,17 @@ export const fsForTests = { rename, rm };
 
 export const HOOK_COMMAND = 'npx -y terum-skills@latest sync --hook';
 export const HOOK_ENTRY = { matcher: 'startup', hooks: [{ type: 'command', command: HOOK_COMMAND, async: true, timeout: 60 }] } as const;
+/**
+ * The Claude Code hook events this tool may own an entry under. Everything below is written per
+ * event: `SessionStart` carries the hourly fetch, `PostToolUse` the edit reminder (src/lib/editHook.ts).
+ * A settings file whose value for either one is not an array is a file we refuse to edit at all.
+ */
+export const MANAGED_EVENTS = ['SessionStart', 'PostToolUse'] as const;
+export type ManagedEvent = (typeof MANAGED_EVENTS)[number];
+/** PostToolUse fires per tool call and matches on the TOOL name, not a path; the script does its own path test. */
+export const EDIT_HOOK_MATCHER = 'Write|Edit';
+/** Not `async`: the reminder has to reach the model's next turn, and the script's first act is a path test that costs nothing. */
+export const editHookEntry = (command: string) => ({ matcher: EDIT_HOOK_MATCHER, hooks: [{ type: 'command', command, timeout: 10 }] });
 export interface HookOptions { settingsFile?: string; backupDir?: string; }
 
 export function defaultHookOptions(storeRoot: string, home = homedir()): Required<HookOptions> {
@@ -44,8 +55,10 @@ function parseSettings(source: string, path: string): Settings {
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw invalidSettings(path);
   const value = parsed as Settings;
   if ('hooks' in value && (!value.hooks || typeof value.hooks !== 'object' || Array.isArray(value.hooks))) throw invalidSettings(path);
-  const sessionStart = (value.hooks as Settings | undefined)?.SessionStart;
-  if (sessionStart !== undefined && !Array.isArray(sessionStart)) throw invalidSettings(path);
+  for (const event of MANAGED_EVENTS) {
+    const entries = (value.hooks as Settings | undefined)?.[event];
+    if (entries !== undefined && !Array.isArray(entries)) throw invalidSettings(path);
+  }
   return value;
 }
 
@@ -54,11 +67,13 @@ async function readSettings(path: string): Promise<{ value: Settings; source?: s
   catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { value: {} }; throw error; }
 }
 
-export async function hookInstalled(settingsFile: string): Promise<boolean> {
+export async function eventHookInstalled(settingsFile: string, event: ManagedEvent): Promise<boolean> {
   const { value, source } = await readSettings(settingsFile);
-  const sessionStart = (value.hooks as Settings | undefined)?.SessionStart;
-  return source !== undefined && Array.isArray(sessionStart) && sessionStart.some(matchingEntry);
+  const entries = (value.hooks as Settings | undefined)?.[event];
+  return source !== undefined && Array.isArray(entries) && entries.some(matchingEntry);
 }
+
+export async function hookInstalled(settingsFile: string): Promise<boolean> { return eventHookInstalled(settingsFile, 'SessionStart'); }
 
 async function hasBackup(directory: string): Promise<boolean> {
   try { return (await readdir(directory)).some((entry) => /^settings\..+\.json$/.test(entry)); }
@@ -86,45 +101,54 @@ async function writeAtomically(path: string, value: Settings, existing: boolean)
   } catch (error) { await rm(temporary, { force: true }); throw error; }
 }
 
-export async function installHook(options: Required<HookOptions>): Promise<'installed' | 'replaced'> {
+/** One event's entry list, written by the rule below. `entry` is the canonical group this tool owns under that event. */
+export async function installEventHook(options: Required<HookOptions>, event: ManagedEvent, entry: { matcher: string; hooks: readonly unknown[] }): Promise<'installed' | 'replaced'> {
   const { value, source } = await readSettings(options.settingsFile);
   const hooks = (value.hooks ??= {}) as Settings;
-  const sessionStart = (hooks.SessionStart ??= []) as unknown[];
-  const index = sessionStart.findIndex(matchingEntry);
+  const list = (hooks[event] ??= []) as unknown[];
+  const index = list.findIndex(matchingEntry);
   const outcome = index < 0 ? 'installed' : 'replaced';
-  if (index < 0) sessionStart.push(HOOK_ENTRY);
+  if (index < 0) list.push(entry);
   else {
     // Entry-level: our command leaves every group it is in (a hand-edited duplicate, an older
     // install under another spelling), so the file never carries two of ours. A group that held
     // nothing else is dropped and the canonical group takes its position; a mixed group keeps its
-    // other commands and its matcher — under `startup` our object goes back where it was, under any
-    // other matcher the canonical group is appended, so the command runs at startup whatever it shared.
-    const first = sessionStart[index] as Settings;
+    // other commands and its matcher — under our own matcher our object goes back where it was,
+    // under any other matcher the canonical group is appended, so the command still runs.
+    const first = list[index] as Settings;
     const position = (first.hooks as unknown[]).findIndex((hook) => matchingEntry({ hooks: [hook] }));
-    const stripped = sessionStart.map(stripOwnHooks);
+    const stripped = list.map(stripOwnHooks);
     const survivor = stripped[index] as Settings | null;
-    if (survivor === null) stripped[index] = HOOK_ENTRY;
-    else if (survivor.matcher === HOOK_ENTRY.matcher) { const remaining = [...(survivor.hooks as unknown[])]; remaining.splice(position, 0, HOOK_ENTRY.hooks[0]); survivor.hooks = remaining; }
-    else stripped.push(HOOK_ENTRY);
-    hooks.SessionStart = stripped.filter((entry) => entry !== null);
+    if (survivor === null) stripped[index] = entry;
+    else if (survivor.matcher === entry.matcher) { const remaining = [...(survivor.hooks as unknown[])]; remaining.splice(position, 0, entry.hooks[0]); survivor.hooks = remaining; }
+    else stripped.push(entry);
+    hooks[event] = stripped.filter((value) => value !== null);
   }
   await backupOnce(options, source);
   await writeAtomically(options.settingsFile, value, source !== undefined);
   return outcome;
 }
 
-export async function removeHook(options: Required<HookOptions>): Promise<'removed' | 'absent'> {
+export async function installHook(options: Required<HookOptions>): Promise<'installed' | 'replaced'> {
+  return installEventHook(options, 'SessionStart', HOOK_ENTRY);
+}
+
+export async function removeEventHook(options: Required<HookOptions>, event: ManagedEvent): Promise<'removed' | 'absent'> {
   const { value, source } = await readSettings(options.settingsFile);
   if (source === undefined) return 'absent';
   const hooks = value.hooks as Settings | undefined;
-  const sessionStart = hooks?.SessionStart;
-  if (!Array.isArray(sessionStart) || !sessionStart.some(matchingEntry)) return 'absent';
-  hooks!.SessionStart = sessionStart.map(stripOwnHooks).filter((entry) => entry !== null);
-  if ((hooks!.SessionStart as unknown[]).length === 0) delete hooks!.SessionStart;
+  const list = hooks?.[event];
+  if (!Array.isArray(list) || !list.some(matchingEntry)) return 'absent';
+  hooks![event] = list.map(stripOwnHooks).filter((entry) => entry !== null);
+  if ((hooks![event] as unknown[]).length === 0) delete hooks![event];
   if (Object.keys(hooks!).length === 0) delete value.hooks;
   await backupOnce(options, source);
   await writeAtomically(options.settingsFile, value, true);
   return 'removed';
+}
+
+export async function removeHook(options: Required<HookOptions>): Promise<'removed' | 'absent'> {
+  return removeEventHook(options, 'SessionStart');
 }
 
 export async function offerHook(io: Prompter, options: Required<HookOptions>): Promise<'installed' | 'replaced' | 'declined' | 'present'> {

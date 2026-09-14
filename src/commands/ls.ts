@@ -13,7 +13,7 @@ import { normalizeAuthor } from '../lib/guard.js';
 import { Prompter } from '../lib/prompt.js';
 import { installCounts, installersById, type Installer, isActivePerson, latestChange, readPeople, skillEndorsement } from '../lib/readme.js';
 import { parseVersionFolder, versionFolderName, versionLabel } from '../lib/versions.js';
-import { receiptSchema, type Receipt } from '../lib/evals/receipt.js';
+import { NO_TEAM_RUNNER_HANDLE, receiptSchema, type Receipt } from '../lib/evals/receipt.js';
 import { localReceiptsFor, receiptFiles, selectCardEval } from '../lib/evals/receipt-store.js';
 import { versionDigests, type VersionDigest } from '../lib/version-digests.js';
 import { fromError, Result, success } from '../lib/result.js';
@@ -63,7 +63,7 @@ export interface LsSkill {
 export type LocalHealth = 'local-changed' | 'unknown';
 /** The checkout's `origin`, for the Library's "which repository is this folder" line. `slug` is owner/repo on GitHub and null on every other host. */
 export interface LocalRemote { url: string; slug: string | null; }
-export interface LocalSection extends LocalRoot { rootState: 'scanned' | 'absent' | 'unreadable'; label: string; remote: LocalRemote | null; counts: { skillFolders: number; connectable: number }; rows: { skillId: string | null; placed: boolean; name: string; path: string; state: string; tracked: boolean; placement: NonNullable<LocalEntry['placement']> | null; health: LocalHealth; edited: boolean; localEval: (Receipt & { path: string }) | null; localEvalStale: boolean; teamEval: TeamEval | null; matchedVersion: string | null; matchedName: string | null; matchedTeam: string | null; knownToTeam: boolean; description: string | null; frontmatter: string | null; body?: string | null; category: string | null; characters: number | null; problem?: string }[]; notOffered: { skillId: string | null; name: string; path: string; reason: SourceProblem | 'failed'; detail: string; description: string | null; frontmatter: string | null; body?: string | null; category: string | null; characters: number | null }[]; problems: { path: string; reason: string }[]; }
+export interface LocalSection extends LocalRoot { rootState: 'scanned' | 'absent' | 'unreadable'; label: string; remote: LocalRemote | null; counts: { skillFolders: number; connectable: number }; rows: { skillId: string | null; placed: boolean; name: string; path: string; state: string; tracked: boolean; placement: NonNullable<LocalEntry['placement']> | null; health: LocalHealth; edited: boolean; localEval: (Receipt & { path: string; mine: boolean }) | null; localEvalStale: boolean; teamEval: TeamEval | null; matchedVersion: string | null; matchedName: string | null; matchedTeam: string | null; knownToTeam: boolean; description: string | null; frontmatter: string | null; body?: string | null; category: string | null; characters: number | null; updated: string | null; problem?: string }[]; notOffered: { skillId: string | null; name: string; path: string; reason: SourceProblem | 'failed'; detail: string; description: string | null; frontmatter: string | null; body?: string | null; category: string | null; characters: number | null }[]; problems: { path: string; reason: string }[]; }
 /**
  * §8.4 — one member, whole, from the team read that already parsed `people/<handle>.json`.
  *
@@ -104,6 +104,11 @@ export interface LsResult { local?: LocalSection[]; roster: readonly { handle: s
   /** §8.4: emitted on the `kind:'all'` team read only; `member?` still serves the single-member view. */
   people?: readonly LsPerson[]; projects?: readonly { name: string; skills: readonly string[]; remotes: readonly string[]; [k: string]: unknown }[]; member?: { installed: { id: string; scope: Person['installed'][number]['scope']; since: string }[]; handle: string; role: string | null; projects: readonly string[] }; }
 
+/** One byline join for every caller that attributes a skill's managed author to a team handle. */
+export function authorBylines(people: readonly Pick<Person, 'display_name' | 'email' | 'handle'>[]): Map<string, string> {
+  return new Map(people.map((person) => [normalizeAuthor(`${person.display_name} <${person.email}>`), person.handle]));
+}
+
 /** §6 read-only team inventory; it deliberately neither pulls nor prompts. */
 export async function run(args: LsArgs, io: Prompter): Promise<Result<LsResult>> {
   try {
@@ -122,7 +127,7 @@ export async function run(args: LsArgs, io: Prompter): Promise<Result<LsResult>>
     const roster = people.sort((a, b) => a.handle.localeCompare(b.handle)).map((person) => ({ handle: person.handle, active: isActivePerson(person, team.archived), role: person.role ?? null, projects: person.projects ?? [] }));
     // §8.4: built from the same parsed people the roster and the install counts come from — no extra
     // read, no second process, and one shape every marketplace reader shares.
-    const bylines = new Map(people.map((person) => [normalizeAuthor(`${person.display_name} <${person.email}>`), person.handle]));
+    const bylines = authorBylines(people);
     const personRows: LsPerson[] = people.map((person) => ({
       handle: person.handle,
       display_name: person.display_name,
@@ -266,6 +271,21 @@ function describedBy(inspection: LocalEntry['inspection']): string | null {
  */
 export type TeamEval = Receipt & { path: string; team: string; mine: boolean };
 
+/**
+ * Cross-mirror overlays spec §4.1, review walk D3 — `mine`, defined once for BOTH receipts a row can carry:
+ * the receipt's runner is one of the handles given. A team receipt is checked against that team's binding;
+ * an own-store receipt names no team, so it is checked against every binding this machine holds, plus the
+ * placeholder `eval` stamps when the machine holds none (`NO_TEAM_RUNNER_HANDLE`) — that run was this
+ * machine's too, and the card must never read "run by local". Computed here and nowhere else — the desktop
+ * names a runner exactly when the shown receipt's `mine` is false.
+ */
+function ranHere(receipt: Receipt, handles: readonly string[]): boolean {
+  return handles.includes(receipt.provenance.runner_handle);
+}
+function ranHereWithoutTeam(receipt: Receipt, handles: readonly string[]): boolean {
+  return ranHere(receipt, handles) || receipt.provenance.runner_handle === NO_TEAM_RUNNER_HANDLE;
+}
+
 interface TeamIndex {
   /** Every uuid any configured team publishes — `knownToTeam` on a row. */
   ids: Set<string>;
@@ -314,7 +334,7 @@ async function teamIndex(store: ConfigStore, config: Config, io: Prompter): Prom
           const parsed = receiptSchema.safeParse(raw);
           if (!parsed.success) { io.print(`${team}/${record.name}: schema-invalid receipt ${folder}/${file}; not considered.`); continue; }
           if (!parsed.data.content_digest) continue;
-          receipts.push({ id: record.id, entry: { ...parsed.data, path, team, mine: parsed.data.provenance.runner_handle === binding.handle } });
+          receipts.push({ id: record.id, entry: { ...parsed.data, path, team, mine: ranHere(parsed.data, [binding.handle]) } });
         }
       }
       return receipts;
@@ -401,7 +421,7 @@ async function showLocal(store: ConfigStore, home: string, io: Prompter, runner:
       if (version.ambiguous) ambiguous.add(entry.path);
       // Stale means: no score for THESE bytes anywhere, but some store scored this skill at another digest.
       const evaluatedElsewhere = entry.skillId !== null && (receipts.some(r => r.skill_id === entry.skillId && r.content_digest !== digest) || [...(team.digestsBySkill.get(entry.skillId) ?? [])].some(d => d !== digest));
-      return { localEval: receipt ? { ...receipt, path: join(evalRoot, digest.slice(7), receipt.run_id, 'receipt.json') } : null,
+      return { localEval: receipt ? { ...receipt, path: join(evalRoot, digest.slice(7), receipt.run_id, 'receipt.json'), mine: ranHereWithoutTeam(receipt, Object.values(config.teams).map((binding) => binding.handle)) } : null,
         localEvalStale: !receipt && !teamEval && evaluatedElsewhere,
         teamEval, matchedVersion: version.match?.folder ?? null, matchedName: version.match?.name ?? null, matchedTeam: version.match?.team ?? null, knownToTeam };
     } catch { return none; }
@@ -432,7 +452,7 @@ async function showLocal(store: ConfigStore, home: string, io: Prompter, runner:
       if (ambiguous.has(entry.path)) local.problems.push({ path: entry.path, reason: 'identical bytes exist in more than one team; no version is shown' });
       if (tracked || inspection.kind === 'candidate') {
         const problem = inspection.kind === 'rejected' ? inspection.detail : inspection.kind === 'failed' ? inspection.reason : inspection.privileged ? 'contains plugin or hook definitions' : undefined;
-        local.rows.push({ skillId: entry.skillId, placed: entry.placement !== undefined, name: entry.name, path: entry.path, state: stateOf(entry), tracked, placement: entry.placement ?? null, health: healths.get(entry)!, edited: healths.get(entry) === 'local-changed', ...evals[entryIndex]!, description: describedBy(inspection), frontmatter: entry.frontmatter, body: entry.body ?? null, category: entry.category, characters: entry.characters ?? null, ...(problem === undefined ? {} : { problem }) });
+        local.rows.push({ skillId: entry.skillId, placed: entry.placement !== undefined, name: entry.name, path: entry.path, state: stateOf(entry), tracked, placement: entry.placement ?? null, health: healths.get(entry)!, edited: healths.get(entry) === 'local-changed', ...evals[entryIndex]!, description: describedBy(inspection), frontmatter: entry.frontmatter, body: entry.body ?? null, category: entry.category, characters: entry.characters ?? null, updated: entry.updated ?? null, ...(problem === undefined ? {} : { problem }) });
       } else if (inspection.kind === 'rejected') local.notOffered.push({ skillId: entry.skillId, name: entry.name, path: entry.path, reason: inspection.reason, detail: inspection.detail, description: inspection.description ?? null, frontmatter: entry.frontmatter, body: entry.body ?? null, category: entry.category, characters: entry.characters ?? null });
       if (inspection.kind === 'failed') {
         if (!tracked) local.notOffered.push({ skillId: entry.skillId, name: entry.name, path: entry.path, reason: 'failed', detail: inspection.reason, description: null, frontmatter: entry.frontmatter, body: entry.body ?? null, category: entry.category, characters: entry.characters ?? null });

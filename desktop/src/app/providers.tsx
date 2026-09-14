@@ -11,6 +11,7 @@ import { WorkflowPopup } from '../components/domain/WorkflowPopup';
 import { Button } from '../components/ui/Button';
 import { affects } from './invalidation';
 import { MachineRemovalProvider } from './MachineRemovalProvider';
+import { ContextMenuProvider } from '../components/domain/ContextMenu';
 import { EvalRunProvider } from './EvalRunProvider';
 import { ThemeOverrideContext } from './theme-override';
 import type { Theme } from '../backend/types';
@@ -20,7 +21,7 @@ export function Providers({children}:PropsWithChildren){
  useEffect(()=>{const off=backend.subscribe(source=>{void client.invalidateQueries({predicate:q=>affects(source,q.queryKey)});});return off;},[backend,client]);
  useEffect(()=>{const stamp=()=>{applyTheme(theme,override===null);const color=getComputedStyle(document.documentElement).getPropertyValue('--tk-chrome').trim();if(color)void backend.setWindowBackground(color);};stamp();if(theme!=='system'||typeof matchMedia!=='function')return;const media=matchMedia('(prefers-color-scheme: light)');const change=stamp;media.addEventListener('change',change);return()=>media.removeEventListener('change',change);},[theme,override,backend]);
  useEffect(()=>{void backend.prefs.ready?.then(async()=>{await useUiStore.persist.rehydrate();});},[backend]);
- return <ThemeOverrideContext value={setOverride}><BackendContext value={backend}><QueryClientProvider client={client}><Tooltip.Provider><PromptProvider><EvalRunProvider><EvalQueueDrainer/><MachineRemovalProvider>{children}</MachineRemovalProvider></EvalRunProvider></PromptProvider></Tooltip.Provider></QueryClientProvider></BackendContext></ThemeOverrideContext>;
+ return <ThemeOverrideContext value={setOverride}><BackendContext value={backend}><QueryClientProvider client={client}><Tooltip.Provider><ContextMenuProvider><PromptProvider><EvalRunProvider><EvalQueueDrainer/><MachineRemovalProvider>{children}</MachineRemovalProvider></EvalRunProvider></PromptProvider></ContextMenuProvider></Tooltip.Provider></QueryClientProvider></BackendContext></ThemeOverrideContext>;
 }
 
 interface PendingPrompt {id:number;question:PromptQuestion;resolve:(value:string|boolean)=>void;reject:(error:Error)=>void}

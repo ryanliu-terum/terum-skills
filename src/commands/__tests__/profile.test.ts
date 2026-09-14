@@ -87,6 +87,25 @@ it('the shared people mutation composes profile edits over its post-image and va
   await repo.safeWrite(tree => writePersonFile(tree, 'seed', p => removeProfileEntry(p, id)), { action: 'profile', handle: 'seed' });
   expect(JSON.parse(await readFile(join(clone, 'people/seed.json'), 'utf8')).profile).toEqual([]);
 });
+it('D77: --remove takes one entry off profile[] by name, and refuses a name that is not there', async () => {
+  const { addProfileEntry, writePersonFile } = await import('../../lib/profile-entry.js');
+  const { openTeamRepo } = await import('../../lib/teamRepo.js');
+  const { fixture, store } = await setup();
+  const id = '11111111-1111-4111-8111-111111111111', other = '22222222-2222-4222-8222-222222222222';
+  await openTeamRepo(store.teamClone('team'), fixture.bare, systemRunner).safeWrite(tree => writePersonFile(tree, 'seed', p => {
+    addProfileEntry(p, { id, name: 'sample', version: 'v2', added: '2026-09-14', via: 'publish' });
+    addProfileEntry(p, { id: other, name: 'keeper', version: 'v1', added: '2026-09-14', via: 'install' });
+  }), { action: 'profile', handle: 'seed' });
+
+  const io = new ScriptedPrompter();
+  expect(await run({ config: store, remove: 'sample' }, io)).toMatchObject({ ok: true, value: { changed: ['profile (removed sample)'] } });
+  expect(io.lines.join('\n')).toContain('Updated seed: profile (removed sample).');
+  expect(JSON.parse(await git(['show', 'main:people/seed.json'], fixture.bare)).profile).toEqual([{ id: other, name: 'keeper', version: 'v1', added: '2026-09-14', via: 'install' }]);
+
+  expect(await run({ config: store, remove: 'sample' }, new ScriptedPrompter())).toEqual({ ok: false, error: 'sample is not on your profile.' });
+  // The refused write leaves the surviving entry exactly as it was.
+  expect(JSON.parse(await git(['show', 'main:people/seed.json'], fixture.bare)).profile).toHaveLength(1);
+});
 it('refreshes local_skills opportunistically when writing the profile', async () => {
   const { mkdir } = await import('node:fs/promises');
   const { store } = await setup();

@@ -6,7 +6,7 @@ import { driveRun } from './drive';
 // CLI keys map to the six drawn tour steps; print-only keys are copy, never placement counters.
 export const SETUP_STEP_TO_BOARD = {
  welcome:'Welcome', app:'Style', role:'Team', github:'Team', team:'Team',
- invite:'Team', projects:'Done', evals:'Done', community:'Feedback', hook:'Done', wrapper:'Done', done:'Done',
+ invite:'Team', projects:'Done', existing:'Your skills', evals:'Done', community:'Feedback', hook:'Done', wrapper:'Done', editHook:'Done', done:'Done',
 } as const satisfies Record<SetupStep, string>;
 export function printedSetupStep(line:string):SetupStep|null {
  if(line.startsWith('Welcome to terum-skills.')||line.startsWith("Your team's skills")||line.startsWith('This wizard'))return 'welcome';
@@ -14,6 +14,7 @@ export function printedSetupStep(line:string):SetupStep|null {
  if(line.startsWith('Identity:')||line.startsWith('Team ')||line.startsWith('Joined '))return 'team';
  // §9.2/D13: the step prints its one explanatory line, then whatever addLibraryProject says.
  if(line.startsWith("Terum will track the skills")||line.startsWith('Added ')||line.startsWith('Could not add that project')||/ is already in your library\.$/.test(line))return 'projects';
+ if(line.startsWith('Checking your library against the team')||line.includes('of your skills match')||line.startsWith('Recorded ')||line.startsWith('Published ')||line.startsWith('Nothing to reconcile'))return 'existing';
  // The four ways the batch can end without running: everything receipted, nothing shared, the version reader
  // failed, or nothing could be checked. All four are the evals step reporting, not unrecognized copy.
  if(line.startsWith('✓ ')||line.startsWith('✗ ')||line.startsWith('Queued ')||line.startsWith('Evaluating ')||line.startsWith('Evaluated ')||line.startsWith('Every shared skill already has')||line.startsWith('Skipping the eval')
@@ -27,6 +28,7 @@ export function printedSetupStep(line:string):SetupStep|null {
 export function askedSetupStep(question:string):SetupStep|null {
  if(question==='Use this identity?')return 'team';
  if(question==='Add a project?'||question==='Which folder?')return 'projects';
+ if(question.startsWith('Record ')||question.startsWith('Publish your version of '))return 'existing';
  if(question.startsWith('Evaluate the ')||question==='How many at a time?'||question.startsWith('Continue with the next '))return 'evals';
  return null;
 }

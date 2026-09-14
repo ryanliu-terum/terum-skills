@@ -120,12 +120,21 @@ function validateCases(raw: Record<string, unknown>): Result<Record<string, Reco
   return success(files);
 }
 
+/**
+ * Generated assets are re-read by every hygiene caller (HYG2/HYG3), so the generator must not write
+ * anything its own gate refuses. `git config user.email test@test.com` is the idiomatic fixture line
+ * a model reaches for, and `test.com` is a real registered domain — it used to plant a HYG3 failure
+ * that only surfaced on a later command. `inspectContent` enforces this before the write-back; this
+ * sentence is what keeps the model from hitting that refusal in the first place.
+ */
+const FIXTURE_RULE = 'Any email address you write must use a reserved domain (example.com, example.org, or a .test/.invalid name) \u2014 never a real or real-looking one. Never include anything shaped like a credential: no API keys, tokens, passwords, or private keys, real or fake.';
+
 function context(options: GenerateOptions): string {
   return `SKILL.md:\n${options.skill}\n\nCANDIDATE FILE LISTING (names only):\n${options.files.join('\n')}`;
 }
 
 function triggerPrompt(options: GenerateOptions): string {
-  return `Generate trigger evaluation assets for this Claude Code skill. Return ONLY JSON with exactly this shape:\n{"should_trigger":["five non-empty prompts"],"should_not_trigger":["five non-empty near-miss prompts"]}\nA should_not_trigger prompt must be a plausible near miss drawn from the endorsed catalog, not an unrelated request.\n\nENDORSED CATALOG:\n${options.catalog}\n\n${context(options)}`;
+  return `Generate trigger evaluation assets for this Claude Code skill. Return ONLY JSON with exactly this shape:\n{"should_trigger":["five non-empty prompts"],"should_not_trigger":["five non-empty near-miss prompts"]}\nA should_not_trigger prompt must be a plausible near miss drawn from the endorsed catalog, not an unrelated request.\n${FIXTURE_RULE}\n\nENDORSED CATALOG:\n${options.catalog}\n\n${context(options)}`;
 }
 
 function casePrompt(options: GenerateOptions): string {

@@ -34,14 +34,16 @@ export function OnboardingScreen(){
  const status=useQuery({queryKey:['status',mock],queryFn:({signal})=>backend.status(undefined,{signal}),enabled:needsStatus});
  const surfaces=useQuery({queryKey:['surfaces'],queryFn:()=>backend.surfaces()});
  if(launch.isPending||surfaces.isPending)return <ScreenFrame ready={false}><Frame current={null} steps={[]} skipped={[]}><Column><Tile/><Title>Setting up your workspace</Title></Column></Frame></ScreenFrame>;
- if(step==='boot'&&manual)return <ManualSetup launch={ctx}/>;
+ if(step==='boot'&&manual)return <ManualSetup key={search.get('target')??''} launch={ctx} target={search.get('target')}/>;
  if(step==='boot'&&needsStatus&&status.isPending)return <ScreenFrame ready={false}/>;
  if(step==='boot'&&ctx&&(decide(ctx,consumed,status.data)==='boot'||existingSetupSession(backend,ctx)))return <SetupBoot key={ctx.writtenAt} launch={ctx}/>;
  if(!surfaces.data?.onboarding)return <Navigate to="/library/global" replace/>;
  return <OnboardingReadScreen/>;
 }
-function ManualSetup({launch}:{launch:LaunchContext|null}){
- const [request]=useState(()=>launch??{writtenAt:`manual:${Date.now()}`});
+// `target` is the repository the handoff screen asked for: a run started from there names the team to join,
+// so it must not inherit the recorded launch (which has no target, which is what produced the handoff).
+function ManualSetup({launch,target}:{launch:LaunchContext|null;target?:string|null}){
+ const [request]=useState<LaunchContext>(()=>target?{writtenAt:`manual:${Date.now()}`,target}:launch??{writtenAt:`manual:${Date.now()}`});
  return <SetupBoot key={request.writtenAt} launch={request} restart/>;
 }
 function OnboardingReadScreen(){

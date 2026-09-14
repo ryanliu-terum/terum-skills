@@ -85,9 +85,9 @@ button.icon-button:hover {background:var(--tk-bg3);color:var(--tk-text1);}
 .footer {display:flex;align-items:center;gap:4px;height:52px;padding:0 8px 0 12px;border-top:1px solid var(--tk-border1);box-sizing:border-box;flex-shrink:0;}
 .footer-identity {display:flex;align-items:center;gap:4px;flex-grow:1;min-width:0;}
 .avatar {display:flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:50%;background:var(--tk-brand);color:#fff;font-size:10px;font-weight:590;letter-spacing:.02em;flex-shrink:0;}
+/* One child today (the name). The column stays so the machine name can join it when the CLI reports one. */
 .footer-lines {display:flex;flex-direction:column;gap:1px;flex-grow:1;min-width:0;}
 .footer-login {font-size:13px;font-weight:500;color:var(--tk-text1);}
-.footer-machine {font-size:11px;font-weight:400;color:var(--tk-text3);}
 .placeholder {padding:24px;font-size:13px;color:var(--tk-text3);}
 .not-found {display:flex;flex:1;align-items:center;justify-content:center;flex-direction:column;gap:12px;font-size:13px;color:var(--tk-text3);}
 
@@ -152,3 +152,20 @@ button:focus-visible,.button[data-state="focus"],[role="switch"]:focus-visible,[
 .prompt-option-description { display: block; color: var(--tk-text3); font-size: 12px; }
 .setup-output-ok { color: var(--tk-good); }
 .setup-output-bad { color: var(--tk-bad); }
+
+/* Right-click menus and one-click copy (2026-09-14). The popup is portalled and the toast transient, so no board moves. */
+.context-menu {min-width:184px;}
+.context-menu .menu-item {cursor:default;}
+.context-menu .menu-item>svg {color:var(--tk-text3);flex-shrink:0;}
+.context-menu .menu-item[data-danger] {color:var(--tk-bad);}
+.context-menu .menu-item[data-danger]>svg {color:var(--tk-bad);}
+.menu-separator {height:1px;margin:4px 6px;background:var(--tk-border1);}
+.copy-toast {position:fixed;left:50%;bottom:20px;transform:translateX(-50%);padding:6px 10px;border-radius:6px;background:var(--tk-tooltipbg);color:var(--tk-tooltipfg);font-size:12px;line-height:16px;white-space:nowrap;box-shadow:var(--tk-shadowlow);border:1px solid var(--tk-tooltipborder);pointer-events:none;z-index:60;}
+.copy-toast[role="alert"] {color:var(--tk-bad);}
+/* A copyable value keeps the wrapped text's every metric (it stays a span), so the boards do not move. */
+.copy-value {cursor:copy;border-radius:3px;}
+.copy-value:hover {color:var(--tk-text1);}
+.copy-value:focus-visible {outline:2px solid var(--tk-accent);outline-offset:2px;}
+
+/* Text the user may want to copy is selectable (2026-09-14); the chrome, controls and card frames stay `user-select:none` from `.shell`. */
+.skill-md-tab,.detail-description,.detail-rail .detail-row>span:last-child,.detail-status>div>span,.board-error-line,.terminal-hint,.cli-box .board-mono,.settings-value,.setting-row>div:first-child,.settings-note,.settings-head>span,.placement-row>span,.placement-footer,.prune-list,.skill-card-desc,.inbox-document,.inbox-fields,.inbox-subject,.inbox-row-content,.member-identity,.market-project-desc,.market-person-lines,.search-page-row,.state-body,.copy-value,pre,code {user-select:text;-webkit-user-select:text;}

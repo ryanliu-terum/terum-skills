@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { assessHygiene, formatHygieneWarnings, hygieneFrontmatter, inspectHygiene } from '../hygiene.js';
+import { assessHygiene, exemptAuthorEmail, formatHygieneWarnings, hygieneFrontmatter, inspectContent, inspectHygiene } from '../hygiene.js';
 
 const ID = '11111111-1111-4111-8111-111111111111';
 const skill = (extra = '', body = '') => `---\nname: sample\ndescription: useful skill\nlicense: Apache-2.0\nmetadata:\n  id: ${ID}\n  author: Author <author@authors.test>\n  terum-category: docs\n${extra}---\n${body}`;
@@ -23,6 +23,32 @@ describe('inspectHygiene (§9)', () => {
   it('allows the author email and placeholders but refuses third-party email addresses', () => {
     expect(codes(inspect({ 'SKILL.md': skill('', 'Author <author@authors.test>; hello@example.com') }))).not.toContain('HYG3');
     expect(codes(inspect({ 'SKILL.md': skill('', 'contact: third.party@company.com') }))).toContain('HYG3');
+  });
+
+  it('exempts the fixture domains a test harness actually types', () => {
+    // `git config user.email test@test.com` is the line our own eval-gen writes; `test.com` is a
+    // real registered domain, so the RFC-2606 list alone refused it (Ryan, 2026-09-14).
+    for (const address of ['test@test.com', 'dev@my.local', 'ci@build.localhost', 'a@b.example']) {
+      expect(codes(inspect({ 'SKILL.md': skill('', `setup: git config user.email ${address}`) }))).not.toContain('HYG3');
+    }
+    // The widening is domain-exact: a real domain that merely starts the same way still fails.
+    expect(codes(inspect({ 'SKILL.md': skill('', 'contact: a@testing.com') }))).toContain('HYG3');
+    expect(codes(inspect({ 'SKILL.md': skill('', 'contact: a@nottest.com') }))).toContain('HYG3');
+  });
+
+  it('names the offending address, the exempt author, and the fix', () => {
+    const [finding] = inspect({ 'SKILL.md': skill('', 'contact: third.party@company.com') }).errors;
+    expect(finding).toMatchObject({ code: 'HYG3', message: expect.stringContaining('third.party@company.com') });
+    // The old wording ("not the skill author") read as an authorship gate and sent a user hunting
+    // for a permission problem that does not exist. It must say whose address IS exempt.
+    expect(finding!.message).toContain('author@authors.test');
+    expect(finding!.message).toContain('example.com');
+  });
+
+  it('reports a credential in preference to an email in the same file', () => {
+    const findings = inspect({ 'SKILL.md': skill('', 'contact: third.party@company.com\ntoken: ghp_0123456789abcdefghijklmnopqrstuvwxyz') });
+    expect(findings.errors.filter((finding) => finding.code === 'HYG3')).toHaveLength(1);
+    expect(findings.errors.find((finding) => finding.code === 'HYG3')!.message).toContain('credential-shaped');
   });
 
   it('recognizes every HYG4 boundary: extension, shebang, binary scope, and executable mode', () => {
@@ -101,5 +127,41 @@ describe('HYG7 — category taxonomy warning', () => {
     const raw = skill().replace(/metadata:[\s\S]*?---/, `metadata: {id: ${ID}, author: 'Author <author@authors.test>', terum-category: ops}\n---`);
     const result = assessHygiene('sample', { files: new Map([['SKILL.md', Buffer.from(raw)]]), executable: new Set() }, 'Apache-2.0', false, false, categories);
     expect(formatHygieneWarnings(result.warnings)).toContain('warning HYG7 SKILL.md: terum-category');
+  });
+});
+
+describe('inspectContent', () => {
+  const bytes = (files: Record<string, string>) => new Map(Object.entries(files).map(([path, body]) => [path, Buffer.from(body)]));
+
+  it('applies HYG2/HYG3 to material that is not a skill folder yet', () => {
+    // Generated eval assets have no frontmatter of their own, so inspectHygiene cannot judge them:
+    // HYG1/HYG5/HYG6 would all fire on the absent SKILL.md and drown the real finding.
+    const findings = inspectContent(bytes({ 'evals/cases/a.yaml': 'setup: git config user.email real.person@company.com' }), 'author@authors.test');
+    expect(findings.map((finding) => finding.code)).toEqual(['HYG3']);
+    expect(findings[0]).toMatchObject({ path: 'evals/cases/a.yaml', line: 1 });
+  });
+
+  it('honours the same author and reserved-domain exemptions as the folder gate', () => {
+    expect(inspectContent(bytes({ 'evals/cases/a.yaml': 'setup: git config user.email test@test.com' }), 'author@authors.test')).toEqual([]);
+    expect(inspectContent(bytes({ 'evals/triggers.yaml': 'should_trigger:\n  - mail author@authors.test' }), 'author@authors.test')).toEqual([]);
+  });
+
+  it('exempts nothing when the folder declares no author', () => {
+    expect(inspectContent(bytes({ 'evals/cases/a.yaml': 'note: someone@company.com' }), undefined).map((finding) => finding.code)).toEqual(['HYG3']);
+  });
+});
+
+describe('exemptAuthorEmail', () => {
+  it('reads the address out of the folder frontmatter, strict schema or not', () => {
+    expect(exemptAuthorEmail(Buffer.from(skill()))).toBe('author@authors.test');
+    // A local, never-published folder carries no managed fields (§6.3) and still gets its exemption.
+    expect(exemptAuthorEmail(Buffer.from('---\nname: sample\ndescription: d\nmetadata:\n  author: A <a@b.com>\n---\nbody'))).toBe('a@b.com');
+  });
+
+  it('is undefined when there is no author to exempt', () => {
+    expect(exemptAuthorEmail(undefined)).toBeUndefined();
+    expect(exemptAuthorEmail(Buffer.from('---\nname: sample\ndescription: d\n---\nbody'))).toBeUndefined();
+    // An author with no angle brackets exempts nothing (§9 HYG3).
+    expect(exemptAuthorEmail(Buffer.from('---\nname: sample\nmetadata:\n  author: plain-handle\n---\nbody'))).toBeUndefined();
   });
 });

@@ -91,11 +91,15 @@ it('opens the project remote, with no hard-coded repository target',async()=>{
  const anchor=document.querySelector<HTMLAnchorElement>('.market-repo a')!;expect(anchor.href).toBe('https://github.com/terum/terum');fireEvent.click(anchor);expect(call).toHaveBeenCalledWith(anchor.href);
 });
 it('unknown category icons render the neutral tag without throwing',()=>{const {container}=render(<Mark name="new-category"/>);expect(container.querySelector('svg path')).toHaveAttribute('d','M3 3h7l11 11-7 7L3 10Z');});
-it('Settings and footer consume the same clone-state copy',async()=>{
+// RM-47 gave clone-state copy two consumers, Settings ▸ Teams and the footer. The footer half is
+// deliberately gone: the sidebar clipped the sentence unreadably, so Settings ▸ Teams is the sole
+// consumer and must show it exactly once.
+it('Settings ▸ Teams is the only surface that shows clone-state copy',async()=>{
  const backend=createMockBackend(),status=await backend.status();if(!status.ok)throw new Error(status.error);
  status.value.teams=status.value.teams.map(team=>({...team,cloneState:{state:'absent'}}));vi.spyOn(backend,'status').mockResolvedValue(status);
  location.hash='#/settings/teams';render(<Providers><BackendContext value={backend}><App/></BackendContext></Providers>);
- await waitFor(()=>expect(screen.getAllByText(`Clone: ${status.value.teams[0]!.clone} is missing.`)).toHaveLength(2));
+ await waitFor(()=>expect(screen.getAllByText(`Clone: ${status.value.teams[0]!.clone} is missing.`)).toHaveLength(1));
+ expect(document.querySelector('footer')?.textContent).not.toContain('Clone:');
 });
 it('Onboarding Eval is receipt-only even with runEvalInApp false, retaining its terminal hint',async()=>{
  const {client}=await open('/onboarding/basics?tab=eval');await act(async()=>{client.setQueryData(['features'],{...client.getQueryData<Features>(['features']),runEvalInApp:false});});

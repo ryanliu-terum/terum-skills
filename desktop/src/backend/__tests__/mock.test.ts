@@ -4,7 +4,7 @@ import { design } from '../mock/data';
 import type { Run, Frame } from '../types';
 afterEach(()=>{location.hash='';localStorage.clear();vi.useRealTimers();vi.restoreAllMocks();resetMockRemovals();});
 async function answerAll<T>(run:Run<T>,answer:(frame:Extract<Frame,{t:'ask'}>)=>string|boolean){for await(const frame of run.frames){if(frame.t==='ask')run.answer(frame.id,answer(frame));}return run.done;}
-it('advertises all mock capabilities and reads current scenarios on every call',async()=>{const b=createMockBackend();expect(await b.capabilities()).toEqual({appVersion:design.APP_VERSION,windowChrome:'cosmetic',disablePerMachine:true,inboxEventLog:true,offtargetKind:true,machineRegistry:true,perCaseEvalTables:true,openInEditor:true,clipboard:true});expect(await b.surfaces()).toEqual({divergence:true,status:true,settings:true,onboarding:true,library:true,skill:true,receipts:true,inbox:true,catalog:true,roster:true,update:true,libraryProjects:false,appUpdate:false});expect((await b.library({scope:{kind:'global'}})).ok).toBe(true);location.hash='#/library/global?__mock=empty';const emptyLibrary=await b.library({scope:{kind:'global'}});expect(emptyLibrary.ok&&emptyLibrary.value.skills).toEqual([]);expect(emptyLibrary.ok&&emptyLibrary.value.title).toBe('0 skills');const status=await b.status();expect(status.ok&&status.value.counts.Global).toBe('0');expect(await b.inbox()).toEqual({ok:true,value:[]});const roster=await b.roster();expect(roster.ok&&roster.value.members.map(m=>m.handle)).toEqual(['teddy']);});
+it('advertises all mock capabilities and reads current scenarios on every call',async()=>{const b=createMockBackend();expect(await b.capabilities()).toEqual({appVersion:design.APP_VERSION,windowChrome:'cosmetic',windowControlsEnd:null,disablePerMachine:true,inboxEventLog:true,offtargetKind:true,machineRegistry:true,perCaseEvalTables:true,openInEditor:true,clipboard:true});expect(await b.surfaces()).toEqual({divergence:true,status:true,settings:true,onboarding:true,library:true,skill:true,receipts:true,inbox:true,catalog:true,roster:true,update:true,libraryProjects:false,appUpdate:false});expect((await b.library({scope:{kind:'global'}})).ok).toBe(true);location.hash='#/library/global?__mock=empty';const emptyLibrary=await b.library({scope:{kind:'global'}});expect(emptyLibrary.ok&&emptyLibrary.value.skills).toEqual([]);expect(emptyLibrary.ok&&emptyLibrary.value.title).toBe('0 skills');const status=await b.status();expect(status.ok&&status.value.counts.Global).toBe('0');expect(await b.inbox()).toEqual({ok:true,value:[]});const roster=await b.roster();expect(roster.ok&&roster.value.members.map(m=>m.handle)).toEqual(['teddy']);});
 it.each([
  ['library',"EACCES: permission denied, scandir '~/.terum/skills'"],
  ['skill',"ENOENT: no such file or directory, open '~/.claude/skills/deploy-check/SKILL.md'"],
@@ -28,7 +28,7 @@ it('keeps a catalog-only skill detail consistent with its marketplace card: not 
 it('treats any requested skill as not installed under the not-installed scenario',async()=>{const b=createMockBackend();location.hash='#/skill/a11y-audit?__mock=not-installed&dialog=install&root=marketplace';const absent=await b.skill({ref:'a11y-audit'});expect(absent.ok).toBe(true);if(!absent.ok)throw new Error(absent.error);expect(absent.value).toMatchObject({name:'a11y-audit',installed:'absent',placed:false,onDiskOnly:false,root:'Marketplace',flags:[]});location.hash='#/skill/a11y-audit';const catalogOnly=await b.skill({ref:'a11y-audit'});expect(catalogOnly.ok&&catalogOnly.value.installed).toBe('absent');location.hash='#/skill/deploy-check';const present=await b.skill({ref:'deploy-check'});expect(present.ok&&present.value.installed).toBe('placed');});
 it('honours latency, slow, and deliberately pending loading reads',async()=>{vi.useFakeTimers();const b=createMockBackend({latencyMs:50});const resolved=vi.fn();void b.inbox().then(resolved);await vi.advanceTimersByTimeAsync(49);expect(resolved).not.toHaveBeenCalled();await vi.advanceTimersByTimeAsync(1);expect(resolved).toHaveBeenCalledOnce();location.hash='#/inbox?__mock=slow';const slow=vi.fn();void b.inbox().then(slow);await vi.advanceTimersByTimeAsync(1999);expect(slow).not.toHaveBeenCalled();await vi.advanceTimersByTimeAsync(1);expect(slow).toHaveBeenCalledOnce();location.hash='#/inbox?__mock=loading';const loading=vi.fn();void b.inbox().then(loading);await vi.advanceTimersByTimeAsync(10000);expect(loading).not.toHaveBeenCalled();});
 it('marks declines for install, removal and team leave',async()=>{const b=createMockBackend();for(const run of [b.install({ref:'deploy-check'}),b.uninstallSkill({ref:'deploy-check'}),b.uninstallMachine({}),b.team({kind:'leave'})]){expect(await answerAll<unknown>(run,()=>false)).toMatchObject({ok:false,cancelled:true});}});
-it('returns fixture-shaped results for successful verbs',async()=>{const b=createMockBackend();expect((await answerAll(b.install({ref:'deploy-check',scope:'Terum'}),()=>true))).toEqual({ok:true,value:[{id:'deploy-check',name:'deploy-check',scope:'Terum',path:'skills/deploy-check',version:null,profiled:false}]});expect((await b.invite({logins:['sam']}).done)).toEqual({ok:true,value:{invited:['sam'],already:[],failed:[]}});expect((await b.publish({ref:'deploy-check'}).done).ok).toBe(true);expect((await b.eval({ref:'deploy-check'}).done).ok).toBe(true);expect(await b.validate({ref:'deploy-check'})).toEqual({ok:true,value:{name:'deploy-check',findings:0,warnings:0,repairable:0}});expect((await answerAll(b.setup({}),frame=>frame.kind==='confirm'?false:frame.question.startsWith('Evaluate the ')?'Overnight':'Join an existing team')).ok).toBe(true);});
+it('returns fixture-shaped results for successful verbs',async()=>{const b=createMockBackend();expect((await answerAll(b.install({ref:'deploy-check',scope:'Terum'}),()=>true))).toEqual({ok:true,value:[{id:'deploy-check',name:'deploy-check',scope:'Terum',path:'skills/deploy-check',version:null,profiled:false}]});expect((await b.invite({logins:['sam']}).done)).toEqual({ok:true,value:{invited:['sam'],already:[],failed:[]}});expect((await b.publish({ref:'deploy-check'}).done).ok).toBe(true);expect((await b.eval({ref:'deploy-check'}).done).ok).toBe(true);expect(await b.validate({ref:'deploy-check'})).toEqual({ok:true,value:{name:'deploy-check',findings:0,warnings:0,repairable:0,repairs:[]}});expect((await answerAll(b.setup({}),frame=>frame.kind==='confirm'?false:frame.question.startsWith('Evaluate the ')?'Overnight':'Join an existing team')).ok).toBe(true);});
 it('handles unknown refs, invalid preferences, storage corruption and unavailable clipboard',async()=>{const b=createMockBackend();expect((await b.install({ref:'missing'}).done).ok).toBe(false);b.prefs.set('theme','light');expect(b.prefs.get('theme','dark')).toBe('light');localStorage.setItem('terum-skills-app:pref:bad','{broken');expect(b.prefs.get('bad',42)).toBe(42);expect(()=>b.prefs.set('bad',undefined)).toThrow();expect(()=>b.prefs.set('bad',NaN)).toThrow();expect(await b.copyToClipboard('text')).toEqual({ok:false,error:'Clipboard unavailable.'});expect(await b.copyImage(new Blob(['x'],{type:'text/plain'}))).toEqual({ok:false,error:'Expected a PNG image.'});});
 
 it('filters project scopes and isolates returned data from the source fixtures',async()=>{const b=createMockBackend();const mrf=await b.library({scope:{kind:'checkout',root:'/Users/you/code/mrf'}});expect(mrf.ok&&mrf.value.skills.every(s=>['migration-guard','csv-profiler'].includes(s.name))).toBe(true);expect(mrf.ok&&mrf.value.skills.length).toBeGreaterThan(0);const first=await b.library({scope:{kind:'global'}});if(!first.ok)throw new Error(first.error);const n=first.value.skills.length;first.value.skills.pop();const next=await b.library({scope:{kind:'global'}});expect(next.ok&&next.value.skills.length).toBe(n);});
@@ -56,7 +56,7 @@ it('returns isolated Settings DTO additions while preserving drawn fixture const
  const b=createMockBackend();const settings=await b.settings();const onboarding=await b.onboarding();
  expect(settings.ok).toBe(true);expect(onboarding.ok).toBe(true);
  if(!settings.ok||!onboarding.ok)throw new Error('Expected fixture reads');
- const additions={AGENT_CLI_AUTH:'signed-in',MACHINE:expectedMachine,ME:expectedMe,TEAMS:expectedTeams,TEAM_POLICY:{...design.TEAM_POLICY,categories:design.CATEGORIES.map(([name])=>name),projects:design.PROJECTS.map(project=>project.name),categoriesNote:'From SKILL.md frontmatter; the list is admin-extendable.'},tools:{git:true,gh:true},syncNote:null};
+ const additions={AGENT_CLI_AUTH:'signed-in',MACHINE:expectedMachine,ME:expectedMe,TEAMS:expectedTeams,TEAM_POLICY:{...design.TEAM_POLICY,categories:design.CATEGORIES.map(([name])=>name),projects:design.PROJECTS.map(project=>project.name),categoriesNote:'From SKILL.md frontmatter; the list is admin-extendable.'},tools:{git:true,gh:true},syncNote:null,lastAutomatic:null};
  for(const [key,value] of Object.entries(settings.value))expect(value).toEqual(Object.hasOwn(additions,key)?Reflect.get(additions,key):Reflect.get(design,key));
  for(const key of ['ONBOARD_STEPS','ONBOARD_BASICS','GLOBAL_SET','BOOT_STEPS','ONBOARD_LATER','ONBOARD_COMMUNITY','ONBOARD_FETCH_ERROR','WELCOME_LINES','BASICS_COPY','BASICS_HINT','THEME_OPTIONS','LIBRARY_OVERVIEW','INVITEE','TEAM_REPO','INVITE_TIP','JOIN_BLOCK_NOTE'])expect(Reflect.get(onboarding.value,key)).toEqual(Reflect.get(design,key));
  expect(onboarding.value.skill.name).toBe(design.SKILLS[0]?.name);expect(onboarding.value.summary?.lift).toBe(44);expect(onboarding.value.arm).toEqual(design.DETAIL.receipt?.arm);expect(onboarding.value.rosterInitials).toEqual(design.ROSTER.map(q=>q.initials));expect(onboarding.value.bootRows).toHaveLength(5);expect(onboarding.value.failedBootRows[1]?.[0]).toBe('failed');
@@ -180,14 +180,19 @@ it("returns exactly the PublishResult keys on a project publish and mints no PR 
 // D64 (2026-09-13 ledger, option A): spec §8.5's two person buckets are distinct on the demo backend — "On their
 // profile" is what the person authored, "Installed" the subset the fixture marks on this machine — and
 // `installable` stays the full authored list the bulk Install/Remove button and marketplace.test pin.
-it('fills a person\'s profile bucket with their authored skills and Installed with the on-disk subset',async()=>{
+// §8.5 (amended 2026-09-13): ONE bucket. The second — "Installed", the on-disk subset — is gone with the
+// spec that asked for it, and the surviving list is what `installable` and the header count both read,
+// so a person can no longer be described by two lists that disagree.
+it('fills a person\'s single profile bucket with their authored skills',async()=>{
  const catalog=await createMockBackend().catalog();if(!catalog.ok)throw new Error(catalog.error);
  const authors:Record<string,string>=design.AUTHOR_OF,authored=(handle:string)=>design.CATALOG.filter(s=>authors[s.name]===handle).map(s=>s.name);
  const ajay=catalog.value.people.find(p=>p.handle==='ajay'),lena=catalog.value.people.find(p=>p.handle==='lena');
  if(!ajay||!lena)throw new Error('Fixture roster is missing ajay or lena.');
- // ajay authored two placed skills and one (secret-scan, installed:false) not on this machine, so his buckets differ; none of lena's three is placed.
- expect(ajay.buckets).toEqual([['On their profile',['deploy-check','env-audit','secret-scan']],['Installed',['deploy-check','env-audit']]]);
- expect(lena.buckets).toEqual([['On their profile',['a11y-audit','storybook-sync','bundle-budget']],['Installed',[]]]);
+ // ajay authored two placed skills and one (secret-scan, installed:false) not on this machine; none of
+ // lena's three is placed. Neither fact splits the page any more — placement shows on the cards.
+ expect(ajay.buckets).toEqual([['On their profile',['deploy-check','env-audit','secret-scan']]]);
+ expect(lena.buckets).toEqual([['On their profile',['a11y-audit','storybook-sync','bundle-budget']]]);
+ for(const person of [ajay,lena])expect(person.buckets[0]?.[1]).toEqual(person.installable);
  for(const person of [ajay,lena])expect(person.installable).toEqual(authored(person.handle));
 });
 // D65 (2026-09-13 ledger): under __mock=stale-eval, "you have Version 2" follows this session's installs and removals, not the page-load fixture flag.
@@ -200,4 +205,31 @@ it('updates the stale-eval installedVersion after a mid-session install and remo
  expect(await versionOf('a11y-audit')).toEqual(['v2','v5',true]);
  expect(await answerAll(b.uninstallSkill({ref:'deploy-check'}),()=>true)).toMatchObject({ok:true});
  expect(await versionOf('deploy-check')).toEqual([null,'v5',false]);
+});
+// Cross-mirror overlays spec §5 M1.7: `?__mock=overlays` puts the first five Library cards into §3.1 states 1–5 by
+// position and the Marketplace's placed cards into states 3 / 3b / 2; `on-disk-only` is the Marketplace's state 4.
+it('produces every overlay card state under __mock=overlays and state 4 under __mock=on-disk-only',async()=>{
+ const b=createMockBackend();location.hash='#/library/global?__mock=overlays';
+ const library=await b.library({scope:{kind:'global'}});if(!library.ok)throw new Error(library.error);
+ expect(library.value.skills.slice(0,5).map(s=>[s.installedVersion,s.localMatch,s.placed,s.edited,s.knownToTeam])).toEqual([
+  ['v3','identical',true,false,true],['v3','differs',true,true,true],[null,'differs',true,true,true],[null,'differs',false,false,true],[null,'none',false,false,false],
+ ]);
+ expect(library.value.skills[0]?.localEval).toMatchObject({runnerHandle:'ajayw36',version:'v3'});
+ location.hash='#/marketplace?__mock=overlays';
+ const catalog=await b.catalog();if(!catalog.ok)throw new Error(catalog.error);
+ const placed=catalog.value.skills.filter(s=>s.placed),absent=catalog.value.skills.filter(s=>!s.placed);
+ expect(placed.slice(0,3).map(s=>[s.latestVersion,s.installedVersion,s.localMatch])).toEqual([['v5','v2','differs'],['v5','v5','identical'],['v5','v2','identical']]);
+ expect(absent.length).toBeGreaterThan(0);for(const s of absent)expect([s.latestVersion,s.installedVersion,s.localMatch]).toEqual(['v5',null,null]);
+ location.hash='#/marketplace?__mock=on-disk-only';
+ const onDisk=await b.catalog();if(!onDisk.ok)throw new Error(onDisk.error);
+ expect(onDisk.value.skills.find(s=>s.name==='deploy-check')).toMatchObject({installed:'placed',placed:false,onDiskOnly:true,latestVersion:'v5',installedVersion:null,localMatch:'differs',path:'~/.claude/skills/deploy-check'});
+});
+
+it('models reconcile listing, project-add reconciliation, and install adoption',async()=>{
+ const b=createMockBackend();const listed=await b.reconcile.list();
+ expect(listed).toMatchObject({ok:true,value:{identical:[{name:'deploy-check',version:'v5'}],differing:[{name:'release-notes',sameId:true},{name:'pr-review',sameId:false}],adopted:[],published:[]}});
+ const added=await b.projects.add('/Users/you/code/new-project').done;
+ expect(added).toMatchObject({ok:true,value:{added:true,reconcile:{identical:[{name:'deploy-check'}]}}});
+ const adopted=await answerAll(b.install({team:'terum',adopt:'~/.claude/skills/deploy-check'}),()=>true);
+ expect(adopted).toMatchObject({ok:true,value:[{name:'deploy-check',scope:'Global',path:'~/.claude/skills/deploy-check'}]});
 });

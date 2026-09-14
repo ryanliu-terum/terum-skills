@@ -1,4 +1,5 @@
 import { useBackend } from '../backend';
+import { useHostReveal } from '../components/domain/context-menu';
 import { CenteredState } from '../components/domain/Primitives';
 import { WorkflowDialog } from '../components/domain/WorkflowControls';
 import { Button } from '../components/ui/Button';
@@ -8,7 +9,7 @@ import { useMachineRemoval } from './machine-removal-context';
 const command='npx -y terum-skills@latest uninstall';
 const title='Remove terum-skills from this machine?';
 export function MachineRemovalHost(){
- const backend=useBackend(),evalRun=useEvalRun(),{current:state,answer,dismiss}=useMachineRemoval();
+ const backend=useBackend(),evalRun=useEvalRun(),{current:state,answer,dismiss}=useMachineRemoval(),reveal=useHostReveal();
  if(!state||state.phase==='cancelled')return null;
  if(state.phase==='reading')return <WorkflowDialog title={title} body="" primary={null} status="Reading what this machine holds…" command={command} closeLabel="Cancel" close={dismiss} submit={()=>{}}/>;
  if(state.phase==='refused')return <WorkflowDialog title="Stop the running eval first" body="Removing terum-skills deletes the version cache and the clone the eval is using (Settings ▸ Evals)." primary="Show eval" command={command} close={dismiss} submit={()=>{evalRun.show();dismiss();}}/>;
@@ -23,7 +24,7 @@ export function MachineRemovalHost(){
     <div>config.json: {result.configRemoved?'removed':'kept'}</div>
     <div>Kept: {result.kept.join(', ')}</div>
     <div>Record: {result.record}</div>
-    <Button kind="ghost" onClick={()=>void backend.revealPath(result.record)}>Show in Finder</Button>
+    <Button kind="ghost" onClick={()=>void backend.revealPath(result.record)}>{reveal}</Button>
     {result.advice.map((line,i)=><div key={i}>{line}</div>)}
     <pre className="board-mono" role="log">{state.lines.join('\n')}</pre>
    </CenteredState>

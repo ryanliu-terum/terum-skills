@@ -34,6 +34,17 @@ it('maps the stated receipt values and formats their units without fixture const
  expect(r.value.evalEstimate).toEqual({cases:3,k:3,arms:2,runs:18,minutes:25,dollars:8,model:'sonnet'});
  expect(r.value.evalEstimateText).toMatch(/arm-run pricing from the last receipt\.$/);
 });
+it('states the receipt numbers at display precision, never a raw float',async()=>{
+ // 5/9, 1/9 and 1/3 stringify as 0.5555555555555556, 0.1111111111111111, 0.3333333333333333. The
+ // prose reads them the way Figure 1's bars and the per-case table already label them \u2014 two decimals
+ // \u2014 and the sign p the way Figure 2 states it. Rendering only: `summary` still carries the number.
+ const latest={...receipt(),arm_scores:{candidate:5/9,baseline:1/9,incumbent:null},comparisons:{'candidate-vs-baseline':{win:6,loss:1,tie:2,net_lift:1/3,sign_p:0.125}}};
+ const r=await adapter({...report(),latest}).backend.evalReport({ref:'deploy-check'});if(!r.ok)throw new Error(r.error);
+ expect(r.value.receipt?.abstract).toBe('3 cases at k=3. Candidate vs baseline: 6W\u20131L\u20132T, net lift 0.33, sign p 0.125. Verdict PASS.');
+ expect(r.value.receipt?.results).toBe('Arm scores: candidate 0.56, baseline 0.11, incumbent \u2014.');
+ for(const text of [r.value.receipt?.abstract,r.value.receipt?.results,r.value.receipt?.trigger_text,r.value.receipt?.coverage,r.value.receipt?.efficiency_text])expect(text).not.toMatch(/\d\.\d{4,}/);
+ expect(r.value.summary?.lift).toBe(33);
+});
 it('keeps ROI fractions null when an arm cost is missing',async()=>{
  const latest=receipt();latest.efficiency.candidate.cost_usd=null as unknown as number;
  const r=await adapter({...report(),latest}).backend.evalReport({ref:'deploy-check'});if(!r.ok)throw new Error(r.error);

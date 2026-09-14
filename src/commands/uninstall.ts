@@ -42,10 +42,14 @@ export async function run(args: UninstallArgs, io: Prompter): Promise<Result<Uni
       if (!handle) throw new Error(`Provide a member handle: \`${invocation(args.form, 'uninstall-skill member <handle>')}\`.`);
       const member = await readPerson(store.teamClone(team), parseOrExplain(handleSchema, handle, 'member handle'));
       const targets: UninstallTarget[] = [];
-      for (const item of member.installed) for (const scope of await ledgerScopes(store, team, item.id, [item.scope])) targets.push({ id: item.id, scope });
+      // The exact inverse of `install member`, which now reads `profile[]` (§8.5, amended 2026-09-13):
+      // the verb that undoes an install must name the same set the install named. A `profile[]` entry
+      // carries no scope — only `installed[]` does — so the seed list is empty and every scope comes
+      // from this machine's own ledger, which is the truthful answer to "what would this remove here".
+      for (const item of member.profile ?? []) for (const scope of await ledgerScopes(store, team, item.id, [])) targets.push({ id: item.id, scope });
       return await confirmAndRemove({ team, targets, from: args.from, store, runner, cwd: args.cwd, home: args.home, safeWrite: args.safeWrite }, io, (preview) => ({
-        question: config.teams[team]?.handle === handle ? `Remove everything you installed (${preview.ids.length} skills)?` : `Remove ${handle}'s ${preview.ids.length} skills from this machine?`,
-        detail: [...preview.lines, `Targets are ${handle}'s current installed list, not what you installed from them.`],
+        question: config.teams[team]?.handle === handle ? `Remove the ${preview.ids.length} skills on your profile from this machine?` : `Remove ${handle}'s ${preview.ids.length} skills from this machine?`,
+        detail: [...preview.lines, `Targets are ${handle}'s current profile list, not what you installed from them.`],
       }));
     }
     if (args.kind === 'project' || args.project) {

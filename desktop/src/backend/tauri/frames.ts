@@ -13,7 +13,8 @@ export type CliFrame =
   | { t: 'result'; verb: string; ok: boolean; exitCode: number; error?: string; declined?: boolean; refused?: boolean; value?: unknown };
 export type CliInbound = { t: 'answer'; id: string; value: string | number | boolean } | { t: 'cancel' };
 
-const KINDS = new Set(['confirm', 'text', 'select']);
+// Every kind the CLI emits (src/lib/frames.ts AskKind): `path` is a text ask with a folder picker, and dropping it here made every real `project add` question vanish.
+const KINDS = new Set<string>(['confirm', 'text', 'select', 'path']);
 const LEVELS = new Set(['info', 'warn', 'error']);
 const str = (v: unknown): v is string => typeof v === 'string';
 

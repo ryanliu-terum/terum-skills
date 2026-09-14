@@ -77,20 +77,7 @@ export function inspectHygiene(input: HygieneInput): HygieneAssessment {
   const author = parsed.success ? authorEmail(parsed.data.metadata?.author) : undefined;
   for (const [path, contents] of input.files) {
     const text = decodeText(contents);
-    if (text !== undefined) {
-      const invisible = INVISIBLE.exec(text);
-      const mixed = invisible ? undefined : mixedScriptOffset(text);
-      if (invisible || mixed !== undefined) {
-        const offset = invisible?.index ?? mixed!;
-        errors.push({ code: 'HYG2', path, line: lineAt(text, offset), message: invisible ? 'Contains a bidi control or zero-width character.' : 'Contains a whitespace-delimited token that mixes Unicode scripts.' });
-      }
-      const credential = credentialOffset(text);
-      const foreignEmail = emailOffset(text, author);
-      if (credential !== undefined || foreignEmail !== undefined) {
-        const offset = credential ?? foreignEmail!;
-        errors.push({ code: 'HYG3', path, line: lineAt(text, offset), message: credential !== undefined ? 'Contains a credential-shaped value.' : 'Contains an email address that is not the skill author.' });
-      }
-    }
+    if (text !== undefined) errors.push(...contentFindings(path, text, author));
     const dot = path.lastIndexOf('.');
     const extension = dot <= path.lastIndexOf('/') ? '' : path.slice(dot).toLowerCase();
     const shebang = text?.startsWith('#!') ?? false;
@@ -118,6 +105,56 @@ export function inspectHygiene(input: HygieneInput): HygieneAssessment {
   const description = parsed.success ? parsed.data.description : recordValue(input.frontmatter, 'description');
   if (typeof description !== 'string' || !description.trim()) errors.push({ code: 'HYG6', path: 'SKILL.md', line: lineOf(skill, /^description\s*:/m), message: 'description must not be empty.' });
   return { errors, warnings };
+}
+
+/**
+ * HYG2/HYG3 over one decoded text file. The only predicates that apply to arbitrary bytes rather
+ * than to a whole skill folder, so they are also what `inspectContent` runs over material that is
+ * not a skill yet (generated eval assets).
+ */
+function contentFindings(path: string, text: string, author: string | undefined): HygieneFinding[] {
+  const findings: HygieneFinding[] = [];
+  const invisible = INVISIBLE.exec(text);
+  const mixed = invisible ? undefined : mixedScriptOffset(text);
+  if (invisible || mixed !== undefined) {
+    const offset = invisible?.index ?? mixed!;
+    findings.push({ code: 'HYG2', path, line: lineAt(text, offset), message: invisible ? 'Contains a bidi control or zero-width character.' : 'Contains a whitespace-delimited token that mixes Unicode scripts.' });
+  }
+  const credential = credentialOffset(text);
+  const foreignEmail = credential === undefined ? emailOffset(text, author) : undefined;
+  if (credential !== undefined || foreignEmail !== undefined) {
+    const offset = credential ?? foreignEmail!.index;
+    findings.push({ code: 'HYG3', path, line: lineAt(text, offset), message: credential !== undefined ? 'Contains a credential-shaped value.' : foreignEmailMessage(foreignEmail!.email, author) });
+  }
+  return findings;
+}
+
+/**
+ * The content-only gate for bytes that are NOT a skill folder — model-generated eval assets on
+ * their way into the user's skill, which have no frontmatter of their own and so cannot be run
+ * through `inspectHygiene` (HYG1/HYG5/HYG6 would all fire on the absent SKILL.md). Same HYG2/HYG3
+ * predicates, same author exemption, so what the generator writes is judged by the rule the next
+ * `validate`/`publish`/`eval` will judge it by. Without this the write-back plants a hygiene
+ * failure that only surfaces on a LATER command, because the folder gate above already ran.
+ */
+/**
+ * The address HYG3 exempts, read straight from the folder's own frontmatter rather than the strict
+ * schema — a local, never-published folder legitimately carries no managed fields (§6.3), and the
+ * exemption has to work there too. Undefined means nothing is exempt, which is what HYG3 already does.
+ */
+export function exemptAuthorEmail(skill: Buffer | undefined): string | undefined {
+  if (skill === undefined) return undefined;
+  const author = recordValue(recordValue(hygieneFrontmatter(skill), 'metadata'), 'author');
+  return typeof author === 'string' ? authorEmail(author) : undefined;
+}
+
+export function inspectContent(files: Map<string, Buffer>, author: string | undefined): HygieneFinding[] {
+  const findings: HygieneFinding[] = [];
+  for (const [path, contents] of files) {
+    const text = decodeText(contents);
+    if (text !== undefined) findings.push(...contentFindings(path, text, author));
+  }
+  return findings;
 }
 
 export function formatHygieneFindings(findings: readonly HygieneFinding[]): string {
@@ -183,15 +220,35 @@ function credentialOffset(text: string): number | undefined {
   for (const pattern of CREDENTIAL_PATTERNS) { const match = new RegExp(pattern.source, pattern.flags).exec(text); if (match) return match.index; }
   return undefined;
 }
+/**
+ * Domains an address can never route to a real person through: the RFC-2606/6761 reserved set the
+ * spec names, plus the fixture domains test harnesses actually type. `test.com` and `*.local` are a
+ * §9 exempt-list widening (Ryan, 2026-09-14) — the list is marked [default — veto cheap], and
+ * `git config user.email test@test.com` is the idiomatic fixture line our own eval-gen emits.
+ */
+function reservedDomain(domain: string): boolean {
+  if (domain === 'example.com' || domain === 'example.org' || domain === 'example.net') return true;
+  if (domain === 'test.com' || domain === 'localhost') return true;
+  return ['.invalid', '.test', '.example', '.local', '.localhost'].some((suffix) => domain.endsWith(suffix));
+}
+
+/** HYG3 is a leak check, not an authorship gate: name the address, the exempt author, and the fix. */
+function foreignEmailMessage(email: string, author: string | undefined): string {
+  const whose = author === undefined
+    ? 'this skill declares no metadata.author, so no address is exempt'
+    : `the skill author is ${author}`;
+  return `Contains the email address ${email}, which is not the skill author's (${whose}). Hygiene refuses addresses that could reach a real person; use a reserved domain such as example.com in test fixtures.`;
+}
+
 /** §6.3: a local-eval folder legitimately declares no `metadata.author` at all — HYG3 then has no author to exempt. */
 function authorEmail(author: string | undefined): string | undefined { return author === undefined ? undefined : /<([^<>]+)>/.exec(author)?.[1]; }
 function recordValue(value: unknown, key: string): unknown { return value !== null && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>)[key] : undefined; }
-function emailOffset(text: string, author: string | undefined): number | undefined {
+function emailOffset(text: string, author: string | undefined): { index: number; email: string } | undefined {
   for (const match of text.matchAll(EMAIL)) {
     const email = match[0]; const at = email.lastIndexOf('@'); const local = email.slice(0, at); const domain = email.slice(at + 1).toLowerCase();
-    if (domain === 'example.com' || domain === 'example.org' || domain === 'example.net' || domain.endsWith('.invalid') || domain.endsWith('.test')) continue;
+    if (reservedDomain(domain)) continue;
     if (author !== undefined) { const authorAt = author.lastIndexOf('@'); if (authorAt > 0 && local === author.slice(0, authorAt) && domain === author.slice(authorAt + 1).toLowerCase()) continue; }
-    return match.index;
+    return { index: match.index, email };
   }
   return undefined;
 }

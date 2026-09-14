@@ -1,4 +1,5 @@
 import type { Design } from '../fixtures/schema';
+import type { EvalQueueItem } from './eval-queue';
 export type Result<T> = {ok:true;value:T}|{ok:false;error:string;cancelled?:true;refused?:true;reason?:'no-team'|'ambiguous-team'|'not-in-library'|'not-found'|'ambiguous-ref'|'unreadable'|'invalid-config';value?:T};
 export interface LaunchContext { writtenAt: string; target?: string; intent?: 'setup' }
 export class PromptCancelledError extends Error { readonly cancelled = true as const; }
@@ -9,10 +10,11 @@ export type AskKind='confirm'|'text'|'select'|'path';
 export interface PromptQuestion {kind:AskKind;question:string;choices?:readonly string[];default?:string;detail?:readonly string[];descriptions?:readonly string[]}
 export type Frame={t:'print';line:string}|{t:'ask';id:string;kind:AskKind;question:string;default?:string;choices?:readonly string[];detail?:readonly string[];descriptions?:readonly string[]}|{t:'progress';done:number;total:number;label?:string}|{t:'result';ok:boolean;error?:string;declined?:boolean;refused?:boolean};
 export interface Run<T>{readonly frames:AsyncIterable<Frame>;answer(id:string,value:string|boolean):void;cancel():Promise<void>;readonly done:Promise<Result<T>>}
-export interface Capabilities {appVersion:string;windowChrome:'mac-overlay'|'native'|'cosmetic';disablePerMachine:boolean;inboxEventLog:boolean;offtargetKind:boolean;machineRegistry:boolean;perCaseEvalTables:boolean;openInEditor:boolean;clipboard:boolean}
+/** `windowControlsEnd`: right edge, in CSS px from the window's left edge, of the OS controls drawn over the web content under `mac-overlay` (68 before macOS 26, 76 from it); null when the OS draws none there. */
+export interface Capabilities {appVersion:string;windowChrome:'mac-overlay'|'native'|'cosmetic';windowControlsEnd:number|null;disablePerMachine:boolean;inboxEventLog:boolean;offtargetKind:boolean;machineRegistry:boolean;perCaseEvalTables:boolean;openInEditor:boolean;clipboard:boolean}
 // §7.1: the local key is `libraryProjects`, not `projects` — `projects` is already the marketplace's
 // team-projects screen, and desktop/AGENTS.md invariant 2 forbids one flag meaning two things.
-export const FEATURE_KEYS = ['favorites','follow','roles','lastSeen','installScope','inviteScoping','disablePerMachine','projectMembers','liftOnCards','runEvalInApp','perCase','progress','memberRole','localIdentity','libraryProjects','projects','refresh','appUpdate','serve'] as const;
+export const FEATURE_KEYS = ['favorites','follow','roles','lastSeen','installScope','inviteScoping','disablePerMachine','projectMembers','liftOnCards','runEvalInApp','perCase','progress','memberRole','localIdentity','libraryProjects','projects','refresh','appUpdate','reconcile','serve'] as const;
 export type FeatureKey = typeof FEATURE_KEYS[number];
 export type Features = Readonly<Record<FeatureKey, boolean>>;
 export interface Surfaces {libraryProjects:boolean;divergence:boolean;status:boolean;settings:boolean;onboarding:boolean;library:boolean;skill:boolean;receipts:boolean;inbox:boolean;catalog:boolean;roster:boolean;update:boolean;appUpdate:boolean}
@@ -86,11 +88,20 @@ export interface RootRemote {url:string;slug:string|null}
 /** §7.2 removed `detected`: every project root is here because the user added it. */
 export interface Root {id:string;kind:'global'|'checkout';label:string;root:string;rootState?:'scanned'|'absent'|'unreadable'|undefined;registered:boolean;count?:string|undefined;remote?:RootRemote|null|undefined}
 export type LibraryScope={kind:'global'}|{kind:'checkout';root:string};
-export interface ProjectAdded {path:string;label:string;added:boolean}
+export interface ReconcileRow {path:string;name:string;team:string;skillId:string|null}
+export interface ReconcileResult {identical:(ReconcileRow&{version:string})[];differing:(ReconcileRow&{teamVersion:string;nextVersion:string;sameId:boolean;teamAuthor:string})[];renamed:(ReconcileRow&{version:string;teamName:string})[];adopted:string[];published:string[]}
+export interface ProjectAdded {path:string;label:string;added:boolean;reconcile?:ReconcileResult}
 /** `project create`: the team project as team.json now holds it. A new project is always born with no skills. */
 export interface ProjectCreated {team:string;name:string;remotes:string[];skills:number}
 export interface ProjectRemoved {path:string;placementsRemaining:number}
-export interface Library {roots:Root[];scanned:string[]|null;skills:SkillCard[];overview:Design['LIBRARY_OVERVIEW'];title:string;root:Root;problems?:readonly {source:string;message:string}[]}
+/** The Library overview row's fourth tile counts skills never published to the team marketplace. It
+ *  stands where the design board draws Team installs, so the two extra strings are declared here
+ *  rather than in `src/fixtures/design.json`, which invariant 3 forbids hand-editing (`installs` /
+ *  `installs_note` / `zero.installs` therefore stay in the generated shape, now unread by the row).
+ *  `unpublished` is '—' when the driving CLI is too old to report publish state — an unknown, never
+ *  a zero. */
+export type LibraryOverview=Design['LIBRARY_OVERVIEW'] & {unpublished:string;unpublished_note:string;zero:Design['LIBRARY_OVERVIEW']['zero'] & {unpublished:string}};
+export interface Library {roots:Root[];scanned:string[]|null;skills:SkillCard[];overview:LibraryOverview;title:string;root:Root;problems?:readonly {source:string;message:string}[]}
 /** attention = failingEvals + updatesAvailable + notEvaluated; counts.Alerts = attention, counts.Updates = updatesAvailable. Absent CLI counters are omitted. */
 export type CloneState = {state:'absent'} | {state:'incomplete';reason:'not-a-repository'|'no-team-json'|'unverifiable';error?:string} | {state:'foreign'|'ok';origin:string};
 /** name comes from team.json via status; key is the config identifier. They may differ; there is no label. */
@@ -113,12 +124,12 @@ export interface SearchArgs {q:string;kinds?:readonly ('skill'|'member'|'project
 export interface SearchHit {kind:'skill'|'member'|'project';ref:string;name:string;description:string;team:string|null;category:string|null;author:string|null;installs:number|null;latest:string|null}
 export interface IdentityArgs {name?:string;email?:string;defaultHandle?:string}
 export interface IdentityWrite {updated:{key:string;value:string}[];notice:string|null}
-export interface InstallArgs {team?:string;ref:string;scope?:Scope;kind?:'skill'|'member'|'project';member?:string;project?:string;yesProfile?:boolean}
+export interface InstallArgs {team?:string;ref?:string;adopt?:string;scope?:Scope;kind?:'skill'|'member'|'project';member?:string;project?:string;yesProfile?:boolean}
 export interface InstalledResult {id:string;name:string;scope:Scope;path:string|null;version:string|null;profiled:boolean}
 export interface UninstallArgs {from?:string;team?:string;ref:string;kind?:'skill'|'member'|'project';member?:string;project?:string}
 export interface UninstalledResult {id:string;name:string}
 export interface MachineUninstallResult {removed:string[];removedPlacements:number;hookRemoved:boolean;wrapperRemoved:boolean;configRemoved:boolean;kept:string[];record:string;advice:string[]}
-export interface PublishArgs {team?:string;ref:string;message?:string;/** Endorse into `team.json projects[<project>].skills` instead of the global list. */project?:string}
+export interface PublishArgs {team?:string;ref:string;message?:string;/** Endorse into `team.json projects[<project>].skills` instead of the global list. */project?:string;/** The skill's terum-category (`--category`): skips the CLI's model suggestion. A declared category in SKILL.md still wins. */category?:string}
 /**
  * §5.3. `version` is the `v<N>` this publish minted, or — when the bytes were byte-identical to a
  * version already in the repo — the one it matched, which `identicalTo` names. `created` is the
@@ -145,30 +156,44 @@ export interface TeamResult {name:string;kind:TeamArgs['kind'];
  /** `move` only: what came back. */
  restored?:string[];missing?:string[];failed?:{name:string;error:string}[]}
 export interface SetupArgs {target?:string}
-export const SETUP_STEP_KEYS = ['welcome','app','role','github','team','invite','projects','evals','community','hook','wrapper','done'] as const;
+export const SETUP_STEP_KEYS = ['welcome','app','role','github','team','invite','projects','existing','evals','community','hook','wrapper','editHook','done'] as const;
 export type SetupStep = typeof SETUP_STEP_KEYS[number];
 export interface SetupResult {team:string;role:'creator'|'joiner';steps?:Partial<Record<SetupStep,'done'|'skipped'|'printed'|'queued'|'batched'>>|null}
 export interface EvalArgs {team?:string;ref:string;cases?:number}
 /** §6.3: `team` and `id` are null for a folder that belongs to no team, which is now the common case. */
 export interface EvalResult {name:string;runDir:string;executionStatus:'complete'|'partial'|'failed';team:string|null;id:string|null;shareHint:boolean}
+/** Several skills in one CLI run — `eval <skill>… [--batch n] [--window w] [--pending]`: the wizard's Now / In batches /
+ *  Overnight choices, offered past setup. `pending` adds every shared skill with no receipt for its current version
+ *  (it needs a team); `batch` is required by, and only read under, mode 'batches'. */
+export interface EvalManyArgs {refs:string[];team?:string;mode:'now'|'batches'|'overnight'|'later';batch?:number;pending?:boolean}
+/** `queued` holds what the run put on the queue: every skill under a window, or the remainder after a declined
+ *  batch, in which case `stoppedAfter` says how many had been attempted. */
+export interface EvalManyResult {mode:'ran'|'queued';team:string|null;skills:string[];ok:number;failed:number;queued:EvalQueueItem[];stoppedAfter?:number}
 export interface ValidateArgs {team?:string;ref?:string;cwd?:string}
-/** `repairable` counts the changes `skill fix` would make; a CLI that predates the verb omits it and the adapter reads 0, so the app draws no Fix. */
-export interface ValidateResult {name:string;findings:number;warnings:number;repairable:number}
+/** `repairs` lists, one sentence each, the changes `skill fix` would make and `repairable` counts them; a CLI that predates the verb omits both and the adapter reads 0 and [], so the app draws no Fix. A CLI with the count but no list draws Fix and the dialog names the count alone. */
+export interface ValidateResult {name:string;findings:number;warnings:number;repairable:number;repairs:string[]}
 export interface UpdateAdvice {running:string|null;latest:string|null;observation:'newer'|'same'|'older'|'unknown';launch:'global'|'local'|'npx'|'source'|'unknown';description:string;advice:string[];lines:string[]}
 export type AppUpdatePhase='waiting'|'installing'|'launched'|'failed';
 export type AppUpdateReason='on-close'|'overnight'|'manual';
 export interface AppUpdateMarker {version:string;phase:AppUpdatePhase;at:string;error:string|null}
 /** The app's own update state. `newer` is computed in the adapter from `latest` vs the running build. */
-export interface AppUpdateStatus {acknowledgementError?:string;reason?:AppUpdateReason;appVersion:string;supported:boolean;cliVersion:string|null;latest:string|null;latestAt:string|null;probe:'ok'|'skipped'|'cached'|'failed';probeError:string|null;staged:string|null;installed:string[];lastApply:AppUpdateMarker|null;newer:boolean;ppid:number}
+export interface AppUpdateStatus {acknowledgementError?:string;reason?:AppUpdateReason;appVersion:string;/** The build the CLI resolved for this machine (`win32-arm64`, `darwin-x64`, `unsupported`…), so the row can say which build it downloads. */platform:string;supported:boolean;cliVersion:string|null;latest:string|null;latestAt:string|null;probe:'ok'|'skipped'|'cached'|'failed';probeError:string|null;staged:string|null;installed:string[];lastApply:AppUpdateMarker|null;newer:boolean;ppid:number}
 export interface AppUpdateStaged {version:string;staged:boolean;notPublished:boolean;alreadyStaged:boolean}
 export interface PrefStore {get<T>(key:string,fallback:T):T;set(key:string,value:unknown):void;readonly ready?:Promise<void>;flush?():Promise<void>;subscribe?(listener:()=>void):Subscription}
 export type Subscription=()=>void;
+/** A folder dragged from the OS over the window: `enter`/`leave` bracket the hover, `drop` carries the paths (2026-09-14). */
+export type FileDropEvent={kind:'enter';paths:string[]}|{kind:'leave'}|{kind:'drop';paths:string[]};
 export type ChangeSource='config'|'clone'|'marketplace'|'placed'|'stamp';
+/** The last background fetch the app ran by itself: at launch and on window focus, at most once a minute.
+ *  Structurally the adapter's own RefreshOutcome (backend/tauri/refresh.ts), restated here so the screens
+ *  read the Settings DTO and never import the Tauri adapter. `detail` is the CLI's error text — Settings
+ *  renders only its first line — and `notices` the lines the CLI printed alongside it. */
+export interface AutoFetchOutcome { at: number; state: 'refreshed' | 'skipped' | 'failed'; detail?: string; notices?: string[] }
 
-export type Settings = Pick<Design, 'PLACEMENTS'|'PLACEMENTS_N'|'PINNED_N'|'APPROVALS'|'APP_VERSION'|'AGENT_CLI'|'COMMUNITY'|'SETTINGS_NAV'|'SHORTCUTS'|'INBOX_KIND_TEXT'|'THEME_OPTIONS'|'CLI_VERSION'|'FOLLOWING'|'INVITE_TIP'|'JOIN_BLOCK_NOTE' > & {
+export type Settings = { lastAutomatic?: AutoFetchOutcome | null } & Pick<Design, 'PLACEMENTS'|'PLACEMENTS_N'|'PINNED_N'|'APPROVALS'|'APP_VERSION'|'AGENT_CLI'|'COMMUNITY'|'SETTINGS_NAV'|'SHORTCUTS'|'INBOX_KIND_TEXT'|'THEME_OPTIONS'|'CLI_VERSION'|'FOLLOWING'|'INVITE_TIP'|'JOIN_BLOCK_NOTE' > & {
 HOOK:Design['HOOK']|null;QUARANTINE:Design['QUARANTINE']|null;CLI_LATEST:string|null;STORAGE:Omit<Design['STORAGE'],'cache_n'|'evals_n'>&{cache_n:number|null;evals_n:number|null};
 // mock-only: the drawn specimen login (design INVITEE); the real adapter never sets it
 INVITEE?:string;K:number|null;AGENT_CLI_AUTH:'signed-in'|'unknown';MACHINE:Machine;ME:Identity;TEAMS:TeamStatus[];TEAM_POLICY:{license:string|null;categories:string[]|null;categoriesNote:string;projects:string[]|null};SHARED_SPECIMEN:[string,string,string,string]|null;tools:{git:boolean;gh:boolean};syncNote:string|null};
 export type Onboarding = Pick<Design, 'ONBOARD_STEPS'|'ONBOARD_BASICS'|'GLOBAL_SET'|'BOOT_STEPS'|'ONBOARD_LATER'|'ONBOARD_COMMUNITY'|'ONBOARD_FETCH_ERROR'|'WELCOME_LINES'|'BASICS_COPY'|'BASICS_HINT'|'THEME_OPTIONS'|'LIBRARY_OVERVIEW'|'INVITEE'|'TEAM_REPO'|'INVITE_TIP'|'JOIN_BLOCK_NOTE'> & {skill:SkillCard;summary:ReceiptSummary|null;arm:Receipt['arm'];used_by:string[];installs_n:number;shareCommand:string;rosterInitials:string[];team:Design['TEAMS'][number];me:Design['ME'];teamN:number;searchResults:{kind:'skill'|'person'|'project';name:string;meta:string;initials?:string}[];joinBlock:string;bootRows:[string,string,string][];failedBootRows:[string,string,string][]};
 
-export interface SkillFileResult {kind:'move'|'rename'|'delete'|'fix';path:string;destination:string|null;quarantined:string|null;installed:boolean;notices:string[]}
+export interface SkillFileResult {kind:'move'|'copy'|'rename'|'delete'|'fix';path:string;destination:string|null;quarantined:string|null;installed:boolean;notices:string[]}

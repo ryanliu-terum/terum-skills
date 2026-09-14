@@ -17,8 +17,10 @@ afterEach(async () => {
   location.hash = ''; localStorage.clear(); vi.restoreAllMocks();
 });
 
-type Kind = 'install' | 'remove' | 'manage';
-const confirm = { install: 'Install', remove: 'Remove', manage: 'Publish' };
+// `publish` is the on-disk-only case the rail used to reach as its own `manage` dialog; the rail now
+// opens the card menu, whose Publish row lands on this same dialog (Ryan, 2026-09-14).
+type Kind = 'install' | 'remove' | 'publish';
+const confirm = { install: 'Install', remove: 'Remove', publish: 'Publish' };
 async function open(kind: Kind = 'install', prompts = false) {
   const backend = createMockBackend();
   const detail = await backend.skill({ ref: 'deploy-check' });
@@ -27,7 +29,7 @@ async function open(kind: Kind = 'install', prompts = false) {
     ...detail.value,
     installed: kind === 'install' ? 'absent' : 'placed',
     placed: kind === 'remove',
-    onDiskOnly: kind === 'manage',
+    onDiskOnly: kind === 'publish',
     path: kind === 'install' ? null : '/skills/deploy-check',
     unidentifiedLocal: null,
   } });
@@ -53,7 +55,7 @@ function start(kind: Kind = 'install') {
   fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: confirm[kind] }));
 }
 
-it.each(['install', 'remove', 'manage'] as const)('%s keeps the CLI step visible until the run settles', async kind => {
+it.each(['install', 'remove', 'publish'] as const)('%s keeps the CLI step visible until the run settles', async kind => {
   const { backend } = await open(kind); const pending = controlledRun();
   // Publish and install/remove each return a result object or result arrays.
   if (kind === 'install') vi.spyOn(backend, 'install').mockReturnValue(pending.run);
@@ -87,7 +89,7 @@ it('Cancel stops an install and a reopened dialog has no orphaned busy state', a
   pending.finish({ ok: true, value: [] });
 });
 
-it.each(['install', 'remove', 'manage'] as const)('%s failure closes progress and exposes the existing error board', async kind => {
+it.each(['install', 'remove', 'publish'] as const)('%s failure closes progress and exposes the existing error board', async kind => {
   const { backend } = await open(kind);
   let fail!: () => void;
   const failure = new Promise<void>(resolve => { fail = resolve; });
