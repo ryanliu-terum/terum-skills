@@ -7,7 +7,7 @@ import { decodeText } from '../../lib/fixture-text';
 import { overviewCopy } from '../../lib/overview-copy';
 import { abbreviateHome } from '../paths';
 import type { Backend } from '../Backend';
-import type { EvalManyResult, InviteResult, Result, Roster, Run, SearchHit, SetupResult, SkillCard } from '../types';
+import type { EvalManyResult, FileDropEvent, InviteResult, Result, Roster, Run, SearchHit, SetupResult, SkillCard, Subscription } from '../types';
 import type { EvalQueueItem } from '../eval-queue';
 import { design, inboxItems, skillByRef, cardOf, detailOf, catalogData, remoteSlugsOf, MOCK_ORIGIN } from './data';
 import { cli, roster_by_adoption, statusLines } from './derive';
@@ -47,6 +47,22 @@ const cancelled=(error:string):Result<never>=>({ok:false,error,cancelled:true});
 const fatal=decodeText(design.ONBOARD_FETCH_ERROR);
 const errors={status:"Could not read ~/.terum/skills/config.json.",library:"EACCES: permission denied, scandir '~/.terum/skills'",settings:"Invalid ~/.terum/skills/config.json: Expected property name or '}' in JSON at position 412 (line 14 column 3)",inbox:fatal,marketplace:"fatal: unable to access 'https://github.com/terum/team-skills.git/': Could not resolve host: github.com",share:"ENOENT: no such file or directory, scandir '~/.terum/skills/teams/terum/people'",skill:(ref:string)=>`ENOENT: no such file or directory, open '~/.claude/skills/${ref}/SKILL.md'`,onboarding:design.ONBOARD_FETCH_ERROR.replaceAll("&#39;", "'")};
 const ok=<T>(value:T):Result<T>=>({ok:true,value});
+/** The paths an HTML5 drop carries: one per non-empty `text/plain` line. A browser never exposes a dropped folder's real path, so a folder dropped from the OS yields none. */
+export function dropPathsFrom(data:Pick<DataTransfer,'getData'>|null):string[]{
+ if(!data)return [];
+ try{return data.getData('text/plain').split(/\r?\n/).map(line=>line.trim()).filter(Boolean);}catch{return [];/* getData throws for a protected store; that is the same as carrying nothing. */}
+}
+/** HTML5 drag events on the window, folded to the seam's three kinds; `dragover` is cancelled so the drop reaches the page. */
+function listenHtmlDrops(listener:(event:FileDropEvent)=>void):Subscription{
+ if(typeof window==='undefined')return ()=>{};
+ let inside=false;
+ const enter=(event:DragEvent)=>{event.preventDefault();if(!inside){inside=true;listener({kind:'enter',paths:[]});}};
+ const over=(event:DragEvent)=>{event.preventDefault();};
+ const leave=(event:DragEvent)=>{if(event.relatedTarget===null&&inside){inside=false;listener({kind:'leave'});}};
+ const drop=(event:DragEvent)=>{event.preventDefault();inside=false;listener({kind:'drop',paths:dropPathsFrom(event.dataTransfer)});};
+ window.addEventListener('dragenter',enter);window.addEventListener('dragover',over);window.addEventListener('dragleave',leave);window.addEventListener('drop',drop);
+ return ()=>{window.removeEventListener('dragenter',enter);window.removeEventListener('dragover',over);window.removeEventListener('dragleave',leave);window.removeEventListener('drop',drop);};
+}
 const fail=(error:string):Result<never>=>({ok:false,error:abbreviateHome(decodeText(error),'')});
 const zeroCopy=overviewCopy;
 const zeroOverview={skills:'0',skills_note:zeroCopy.skills,evaluated:'—',meter:{pass_:0,neutral:0,fail:0,total:0},meter_text:zeroCopy.evaluated,installs:'0',installs_note:zeroCopy.installs,attention:'0',attention_lines:[zeroCopy.attention],attention_link:design.LIBRARY_OVERVIEW.attention_link,zero:zeroCopy};
@@ -125,6 +141,7 @@ export function createMockBackend(opts:{latencyMs?:number}={}):Backend & {readon
   async launchContext(){return null;},
   async refreshLaunch(){return null;},
   onLaunchRequest(){return ()=>{};},
+  onFileDrop(listener){return listenHtmlDrops(listener);},
   async features(){return Object.fromEntries(FEATURE_KEYS.map(key=>[key,true])) as Features;},
   async windowAction(){return ok(undefined);},
   async openUrl(url){try{window.open(url,'_blank','noopener');return ok(undefined);}catch(error){return fail(error instanceof Error?error.message:String(error));}},

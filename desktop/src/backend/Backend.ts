@@ -1,4 +1,4 @@
-import type { SkillFileResult } from './types';
+import type { FileDropEvent, SkillFileResult } from './types';
 import type { AppUpdateStaged, AppUpdateStatus, LaunchContext, IdentityArgs, IdentityWrite, Settings, Onboarding, Features, Capabilities, Surfaces, ReadOptions, Catalog, ChangeSource, EvalArgs, EvalManyArgs, EvalManyResult, EvalResult, EvalReportModel, InboxItem, InstallArgs, InstalledResult, InviteArgs, InviteResult, MachineUninstallResult, PrefStore, PublishArgs, PublishResult, Receipt, Result, Roster, Run, LibraryScope, ProjectAdded, ProjectRemoved, ProjectCreated, SearchArgs, SearchHit, SetupArgs, SetupResult, Library, SkillDetail, StatusResult, Subscription, SyncArgs, SyncResult, TeamArgs, TeamResult, UninstallArgs, UninstalledResult, UpdateAdvice, ValidateArgs, ValidateResult } from './types';
 export interface Backend {
   setWindowBackground(color: string): Promise<Result<void>>;
@@ -14,6 +14,9 @@ export interface Backend {
   launchContext(): Promise<LaunchContext | null>;
   refreshLaunch(): Promise<LaunchContext | null>;
   onLaunchRequest(listener: () => void): Subscription;
+  /** Folders dragged from the OS onto the window. The Tauri shell forwards the webview's drag-drop events; the browser mock
+   *  reads `text/plain` lines from an HTML5 drop (a browser never exposes a dropped folder's path). */
+  onFileDrop(listener: (event: FileDropEvent) => void): Subscription;
   status(q?: undefined, options?: ReadOptions): Promise<Result<StatusResult>>;
   settings(q?: undefined, options?: ReadOptions): Promise<Result<Settings>>;
   onboarding(q?: undefined, options?: ReadOptions): Promise<Result<Onboarding>>;

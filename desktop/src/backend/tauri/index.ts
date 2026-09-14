@@ -5,6 +5,7 @@ import { cliEvalMany, evalManyArgv, mapEvalMany } from './eval-many';
 import { z } from 'zod';
 import { createAppUpdate } from './app-update';
 import { getCurrentWindow } from '@tauri-apps/api/window';
+import { getCurrentWebview } from '@tauri-apps/api/webview';
 import { nativePrefs } from './prefs';
 import { SETUP_STEP_KEYS, FEATURE_KEYS } from '../types';
 import type { Features } from '../types';
@@ -709,6 +710,20 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
       launchListenerReady = bridge.onLaunchRequest(() => { refreshPolicy.reset(); listener(); refreshPolicy.trigger(); }).then(stop => {
         if (disposed) stop(); else unlisten = stop;
       });
+      return () => { disposed = true; unlisten?.(); };
+    },
+    onFileDrop(listener) {
+      // The webview's own drag-drop stream (Tauri keeps `dragDropEnabled`, so the OS drop never reaches HTML5 handlers).
+      let disposed = false;
+      let unlisten: (() => void) | undefined;
+      try {
+        void getCurrentWebview().onDragDropEvent(({ payload }) => {
+          if (disposed) return;
+          if (payload.type === 'enter') listener({ kind: 'enter', paths: payload.paths });
+          else if (payload.type === 'leave') listener({ kind: 'leave' });
+          else if (payload.type === 'drop') listener({ kind: 'drop', paths: payload.paths });
+        }).then(stop => { if (disposed) stop(); else unlisten = stop; }, () => { /* Outside the Tauri shell (browser dev, vitest) there is no webview event stream; a drop then simply never arrives, which is the mock's job to serve. */ });
+      } catch { /* Same: getCurrentWebview() throws without the shell's IPC, and there is nothing to clean up. */ }
       return () => { disposed = true; unlisten?.(); };
     },
     async features(): Promise<Features> {

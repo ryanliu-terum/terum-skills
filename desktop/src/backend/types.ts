@@ -171,6 +171,8 @@ export interface AppUpdateStatus {acknowledgementError?:string;reason?:AppUpdate
 export interface AppUpdateStaged {version:string;staged:boolean;notPublished:boolean;alreadyStaged:boolean}
 export interface PrefStore {get<T>(key:string,fallback:T):T;set(key:string,value:unknown):void;readonly ready?:Promise<void>;flush?():Promise<void>;subscribe?(listener:()=>void):Subscription}
 export type Subscription=()=>void;
+/** A folder dragged from the OS over the window: `enter`/`leave` bracket the hover, `drop` carries the paths (2026-09-14). */
+export type FileDropEvent={kind:'enter';paths:string[]}|{kind:'leave'}|{kind:'drop';paths:string[]};
 export type ChangeSource='config'|'clone'|'marketplace'|'placed'|'stamp';
 /** The last background fetch the app ran by itself: at launch and on window focus, at most once a minute.
  *  Structurally the adapter's own RefreshOutcome (backend/tauri/refresh.ts), restated here so the screens

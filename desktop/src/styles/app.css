@@ -152,3 +152,20 @@ button:focus-visible,.button[data-state="focus"],[role="switch"]:focus-visible,[
 .prompt-option-description { display: block; color: var(--tk-text3); font-size: 12px; }
 .setup-output-ok { color: var(--tk-good); }
 .setup-output-bad { color: var(--tk-bad); }
+
+/* Right-click menus and one-click copy (2026-09-14). The popup is portalled and the toast transient, so no board moves. */
+.context-menu {min-width:184px;}
+.context-menu .menu-item {cursor:default;}
+.context-menu .menu-item>svg {color:var(--tk-text3);flex-shrink:0;}
+.context-menu .menu-item[data-danger] {color:var(--tk-bad);}
+.context-menu .menu-item[data-danger]>svg {color:var(--tk-bad);}
+.menu-separator {height:1px;margin:4px 6px;background:var(--tk-border1);}
+.copy-toast {position:fixed;left:50%;bottom:20px;transform:translateX(-50%);padding:6px 10px;border-radius:6px;background:var(--tk-tooltipbg);color:var(--tk-tooltipfg);font-size:12px;line-height:16px;white-space:nowrap;box-shadow:var(--tk-shadowlow);border:1px solid var(--tk-tooltipborder);pointer-events:none;z-index:60;}
+.copy-toast[role="alert"] {color:var(--tk-bad);}
+/* A copyable value keeps the wrapped text's every metric (it stays a span), so the boards do not move. */
+.copy-value {cursor:copy;border-radius:3px;}
+.copy-value:hover {color:var(--tk-text1);}
+.copy-value:focus-visible {outline:2px solid var(--tk-accent);outline-offset:2px;}
+
+/* Text the user may want to copy is selectable (2026-09-14); the chrome, controls and card frames stay `user-select:none` from `.shell`. */
+.skill-md-tab,.detail-description,.detail-rail .detail-row>span:last-child,.detail-status>div>span,.board-error-line,.terminal-hint,.cli-box .board-mono,.settings-value,.setting-row>div:first-child,.settings-note,.settings-head>span,.placement-row>span,.placement-footer,.prune-list,.skill-card-desc,.inbox-document,.inbox-fields,.inbox-subject,.inbox-row-content,.member-identity,.market-project-desc,.market-person-lines,.search-page-row,.state-body,.copy-value,pre,code {user-select:text;-webkit-user-select:text;}
