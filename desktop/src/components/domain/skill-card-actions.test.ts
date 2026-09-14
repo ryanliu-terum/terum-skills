@@ -91,3 +91,21 @@ it('rides a checkout origin exactly as it rides the marketplace one',()=>{
  expect(detailHref(card({teamed:false,path:'~/.claude/skills/notes'}),origin)).toBe('/skill/local?path='+encodeURIComponent('~/.claude/skills/notes'));
  expect(local.find(a=>a.key==='delete')?.to).toBe('/skill/local?path='+encodeURIComponent('~/.claude/skills/notes')+'&dialog=file-delete');
 });
+
+// Two flags close Run eval and Publish, and each says why in its own row: `broken` is a fault in the
+// folder, `bundled` is this tool's own manual, which `connect` refuses by marker (Ryan, 2026-09-14).
+it('closes eval and publish for a broken folder and for the bundled wrapper, each with its own reason', () => {
+ const note='Bundled with terum-skills — placed by setup, not a team skill.';
+ const wrapper=card({teamed:false,path:'~/.claude/skills/terum-skills',flags:['bundled'],flagText:{bundled:note}});
+ for(const key of ['run-eval','publish']) {
+  const row=cardActions(wrapper,{runEvalInApp:true}).find(a=>a.key===key);
+  expect(row?.to).toBeNull();
+  expect(row?.reason).toBe(note);
+ }
+ const brokenNote='SKILL.md frontmatter is not valid YAML';
+ const broken=card({teamed:false,path:'~/.claude/skills/half-written',flags:['broken'],flagText:{broken:brokenNote}});
+ expect(cardActions(broken,{runEvalInApp:true}).find(a=>a.key==='run-eval')?.reason).toBe(brokenNote);
+ // A local folder with neither flag keeps both rows open.
+ const fine=card({teamed:false,path:'~/.claude/skills/notes',flags:['local']});
+ for(const key of ['run-eval','publish']) expect(cardActions(fine,{runEvalInApp:true}).find(a=>a.key===key)?.reason).toBeNull();
+});
