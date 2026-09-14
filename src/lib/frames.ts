@@ -19,7 +19,7 @@ export type AskKind = 'confirm' | 'text' | 'select' | 'path';
 export interface HelloFrame { t: 'hello'; protocol: typeof FRAME_PROTOCOL; version: string | null; verbs: readonly string[]; features: Readonly<Record<string, boolean>>; }
 export interface PrintFrame { t: 'print'; id?: string; level: FrameLevel; line: string; }
 export interface AskFrame { t: 'ask'; id?: string; kind: AskKind; question: string; default?: string; choices?: readonly string[]; detail?: readonly string[]; descriptions?: readonly string[]; }
-/** Emitted by `install` and `setup`'s evals step; every other verb is silent. One shape, declared once (Prompter.progress). Never ordered against `ask`; a shell may ignore it. */
+/** Emitted by `install`, `publish` and `setup`'s evals step; every other verb is silent. One shape, declared once (Prompter.progress). Never ordered against `ask`; a shell may ignore it. */
 export interface ProgressFrame extends ProgressUpdate { t: 'progress'; id?: string; }
 export interface ResultFrame { t: 'result'; id?: string; verb: string; ok: boolean; exitCode: 0 | 1; error?: string; declined?: boolean; refused?: boolean; value?: unknown; }
 export type Frame = HelloFrame | PrintFrame | AskFrame | ProgressFrame | ResultFrame;

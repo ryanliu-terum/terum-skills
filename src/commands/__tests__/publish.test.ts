@@ -9,7 +9,7 @@ import { run } from '../publish.js';
 import { receiptSchema } from '../../lib/evals/receipt.js';
 import { DEFAULT_CATEGORY, skillContentDigest } from '../../lib/skills.js';
 import { sourceFiles } from '../../lib/skill-source.js';
-import { systemRunner, type Runner } from '../../lib/runner.js';
+import { systemRunner, type CommandResult, type Runner } from '../../lib/runner.js';
 
 // Every model call stays behind the askJson seam, including accidental calls in older cases.
 beforeEach(() => { vi.spyOn(systemAgent, 'askJson').mockRejectedValue(new AgentRunError('offline test')); });
@@ -398,6 +398,115 @@ describe('B9 — first-publish category', () => {
     return { ...fixture, folder };
   }
   const agentFor = (answer: Record<string, unknown>): AgentApi => ({ askJson: vi.fn().mockResolvedValue(answer), runAgent: vi.fn() });
+
+  /**
+   * `categoryFixture` pushes the list to the BARE repo, so the machine's clone still holds the old
+   * team.json until publish fetches — the stale-clone shape. This variant syncs the clone first, so
+   * `publish` has the list on disk before its fetch and can start the model ask against it. That is
+   * the ordinary state of a machine that has synced even once, and the only state the early ask runs in.
+   */
+  async function syncedCategoryFixture(list: readonly string[], raw?: string): Promise<Awaited<ReturnType<typeof categoryFixture>>> {
+    const fixture = await categoryFixture(raw, list);
+    await git(['fetch', 'origin'], fixture.clone);
+    await git(['reset', '--hard', 'origin/main'], fixture.clone);
+    return fixture;
+  }
+  /** A Runner that runs everything for real except `git fetch`, which waits on `gate` first. */
+  const gatedFetch = (gate: Promise<unknown>, onFetch?: () => CommandResult | undefined): Runner => ({
+    run: async (command, argv, options) => {
+      if (command === 'git' && argv[0] === 'fetch') {
+        const short = onFetch?.();
+        await gate;
+        if (short) return short;
+      }
+      return systemRunner.run(command, argv, options);
+    },
+  });
+
+  it('asks the model while the fetch is still in flight, never after it', async () => {
+    const { store, home } = await syncedCategoryFixture(['review', 'docs']);
+    // The gate is released by the model call itself, so this deadlocks unless the ask really does
+    // start before the fetch resolves. Publishing sequentially — fetch, then ask — cannot finish here.
+    let release = (): void => {};
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const agent: AgentApi = { runAgent: vi.fn(), askJson: vi.fn(async () => { release(); return { category: 'review' }; }) };
+    const io = new ScriptedPrompter();
+    expect(await run({ ref: 'sample', home, config: store, runner: gatedFetch(gate), agent, yesProfile: false }, io)).toMatchObject({ ok: true, value: { version: 'v1' } });
+    expect(agent.askJson).toHaveBeenCalledTimes(1);
+    expect(io.lines.join('\n')).toContain('metadata.terum-category: review (suggested from your SKILL.md; edit any time)');
+  }, 30_000);
+
+  it('asks again against the current list when the fetch retires the category it answered', async () => {
+    // On disk: ['review']. On the remote, pushed after the clone synced: ['docs']. The early answer is
+    // valid for the list it was asked with and gone from the one the fetch brings, so it is not used.
+    const { fixture, store, home } = await syncedCategoryFixture(['review']);
+    await pushFromSeed(fixture.seed, 'team.json', JSON.stringify({ ...TEAM_JSON, categories: ['docs'] }));
+    const offered: string[][] = [];
+    const agent: AgentApi = {
+      runAgent: vi.fn(),
+      askJson: vi.fn(async (prompt: string) => {
+        const list = /choose one verbatim\): (.+?)\./.exec(prompt)![1]!.split(', ');
+        offered.push(list);
+        return { category: list[0] };
+      }),
+    };
+    const io = new ScriptedPrompter();
+    expect(await run({ ref: 'sample', home, config: store, agent, yesProfile: false }, io)).toMatchObject({ ok: true, value: { version: 'v1' } });
+    expect(offered).toEqual([['review'], ['docs']]);
+    expect(await show(fixture.bare, 'skills/sample/v1/SKILL.md')).toContain('terum-category: docs');
+  });
+
+  it('keeps the early answer when the fetch leaves it on the list, without a second call', async () => {
+    const { fixture, store, home } = await syncedCategoryFixture(['review']);
+    await pushFromSeed(fixture.seed, 'team.json', JSON.stringify({ ...TEAM_JSON, categories: ['review', 'docs'] }));
+    const agent = agentFor({ category: 'review' });
+    expect(await run({ ref: 'sample', home, config: store, agent, yesProfile: false }, new ScriptedPrompter())).toMatchObject({ ok: true });
+    expect(agent.askJson).toHaveBeenCalledTimes(1);
+    expect(await show(fixture.bare, 'skills/sample/v1/SKILL.md')).toContain('terum-category: review');
+  });
+
+  it('an unreachable model is the disclosed fallback, never a second wait on the same timeout', async () => {
+    const { store, home } = await syncedCategoryFixture(['review']);
+    const agent = agentFor({ category: 'review' });
+    vi.mocked(agent.askJson).mockRejectedValue(new AgentRunError('offline'));
+    const io = new ScriptedPrompter();
+    expect(await run({ ref: 'sample', home, config: store, agent, yesProfile: false }, io)).toMatchObject({ ok: true });
+    expect(agent.askJson).toHaveBeenCalledTimes(1);
+    expect(io.lines.join('\n')).toContain("metadata.terum-category: misc (couldn't reach the model; edit SKILL.md any time)");
+  });
+
+  it('abandons a model call still running when the run fails before its answer is needed', async () => {
+    // The ask never settles. Nothing may wait on it: the fetch failure is the result, and the signal
+    // publish holds is what kills the `claude` child that would otherwise hold the process open.
+    const { store, home } = await syncedCategoryFixture(['review']);
+    let asked = (): void => {};
+    const started = new Promise<void>((resolve) => { asked = resolve; });
+    let observed: AbortSignal | undefined;
+    const agent: AgentApi = {
+      runAgent: vi.fn(),
+      askJson: vi.fn(async (_prompt: string, options?: { signal?: AbortSignal }) => {
+        observed = options?.signal;
+        asked();
+        return new Promise<Record<string, unknown>>(() => {});
+      }),
+    };
+    const runner = gatedFetch(started, () => ({ code: 128, stdout: '', stderr: 'fatal: could not read from remote repository' }));
+    const result = await run({ ref: 'sample', home, config: store, runner, agent, yesProfile: false }, new ScriptedPrompter());
+    expect(result).toMatchObject({ ok: false });
+    expect(observed?.aborted).toBe(true);
+  }, 30_000);
+
+  it('reports its step ladder, skipping the category rung a declared category makes unnecessary', async () => {
+    const { store, home } = await syncedCategoryFixture(['review']);
+    const asked = new ScriptedPrompter();
+    expect(await run({ ref: 'sample', home, config: store, agent: agentFor({ category: 'review' }), yesProfile: false }, asked)).toMatchObject({ ok: true });
+    expect(asked.steps).toEqual(['Refreshing the team repository', 'Choosing a category', 'Checking sample', 'Publishing sample', 'Adding sample to your profile']);
+    expect(asked.progressed[0]).toEqual({ step: 'Refreshing the team repository', current: 1, total: 5 });
+    // Second publish: the category is now declared in the folder, so that rung never runs.
+    const again = new ScriptedPrompter();
+    expect(await run({ ref: 'sample', home, config: store, yesProfile: false }, again)).toMatchObject({ ok: true });
+    expect(again.steps).toEqual(['Refreshing the team repository', 'Checking sample', 'Publishing sample', 'Adding sample to your profile']);
+  });
 
   it('suggests once, writes identical local and published bytes, then preserves category on republish', async () => {
     const { fixture, store, home, folder } = await categoryFixture();

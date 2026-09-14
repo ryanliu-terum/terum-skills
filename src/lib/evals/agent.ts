@@ -119,7 +119,7 @@ interface SpawnOutcome { code: number; stdout: string; stderr: string; timedOut:
 const liveChildren = new Set<ChildProcess>();
 let terminationHandlerInstalled = false;
 
-function spawnCollect(args: readonly string[], options: { cwd?: string; env?: Record<string, string>; timeoutMs: number }): Promise<SpawnOutcome> {
+function spawnCollect(args: readonly string[], options: { cwd?: string; env?: Record<string, string>; timeoutMs: number; signal?: AbortSignal }): Promise<SpawnOutcome> {
   if (!terminationHandlerInstalled) {
     terminationHandlerInstalled = true;
     // One implementation, two entry points: a POSIX SIGTERM (the shell's process-group kill) and the
@@ -133,6 +133,12 @@ function spawnCollect(args: readonly string[], options: { cwd?: string; env?: Re
   }
   const command = resolveAgentCommand(agentCmd(), args, hostEvidence());
   if (!command.ok) return Promise.reject(new Error(command.error));
+  // C6 again, for a caller that no longer wants the answer: a spawn is piped stdio, and node will not
+  // let the process exit while it is open. A verb that starts a model call CONCURRENTLY with other
+  // work (publish, whose category ask overlaps its `git fetch`) must be able to drop it, or a failure
+  // in that other work waits out the full timeout before the CLI can report it. Aborting kills the
+  // child; the `close` handler then settles this promise as an ordinary non-zero run.
+  if (options.signal?.aborted) return Promise.resolve({ code: 143, stdout: '', stderr: 'the caller abandoned this model call', timedOut: false });
   return new Promise((resolvePromise, reject) => {
     const child = spawn(command.value.file, command.value.args, {
       cwd: options.cwd,
@@ -146,12 +152,15 @@ function spawnCollect(args: readonly string[], options: { cwd?: string; env?: Re
     const err: Buffer[] = [];
     let timedOut = false;
     const timer = setTimeout(() => { timedOut = true; child.kill('SIGKILL'); }, options.timeoutMs);
+    const onAbort = (): void => { child.kill('SIGKILL'); };
+    options.signal?.addEventListener('abort', onAbort, { once: true });
+    const settle = (): void => { clearTimeout(timer); options.signal?.removeEventListener('abort', onAbort); };
     child.stdout.on('data', (chunk: Buffer) => out.push(chunk));
     child.stderr.on('data', (chunk: Buffer) => err.push(chunk));
-    child.on('error', (error) => { clearTimeout(timer); reject(error); });
+    child.on('error', (error) => { settle(); reject(error); });
     child.on('close', (code) => {
       liveChildren.delete(child);
-      clearTimeout(timer);
+      settle();
       resolvePromise({ code: code ?? 1, stdout: Buffer.concat(out).toString('utf8'), stderr: Buffer.concat(err).toString('utf8'), timedOut });
     });
   });
@@ -169,6 +178,8 @@ export interface AskJsonOptions {
   settingSources?: string;
   timeoutMs?: number;
   model?: string;
+  /** Kills the spawned model call when the caller stops wanting it; the call then fails like any other. */
+  signal?: AbortSignal;
 }
 
 /** Injection seam: judge/triggers/execution depend on this, never on the spawning functions directly. */
@@ -217,7 +228,7 @@ async function askJson(prompt: string, options: AskJsonOptions = {}): Promise<Re
     // TCC hygiene: under the desktop app an inherited cwd is `/`, and agent startup work
     // scanning an unexpected root walks into macOS-protected dirs. Pin every spawn, like
     // runCase pins the sandbox; tool-free calls get the tmpdir.
-  ], { cwd: tmpdir(), timeoutMs: options.timeoutMs ?? 120_000 });
+  ], { cwd: tmpdir(), timeoutMs: options.timeoutMs ?? 120_000, ...(options.signal ? { signal: options.signal } : {}) });
   if (outcome.timedOut) throw new AgentRunError(`model call timed out after ${options.timeoutMs ?? 120_000}ms`);
   if (outcome.code !== 0) throw new AgentRunError(`model call failed (rc=${outcome.code}): ${outcome.stderr.slice(-2000)}`);
   let text = outcome.stdout;

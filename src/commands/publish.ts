@@ -19,7 +19,7 @@ import { assessHygiene, HygieneRefused, reportHygieneWarnings } from '../lib/eva
 import { versionFolderName, versionLabel, versionsInTree } from '../lib/versions.js';
 import { localReceiptsFor } from '../lib/evals/receipt-store.js';
 import { offerProfileEntry } from '../lib/profile-entry.js';
-import { suggestCategory, teamCategory, type CategorySuggestion } from '../lib/categorize.js';
+import { askCategory, resolveCategory, suggestCategory, teamCategory, type CategorySuggestion } from '../lib/categorize.js';
 import type { AgentApi } from '../lib/evals/agent.js';
 
 export interface PublishArgs extends WithForm {
@@ -57,12 +57,60 @@ export interface PublishResult {
 }
 
 /**
+ * The rungs `io.progress?.()` reports against. Publish is the longest verb in the product — two
+ * network round trips, a model call and a full folder read — and it used to emit nothing at all
+ * (`frames.ts`: "every other verb is silent"), so a frame-mode shell had a disabled button and no
+ * way to say what was happening. A terminal ignores progress; a person there reads the printed lines.
+ *
+ * The category rung is skipped when the folder already declares one or `--category` was passed, so
+ * `current` may step 1 → 3. That is what `current`/`total` mean: what is DONE, not how many rungs ran.
+ */
+const PUBLISH_STEPS = 5;
+
+/** Everything `readLocalSource` proved about the folder being published. `skillMd` is its text, decoded once. */
+interface LocalSource { found: NonNullable<Awaited<ReturnType<typeof resolveLibrarySkill>>>; files: Map<string, Buffer>; executable: Set<string>; skillMd: string }
+
+/**
+ * §5.1 steps 1–3 as one awaitable: resolve the ref to a Library folder, refuse the folders publish
+ * cannot read, and load every byte of the one it can.
+ *
+ * Extracted from `run` for one reason: it touches only the local disk, so it can be STARTED before
+ * the team clone's fetch is awaited and finish inside it. It keeps every refusal it always made —
+ * `run` awaits the fetch first and this second, so a broken remote is still the first thing reported
+ * and these refusals still arrive in their original order relative to each other.
+ */
+async function readLocalSource(args: PublishArgs, config: Config, store: ConfigStore): Promise<LocalSource> {
+  // 1. Resolve the ref to a LOCAL folder. You publish what is on your machine, never what is in
+  //    the clone — that is the whole direction of this refactor.
+  const found = await resolveLibrarySkill(args.home ?? homedir(), config, store.root, args.ref);
+  if (!found) throw new Error(await notFoundLocally(args, config, args.ref, store.root));
+  // D72: the folder is there but the scan rejected it or could not read it. Refuse with the scan's
+  // own detail against the path — the miss above is reserved for a name no Library root holds.
+  const unusable = unusableSkillFolder(found);
+  if (unusable !== undefined) throw new Error(unusable);
+
+  // 2. Refuse a nested symlink or a non-directory before reading a byte.
+  assertNotInsideStateRoot(found.path, store.root);
+  await assertSkillDirectory(found.path);
+
+  // 3. One map of every file, eval cases included (D9) — they are skill bytes like any other.
+  const { files, executable } = await sourceFiles(found.path);
+  const skillMd = files.get('SKILL.md');
+  if (skillMd === undefined) throw new Error(`${found.path} has no SKILL.md.`);
+  return { found, files, executable, skillMd: skillMd.toString('utf8') };
+}
+
+/**
  * §5: publish copies ONE local skill folder into the team repo as its next immutable version.
  *
  * It is the only bridge between the two mirrors and the only thing that can write a skill. Everything
  * before `safeWrite` reads and asks; the mutation itself is pure.
  */
 export async function run(args: PublishArgs, io: Prompter): Promise<Result<PublishResult>> {
+  // Kills the category model call on EVERY exit path, including the failing ones. Without it, a
+  // `git fetch` that fails while `claude` is still answering would hold this process open on the
+  // child's piped stdio until the 20 s timeout — turning an instant network error into a 20 s hang.
+  const abort = new AbortController();
   try {
     // Hybrid review r1 (medium, publish.ts:98): this check trimmed the flag and then the RAW string was
     // stored, so `--category "ops "` (a trailing space from shell history) was injected as ` ops ` and,
@@ -78,48 +126,74 @@ export async function run(args: PublishArgs, io: Prompter): Promise<Result<Publi
     const binding = config.teams[team]!;
     if (!binding.handle) throw new Error(`Team ${team} has no joined handle.`);
     const clone = store.teamClone(team);
-    await refreshClone(runner, clone, { label: team, ...lockWait(io) });
+    io.progress?.({ step: 'Refreshing the team repository', current: 1, total: PUBLISH_STEPS });
+
+    // The category list as of the LAST sync, read before the fetch so the model ask below can start
+    // while `git fetch` is still in flight. Best effort by design: no clone yet, or an unreadable
+    // team.json, simply means no early ask and the in-band call further down. It is never a refusal
+    // — `refreshClone` and `readTeam` are the two allowed to fail on a broken clone, and both still
+    // do, below, with their own messages.
+    const lastKnown = await readTeam(clone).catch(() => null);
+
+    // Three things that need nothing from one another now run together: the network fetch, the local
+    // folder read, and — once that read has the SKILL.md — the category model call. The wall clock
+    // becomes max(fetch, read + ask) instead of their sum; on a first publish that is the 1–3 s fetch
+    // and the 2–6 s `claude` spawn overlapping instead of queueing.
+    //
+    // Refusal ORDER is deliberately unchanged. `await refresh` comes first below, so a bad remote is
+    // still the first thing a user sees, and the local refusals follow in the order they always had.
+    // Each `.catch` is the no-op the catalogue read already uses: it marks the promise handled so a
+    // rejection landing while something else is in flight is not an unhandled rejection (which kills
+    // the process without ever reaching this try/catch). The awaits below still throw it in here.
+    const refresh = refreshClone(runner, clone, { label: team, ...lockWait(io) });
+    refresh.catch(() => {});
+    const source = readLocalSource(args, config, store);
+    source.catch(() => {});
+    // Started only when it can be USED: a folder that declares a category, or a `--category` flag,
+    // never asks the model, and neither does a team whose last-known list was empty or unreadable —
+    // those fall through to the in-band call, which is also the only path that can ask a team whose
+    // categories this machine has never seen.
+    const earlyAsk = categoryFlag === undefined && lastKnown !== null && lastKnown.categories.length > 0
+      ? source
+          .then((read) => declaredCategory(read.skillMd) === undefined ? askCategory(read.skillMd, lastKnown.categories, args.agent, abort.signal) : null)
+          .catch(() => null)
+      : null;
+
+    await refresh;
     const teamJson = await readTeam(clone);
     // Hybrid review r1 (medium, publish.ts:99): start the local catalogue read NOW. It depends only on
     // `clone`/`team`, both in hand, and on nothing the category branch below produces — while that
-    // branch's `suggestCategory` can hold a `claude` subprocess for up to 20s on a first publish. The
-    // two used to run back to back; now the readdir/readFile overlaps the model round-trip. The
-    // `.catch` is a deliberate no-op: it only marks the promise handled, so a rejection that lands while
-    // the model call is still in flight is not reported as an unhandled rejection (which kills the
-    // process without ever reaching this function's try/catch). `await catalogPromise` below still
-    // throws that same rejection into the try/catch, exactly as the inline await did; a refusal that
-    // returns before that point simply never awaits it.
+    // branch's model call can hold a `claude` subprocess for up to 20s on a first publish. The two
+    // used to run back to back; now the readdir/readFile overlaps the model round-trip.
     const catalogPromise = skillRecords(clone, team);
     catalogPromise.catch(() => {});
 
-    // 1. Resolve the ref to a LOCAL folder. You publish what is on your machine, never what is in
-    //    the clone — that is the whole direction of this refactor.
-    const found = await resolveLibrarySkill(args.home ?? homedir(), config, store.root, args.ref);
-    if (!found) throw new Error(await notFoundLocally(args, config, args.ref, store.root));
-    // D72: the folder is there but the scan rejected it or could not read it. Refuse with the scan's
-    // own detail against the path — the miss above is reserved for a name no Library root holds.
-    const unusable = unusableSkillFolder(found);
-    if (unusable !== undefined) throw new Error(unusable);
-
-    // 2. Refuse a nested symlink or a non-directory before reading a byte.
-    assertNotInsideStateRoot(found.path, store.root);
-    await assertSkillDirectory(found.path);
-
-    // 3. One map of every file, eval cases included (D9) — they are skill bytes like any other.
-    const { files, executable } = await sourceFiles(found.path);
-    const skillMd = files.get('SKILL.md');
-    if (skillMd === undefined) throw new Error(`${found.path} has no SKILL.md.`);
+    // 1–3. The local folder, as read above while the fetch ran. Awaited HERE, after the fetch, so
+    //      every refusal it holds is reported in the order it always was.
+    const { found, files, executable, skillMd } = await source;
 
     // 4. Managed fields, resolved into the IN-MEMORY SKILL.md before anything is hygiene-checked or
     //    digested. Once written back, the category is ordinary content: subsequent publishes keep it.
-    const declared = declaredCategory(skillMd.toString('utf8'));
+    const declared = declaredCategory(skillMd);
     //    The flag takes the team's own spelling when it matches a team category case-insensitively —
     //    the rule the model's answer already goes through (categorize.ts teamCategory), so
     //    `--category Ops` lands in the one `ops` bucket. An off-list value stays as typed, trimmed:
     //    §5 says the flag need not be on the list, and HYG7 must warn about what the user wrote.
-    const chosen: CategorySuggestion = declared !== undefined ? { category: declared, suggested: false }
-      : categoryFlag !== undefined ? { category: teamCategory(categoryFlag, teamJson.categories) ?? categoryFlag, suggested: false }
-      : await suggestCategory(skillMd.toString('utf8'), teamJson.categories, args.agent);
+    let chosen: CategorySuggestion;
+    if (declared !== undefined) chosen = { category: declared, suggested: false };
+    else if (categoryFlag !== undefined) chosen = { category: teamCategory(categoryFlag, teamJson.categories) ?? categoryFlag, suggested: false };
+    else {
+      io.progress?.({ step: 'Choosing a category', current: 2, total: PUBLISH_STEPS });
+      // `undefined` means no early ask ran; `null` means one ran and the model gave nothing usable —
+      // the disclosed fallback, exactly as in-band, and never a second 20 s wait on an offline model.
+      const raw = earlyAsk === null ? undefined : await earlyAsk;
+      // An early answer counts only while it still names a category this team HAS. The fetch may have
+      // brought a list the answer has fallen off; inventing that bucket is the one thing this must not
+      // do, so the model is asked again — against the list that is now current.
+      chosen = raw !== undefined && (raw === null || teamCategory(raw, teamJson.categories) !== undefined)
+        ? resolveCategory(raw, teamJson.categories)
+        : await suggestCategory(skillMd, teamJson.categories, args.agent, abort.signal);
+    }
     const category = chosen.category;
     if (declared === undefined) {
       const disclosure = categoryFlag !== undefined ? 'from --category; edit SKILL.md any time'
@@ -135,15 +209,16 @@ export async function run(args: PublishArgs, io: Prompter): Promise<Result<Publi
     // this publish's receipts in that skill's eval history.
     const catalogue = await catalogPromise;
     const published = catalogue.find((record) => record.name === found.name);
-    const declaredId = declaredSkillId(skillMd.toString('utf8'));
+    const declaredId = declaredSkillId(skillMd);
     const id = published?.id
       // A declared id already belonging to a DIFFERENT name means a copied folder: mint instead of
       // grafting onto that skill's identity. §5.1 step 4's "minted at v1" is exactly this case.
       ?? (declaredId !== undefined && !catalogue.some((record) => record.id === declaredId) ? declaredId : randomUUID());
     const author = `${config.display_name ?? binding.handle} <${config.email ?? ''}>`.trim();
-    const injected = Buffer.from(injectManagedFields(skillMd.toString('utf8'), { license: teamJson.policy.skill_license, id, author, category }));
+    const injected = Buffer.from(injectManagedFields(skillMd, { license: teamJson.policy.skill_license, id, author, category }));
     files.set('SKILL.md', injected);
 
+    io.progress?.({ step: `Checking ${found.name}`, current: 3, total: PUBLISH_STEPS });
     // 5. Hygiene on the INJECTED map, never before — `skillFrontmatterSchema` is strict and requires
     //    the managed fields, so a never-published folder would fail HYG1 on fields publish is about
     //    to write.
@@ -179,6 +254,7 @@ export async function run(args: PublishArgs, io: Prompter): Promise<Result<Publi
     //     because every injected field is re-derived identically on the next attempt.
     await writeFile(join(found.path, 'SKILL.md'), injected);
 
+    io.progress?.({ step: `Publishing ${found.name}`, current: 4, total: PUBLISH_STEPS });
     const repo = openTeamRepo(clone, binding.remote, runner);
     let outcome: { version: string | null; identicalTo: string | null; attached: number; projectAdded: boolean; assets: number } = { version: null, identicalTo: null, attached: 0, projectAdded: false, assets: 0 };
     let assetsWritten = 0;
@@ -307,6 +383,7 @@ export async function run(args: PublishArgs, io: Prompter): Promise<Result<Publi
     //     file, a lock timeout or a network blip returned a failure Result carrying no
     //     PublishResult, for a publish that fully succeeded.
     let profileAdded = false;
+    io.progress?.({ step: `Adding ${found.name} to your profile`, current: 5, total: PUBLISH_STEPS });
     try {
       profileAdded = await offerProfileEntry({ store, clone, team, handle: binding.handle, remote: binding.remote, runner, id, name: found.name, version: at, via: 'publish', preAnswered: args.yesProfile }, io);
     } catch (error) {
@@ -317,6 +394,8 @@ export async function run(args: PublishArgs, io: Prompter): Promise<Result<Publi
   } catch (error) {
     if (error instanceof HygieneRefused) reportHygieneWarnings((line) => io.print(line), error.assessment);
     return fromError(error);
+  } finally {
+    abort.abort();
   }
 }
 
