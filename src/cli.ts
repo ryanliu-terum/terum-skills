@@ -211,6 +211,7 @@ export function buildProgram(execute: Execute, verbs: CliVerbs = { login, team: 
   program.command('profile').description('Update your own team profile')
     .option('--name <display>').option('--bio <text>').option('--role <role>')
     .option('--project <name>', 'project membership (repeat for each project)', (value: string, previous: string[]) => [...previous, value], [])
+    .option('--remove <skill>', 'take a skill off your profile (publishing adds it)')
     .addOption(new Option('--team <team>').hideHelp())
     .action(async (options: Omit<ProfileArgs, 'projects'> & { project?: string[] }) => {
       const { project, ...rest } = options;

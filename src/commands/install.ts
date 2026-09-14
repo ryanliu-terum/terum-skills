@@ -18,7 +18,7 @@ import { Runner, systemRunner } from '../lib/runner.js';
 import { Config, Destination, Team, describeRaw, handleSchema, parseOrExplain, parseSkillFrontmatter, sameScope } from '../lib/schema.js';
 import { canonicalDigest, findSkill, readPerson, readTeam, skillRecords, SkillRecord } from '../lib/skills.js';
 import { openTeamRepo, SafeWriteOptions, lockWait } from '../lib/teamRepo.js';
-import { offerProfileEntry, writePersonFile } from '../lib/profile-entry.js';
+import { recordProfileEntry, writePersonFile } from '../lib/profile-entry.js';
 import { receiptFiles } from '../lib/evals/receipt-store.js';
 import { receiptSchema, type Receipt } from '../lib/evals/receipt.js';
 import { versionLabel } from '../lib/versions.js';
@@ -234,7 +234,7 @@ export async function installOne(input: AdoptInstallInput | PlacingInstallInput,
   }), { action: 'install', handle: binding.handle, message: `${binding.handle}: install ${skill.name}`, ...input.safeWrite, ...lockWait(io) });
   io.progress?.({ step: 'Recording your install', current: 4, total: 4 });
   await input.store.update((fresh) => { fresh.pending = fresh.pending.filter((entry) => !samePending(entry, pending)); });
-  const profiled = await offerProfileEntry({ store: input.store, clone, team: input.team, handle: binding.handle, remote: binding.remote, runner: input.runner,
+  const profiled = await recordProfileEntry({ store: input.store, clone, team: input.team, handle: binding.handle, remote: binding.remote, runner: input.runner,
     id: skill.id, name: skill.name, version: latest, via: 'install', preAnswered: input.yesProfile, localSkills, safeWrite: input.safeWrite }, io);
   return { id: skill.id, team: input.team, path: placed.path, version: latest, profiled };
 

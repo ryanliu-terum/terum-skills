@@ -853,7 +853,7 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "file": ".claude/skills/terum-skills/SKILL.md",
     "line": 65,
     "policy": "prose",
-    "pattern": "| `profile [--name <display>] [--bio <text>] [--role <role>] [--project <name>]…` | confirm the profile changes; project membership names team projects | show stdout |"
+    "pattern": "| `profile [--name <display>] [--bio <text>] [--role <role>] [--project <name>]… [--remove <skill>]` | confirm the profile changes; project membership names team projects; `--remove` takes one skill off the profile list | show stdout |"
   },
   {
     "file": ".claude/skills/terum-skills/SKILL.md",
@@ -986,6 +986,12 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "line": 114,
     "policy": "fixed",
     "pattern": "| `setup [target]`, `team create`, `team join <target>`, `login` | none; setup/join can clone before asking | `npx -y terum-skills@latest setup` / `setup <org>/<repo>` / `team create` / `team join <target>` / `login` with the same npx prefix |"
+  },
+  {
+    "file": ".claude/skills/terum-skills/SKILL.md",
+    "line": 135,
+    "policy": "prose",
+    "pattern": "without asking — publishing is the endorsement (`profile --remove <name>` takes it back)."
   },
   {
     "file": ".claude/skills/terum-skills/SKILL.md",
@@ -1165,7 +1171,7 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "file": "README.md",
     "line": 370,
     "policy": "prose",
-    "pattern": "| | `profile [--name <display>] [--bio <text>] [--role <role>] [--project <name>]…` | Describe yourself in your own people file (job label, team projects) |"
+    "pattern": "| | `profile [--name <display>] [--bio <text>] [--role <role>] [--project <name>]… [--remove <skill>]` | Describe yourself in your own people file (job label, team projects); `--remove` takes a skill off the profile list publishing added |"
   },
   {
     "file": "README.md",
@@ -1201,7 +1207,7 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "file": "README.md",
     "line": 376,
     "policy": "prose",
-    "pattern": "| | `publish <ref> [--project <name>] [--category <name>]` | Publish a local folder — named by its skill name or its folder path (\`~/…\` accepted) — as an immutable version directly to main, or reuse identical bytes and attach matching evals. Select a team project (Global by default). Category precedence: declared frontmatter, flag, model suggestion, misc fallback; undeclared categories get a source disclosure. Managed frontmatter is written back locally; a profile offer follows publication |"
+    "pattern": "| | `publish <ref> [--project <name>] [--category <name>]` | Publish a local folder — named by its skill name or its folder path (\`~/…\` accepted) — as an immutable version directly to main, or reuse identical bytes and attach matching evals. Select a team project (Global by default). Category precedence: declared frontmatter, flag, model suggestion, misc fallback; undeclared categories get a source disclosure. Managed frontmatter is written back locally; publication adds the skill to your profile with no prompt (`profile --remove <skill>` takes it back) |"
   },
   {
     "file": "README.md",

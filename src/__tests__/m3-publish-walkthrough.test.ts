@@ -16,7 +16,7 @@ describe('M3 publish walkthrough (§5)', () => {
     const home = await temporaryDirectory();
     await mkdir(join(home, '.claude', 'skills', 'sample'), { recursive: true });
     await writeFile(join(home, '.claude', 'skills', 'sample', 'SKILL.md'), '---\nname: sample\ndescription: sample\n---\n');
-    await expect(publish({ ref: 'sample', home, config: store, yesProfile: false }, new ScriptedPrompter())).resolves.toMatchObject({ ok: true, value: { version: 'v1', created: true } });
+    await expect(publish({ ref: 'sample', home, config: store }, new ScriptedPrompter())).resolves.toMatchObject({ ok: true, value: { version: 'v1', created: true } });
     expect(await git(['show', 'main:skills/sample/v1/SKILL.md'], fixture.bare)).toContain('license: UNLICENSED');
   });
 });

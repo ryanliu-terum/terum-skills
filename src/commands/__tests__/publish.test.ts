@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AgentRunError, systemAgent, type AgentApi } from '../../lib/evals/agent.js';
 import { run as validate } from '../validate.js';
 import { createConfigStore, type ConfigStore } from '../../lib/config.js';
-import { bareTeam, cloneWithIdentity, git, originSha, person, pushFromSeed, ScriptedPrompter, TEAM_JSON } from '../../lib/__tests__/fixtures.js';
+import { bareTeam, cloneWithIdentity, git, NonInteractivePrompter, originSha, person, pushFromSeed, ScriptedPrompter, TEAM_JSON } from '../../lib/__tests__/fixtures.js';
 import { run } from '../publish.js';
 import { receiptSchema } from '../../lib/evals/receipt.js';
 import { DEFAULT_CATEGORY, skillContentDigest } from '../../lib/skills.js';
@@ -90,14 +90,14 @@ describe('publish (§5) — the only bridge between the two mirrors', () => {
   it('category precedence is declared > --category > the default, and only the default announces itself', async () => {
     const { fixture, store, home } = await prepared();
     await librarySkill(home, 'sample');
-    const flagged = await run({ ref: 'sample', home, config: store, category: 'docs', yesProfile: false }, new ScriptedPrompter());
+    const flagged = await run({ ref: 'sample', home, config: store, category: 'docs' }, new ScriptedPrompter());
     expect(flagged).toMatchObject({ ok: true });
     expect(await show(fixture.bare, 'skills/sample/v1/SKILL.md')).toContain('terum-category: docs');
 
     const second = await prepared();
     await librarySkill(second.home, 'declared', `---\nname: declared\ndescription: d\nmetadata:\n  terum-category: testing\n---\n`);
     const io = new ScriptedPrompter();
-    expect(await run({ ref: 'declared', home: second.home, config: second.store, category: 'docs', yesProfile: false }, io)).toMatchObject({ ok: true });
+    expect(await run({ ref: 'declared', home: second.home, config: second.store, category: 'docs' }, io)).toMatchObject({ ok: true });
     expect(await show(second.fixture.bare, 'skills/declared/v1/SKILL.md')).toContain('terum-category: testing');
     expect(io.lines.filter((line) => line.startsWith('metadata.terum-category:'))).toEqual([]);
   });
@@ -105,7 +105,7 @@ describe('publish (§5) — the only bridge between the two mirrors', () => {
   it('keeps a declared metadata.id and mints one only when the folder has none', async () => {
     const { fixture, store, home } = await prepared();
     await librarySkill(home, 'sample', published());
-    const result = await run({ ref: 'sample', home, config: store, yesProfile: false }, new ScriptedPrompter());
+    const result = await run({ ref: 'sample', home, config: store }, new ScriptedPrompter());
     expect(result).toMatchObject({ ok: true, value: { id: ID } });
     expect(await show(fixture.bare, 'skills/sample/v1/SKILL.md')).toContain(`id: ${ID}`);
   });
@@ -113,10 +113,10 @@ describe('publish (§5) — the only bridge between the two mirrors', () => {
   it('a byte-identical republish mints nothing — the §5.1 step 7 prefix strip is what makes this reachable', async () => {
     const { fixture, store, home } = await prepared();
     await librarySkill(home);
-    expect(await run({ ref: 'sample', home, config: store, yesProfile: false }, new ScriptedPrompter())).toMatchObject({ ok: true, value: { version: 'v1' } });
+    expect(await run({ ref: 'sample', home, config: store }, new ScriptedPrompter())).toMatchObject({ ok: true, value: { version: 'v1' } });
     const afterFirst = await originSha(fixture.bare);
     const io = new ScriptedPrompter();
-    const again = await run({ ref: 'sample', home, config: store, yesProfile: false }, io);
+    const again = await run({ ref: 'sample', home, config: store }, io);
     expect(again).toMatchObject({ ok: true, value: { version: null, created: false, identicalTo: 'v1', projectAdded: false } });
     expect(await originSha(fixture.bare)).toBe(afterFirst);
     expect(io.lines.join('\n')).toContain('Nothing to publish: sample is identical to Version 1 and already in Global.');
@@ -125,9 +125,9 @@ describe('publish (§5) — the only bridge between the two mirrors', () => {
   it('changed bytes mint the next ordinal from the HIGHEST version, never from the count', async () => {
     const { fixture, store, home } = await prepared();
     const folder = await librarySkill(home);
-    await run({ ref: 'sample', home, config: store, yesProfile: false }, new ScriptedPrompter());
+    await run({ ref: 'sample', home, config: store }, new ScriptedPrompter());
     await writeFile(join(folder, 'SKILL.md'), `---\nname: sample\ndescription: useful skill\n---\n\n# changed\n`);
-    expect(await run({ ref: 'sample', home, config: store, yesProfile: false }, new ScriptedPrompter())).toMatchObject({ ok: true, value: { version: 'v2' } });
+    expect(await run({ ref: 'sample', home, config: store }, new ScriptedPrompter())).toMatchObject({ ok: true, value: { version: 'v2' } });
     // A version folder is immutable, but history can still lose one (a repo surgery, a bad import).
     // Counting would then re-mint v2 over different bytes; the highest ordinal + 1 cannot.
     await git(['rm', '-r', '-q', 'skills/sample/v1'], fixture.seed).catch(async () => {
@@ -137,7 +137,7 @@ describe('publish (§5) — the only bridge between the two mirrors', () => {
     await git(['commit', '-q', '-m', 'drop v1'], fixture.seed);
     await git(['push', '-q', 'origin', 'HEAD:main'], fixture.seed);
     await writeFile(join(folder, 'SKILL.md'), `---\nname: sample\ndescription: useful skill\n---\n\n# changed again\n`);
-    expect(await run({ ref: 'sample', home, config: store, yesProfile: false }, new ScriptedPrompter())).toMatchObject({ ok: true, value: { version: 'v3' } });
+    expect(await run({ ref: 'sample', home, config: store }, new ScriptedPrompter())).toMatchObject({ ok: true, value: { version: 'v3' } });
   });
 
   it('publishes ordinary files into the version and eval assets beside it, never inside (overrides D9)', async () => {
@@ -148,7 +148,7 @@ describe('publish (§5) — the only bridge between the two mirrors', () => {
     await writeFile(join(folder, 'evals', 'triggers.yaml'), 'should_trigger: []\n');
     await mkdir(join(folder, 'references'), { recursive: true });
     await writeFile(join(folder, 'references', 'a.md'), 'aux\n');
-    expect(await run({ ref: 'sample', home, config: store, yesProfile: false }, new ScriptedPrompter())).toMatchObject({ ok: true, value: { version: 'v1', evalAssets: 2 } });
+    expect(await run({ ref: 'sample', home, config: store }, new ScriptedPrompter())).toMatchObject({ ok: true, value: { version: 'v1', evalAssets: 2 } });
     // Everything that is the skill goes into the immutable version folder…
     expect(await show(fixture.bare, 'skills/sample/v1/references/a.md')).toBe('aux\n');
     // …and the eval dataset goes beside it, where a later publish can correct it without minting.
@@ -162,18 +162,18 @@ describe('publish (§5) — the only bridge between the two mirrors', () => {
     const folder = await librarySkill(home);
     await mkdir(join(folder, 'evals', 'cases'), { recursive: true });
     await writeFile(join(folder, 'evals', 'cases', 'happy.yaml'), 'task: t\n');
-    expect(await run({ ref: 'sample', home, config: store, yesProfile: false }, new ScriptedPrompter())).toMatchObject({ ok: true, value: { version: 'v1' } });
+    expect(await run({ ref: 'sample', home, config: store }, new ScriptedPrompter())).toMatchObject({ ok: true, value: { version: 'v1' } });
 
     // The whole point: the skill did not change, so no version is minted — but the case still lands.
     await writeFile(join(folder, 'evals', 'cases', 'happy.yaml'), 'task: t2\n');
     const io = new ScriptedPrompter();
-    expect(await run({ ref: 'sample', home, config: store, yesProfile: false }, io)).toMatchObject({ ok: true, value: { version: null, identicalTo: 'v1', evalAssets: 1 } });
+    expect(await run({ ref: 'sample', home, config: store }, io)).toMatchObject({ ok: true, value: { version: null, identicalTo: 'v1', evalAssets: 1 } });
     expect(await show(fixture.bare, 'skills/sample/evals/cases/happy.yaml')).toBe('task: t2\n');
     expect(io.lines.join('\n')).toContain('no new version was minted');
 
     // A folder that has lost a case never deletes the team's copy (guard row a″ admits no removal).
     await rm(join(folder, 'evals', 'cases', 'happy.yaml'));
-    expect(await run({ ref: 'sample', home, config: store, yesProfile: false }, new ScriptedPrompter())).toMatchObject({ ok: true, value: { version: null, evalAssets: 0 } });
+    expect(await run({ ref: 'sample', home, config: store }, new ScriptedPrompter())).toMatchObject({ ok: true, value: { version: null, evalAssets: 0 } });
     expect(await show(fixture.bare, 'skills/sample/evals/cases/happy.yaml')).toBe('task: t2\n');
   });
 
@@ -186,7 +186,7 @@ describe('publish (§5) — the only bridge between the two mirrors', () => {
     // A run of DIFFERENT bytes — the pre-injection folder, say — must not ride along.
     await localReceipt(store, folder, { content_digest: `sha256:${'c'.repeat(64)}`, run_id: '20260102T000000Z' });
     const io = new ScriptedPrompter();
-    const result = await run({ ref: 'sample', home, config: store, yesProfile: false }, io);
+    const result = await run({ ref: 'sample', home, config: store }, io);
     expect(result).toMatchObject({ ok: true, value: { version: 'v1', attachedEvals: 0 } });
     // Injection changes the bytes, so a receipt taken before the FIRST publish legitimately misses.
     expect(io.lines.join('\n')).not.toContain('Attached 1 eval run');
@@ -194,7 +194,7 @@ describe('publish (§5) — the only bridge between the two mirrors', () => {
     // After the first publish the folder carries its managed fields, so every later run matches.
     await writeFile(join(folder, 'SKILL.md'), `${await readFile(join(folder, 'SKILL.md'), 'utf8')}\nmore\n`);
     const digest = await localReceipt(store, folder, { run_id: '20260103T000000Z' });
-    const second = await run({ ref: 'sample', home, config: store, yesProfile: false }, new ScriptedPrompter());
+    const second = await run({ ref: 'sample', home, config: store }, new ScriptedPrompter());
     expect(second).toMatchObject({ ok: true, value: { version: 'v2', attachedEvals: 1 } });
     const attached = JSON.parse(await show(fixture.bare, `evals/${second.ok ? second.value.id : ''}/v2/20260103T000000Z.json`));
     // Stamped, not copied: this is what makes §8.1's misfiled check mean anything.
@@ -207,7 +207,7 @@ describe('publish (§5) — the only bridge between the two mirrors', () => {
   it('D19: a failing local eval of these exact bytes asks once, and a decline leaves the folder byte-identical', async () => {
     const { fixture, store, home } = await prepared();
     const folder = await librarySkill(home);
-    await run({ ref: 'sample', home, config: store, yesProfile: false }, new ScriptedPrompter());
+    await run({ ref: 'sample', home, config: store }, new ScriptedPrompter());
     await writeFile(join(folder, 'SKILL.md'), `${await readFile(join(folder, 'SKILL.md'), 'utf8')}\nchanged\n`);
     const before = await readFile(join(folder, 'SKILL.md'), 'utf8');
     const mainBefore = await originSha(fixture.bare);
@@ -220,40 +220,40 @@ describe('publish (§5) — the only bridge between the two mirrors', () => {
     expect(await readFile(join(folder, 'SKILL.md'), 'utf8')).toBe(before);
     expect(await originSha(fixture.bare)).toBe(mainBefore);
 
-    expect(await run({ ref: 'sample', home, config: store, allowRegression: true, yesProfile: false }, new ScriptedPrompter())).toMatchObject({ ok: true, value: { version: 'v2' } });
+    expect(await run({ ref: 'sample', home, config: store, allowRegression: true }, new ScriptedPrompter())).toMatchObject({ ok: true, value: { version: 'v2' } });
   });
 
   it('injects BEFORE hygiene, so a folder that has never been published is not refused for the fields publish is about to write', async () => {
     const { store, home } = await prepared();
     await librarySkill(home, 'sample', `---\nname: sample\ndescription: useful skill\n---\n`);
-    expect(await run({ ref: 'sample', home, config: store, yesProfile: false }, new ScriptedPrompter())).toMatchObject({ ok: true });
+    expect(await run({ ref: 'sample', home, config: store }, new ScriptedPrompter())).toMatchObject({ ok: true });
   });
 
   it('still refuses hygiene failures, an unknown project, a missing folder, a symlink, and state-root content', async () => {
     const { store, home } = await prepared();
     await librarySkill(home, 'hostile', `---\nname: hostile\ndescription: has a credential\n---\n\nAWS_SECRET_ACCESS_KEY=AKIAIOSFODNN7EXAMPLEKEYX\n`);
-    expect(await run({ ref: 'hostile', home, config: store, yesProfile: false }, new ScriptedPrompter())).toMatchObject({ ok: false, error: expect.stringContaining('HYG3') });
+    expect(await run({ ref: 'hostile', home, config: store }, new ScriptedPrompter())).toMatchObject({ ok: false, error: expect.stringContaining('HYG3') });
 
     await librarySkill(home, 'sample');
-    expect(await run({ ref: 'sample', home, config: store, project: 'nope', yesProfile: false }, new ScriptedPrompter())).toMatchObject({ ok: false, error: 'Unknown project nope.' });
-    expect(await run({ ref: 'ghost', home, config: store, yesProfile: false }, new ScriptedPrompter())).toMatchObject({ ok: false, error: expect.stringContaining('No local skill folder named ghost in your library.') });
+    expect(await run({ ref: 'sample', home, config: store, project: 'nope' }, new ScriptedPrompter())).toMatchObject({ ok: false, error: 'Unknown project nope.' });
+    expect(await run({ ref: 'ghost', home, config: store }, new ScriptedPrompter())).toMatchObject({ ok: false, error: expect.stringContaining('No local skill folder named ghost in your library.') });
     // A path outside every Library root misses in the path grammar — publish never reads an arbitrary folder.
     const outside = join(await (await import('../../lib/__tests__/fixtures.js')).temporaryDirectory(), 'sample');
     await mkdir(outside, { recursive: true }); await writeFile(join(outside, 'SKILL.md'), '---\nname: sample\ndescription: elsewhere\n---\n');
-    expect(await run({ ref: outside, home, config: store, yesProfile: false }, new ScriptedPrompter())).toMatchObject({ ok: false, error: expect.stringContaining(`No skill folder at ${outside} in your library.`) });
+    expect(await run({ ref: outside, home, config: store }, new ScriptedPrompter())).toMatchObject({ ok: false, error: expect.stringContaining(`No skill folder at ${outside} in your library.`) });
 
     const linked = join(home, '.claude', 'skills', 'linked');
     await symlink(join(home, '.claude', 'skills', 'sample'), linked, 'dir');
     expect(await lstat(linked)).toMatchObject({});
-    expect(await run({ ref: 'linked', home, config: store, yesProfile: false }, new ScriptedPrompter())).toMatchObject({ ok: false });
+    expect(await run({ ref: 'linked', home, config: store }, new ScriptedPrompter())).toMatchObject({ ok: false });
   });
 
   it('adds the skill to a chosen project without minting when the bytes are unchanged', async () => {
     const { fixture, store, home } = await prepared({ projects: { Global: { remotes: [], skills: [] }, product: { remotes: [], skills: [] } } });
     await librarySkill(home);
-    expect(await run({ ref: 'sample', home, config: store, project: 'Global', yesProfile: false }, new ScriptedPrompter())).toMatchObject({ ok: true, value: { version: 'v1', projectAdded: true } });
+    expect(await run({ ref: 'sample', home, config: store, project: 'Global' }, new ScriptedPrompter())).toMatchObject({ ok: true, value: { version: 'v1', projectAdded: true } });
     const io = new ScriptedPrompter();
-    const second = await run({ ref: 'sample', home, config: store, project: 'product', yesProfile: false }, io);
+    const second = await run({ ref: 'sample', home, config: store, project: 'product' }, io);
     expect(second).toMatchObject({ ok: true, value: { version: null, identicalTo: 'v1', projectAdded: true } });
     expect(io.lines.join('\n')).toContain('Added sample to product. It is identical to Version 1');
     const teamJson = JSON.parse(await show(fixture.bare, 'team.json'));
@@ -265,34 +265,49 @@ describe('publish (§5) — the only bridge between the two mirrors', () => {
     const { store, home } = await prepared({ projects: { Global: { remotes: [], skills: [] }, product: { remotes: [], skills: [] } } });
     await librarySkill(home);
     const io = new ScriptedPrompter(['product']);
-    const result = await run({ ref: 'sample', home, config: store, yesProfile: false }, io);
+    const result = await run({ ref: 'sample', home, config: store }, io);
     expect(result).toMatchObject({ ok: true, value: { project: 'product' } });
     expect(io.asked.join('\n')).toContain('Which project?');
   });
 
-  it('D5: publishing is not installing — the only people-file write is the profile prompt, and it defaults to no', async () => {
+  it('D5/D77: publishing is not installing — the only people-file write is the profile entry, and publish writes it without asking', async () => {
     const { fixture, store, home } = await prepared();
     await librarySkill(home);
-    const declined = new ScriptedPrompter([], [false]);
-    expect(await run({ ref: 'sample', home, config: store }, declined)).toMatchObject({ ok: true, value: { profileAdded: false } });
-    expect(declined.asked.join('\n')).toContain('Add sample to your profile?');
-    expect(JSON.parse(await show(fixture.bare, 'people/seed.json'))).toEqual(person('seed'));
+    // NonInteractivePrompter throws on any question, so a surviving prompt fails this outright —
+    // and it is the shape a piped `publish` really has, where the old question could only throw.
+    const io = new NonInteractivePrompter();
+    const first = await run({ ref: 'sample', home, config: store }, io);
+    expect(first).toMatchObject({ ok: true, value: { profileAdded: true, version: 'v1' } });
+    expect(io.asked).toEqual([]);
+    expect(io.lines.join('\n')).toContain('Your profile now lists sample at Version 1.');
+    const after = JSON.parse(await show(fixture.bare, 'people/seed.json'));
+    expect(after.installed).toEqual([]);
+    expect(after.profile).toEqual([{ id: first.ok ? first.value.id : '', name: 'sample', version: 'v1', added: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/), via: 'publish' }]);
+    expect({ ...after, profile: undefined }).toEqual({ ...person('seed'), profile: undefined });
 
-    const accepted = new ScriptedPrompter([], [true]);
+    // A second publish refreshes the one entry in place rather than appending a duplicate.
     await writeFile(join(home, '.claude', 'skills', 'sample', 'SKILL.md'), `---\nname: sample\ndescription: useful skill\n---\n\n# v2\n`);
-    const result = await run({ ref: 'sample', home, config: store }, accepted);
+    const result = await run({ ref: 'sample', home, config: store }, new ScriptedPrompter());
     expect(result).toMatchObject({ ok: true, value: { profileAdded: true, version: 'v2' } });
     const file = JSON.parse(await show(fixture.bare, 'people/seed.json'));
-    expect(file.installed).toEqual([]);
     expect(file.profile).toEqual([{ id: result.ok ? result.value.id : '', name: 'sample', version: 'v2', added: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/), via: 'publish' }]);
+  });
+
+  it('D77: an interactive publish does not ask either', async () => {
+    const { fixture, store, home } = await prepared();
+    await librarySkill(home);
+    const interactive = new ScriptedPrompter([], [], true);
+    expect(await run({ ref: 'sample', home, config: store }, interactive)).toMatchObject({ ok: true, value: { profileAdded: true } });
+    expect(interactive.asked).toEqual([]);
+    expect(JSON.parse(await show(fixture.bare, 'people/seed.json')).profile).toHaveLength(1);
   });
 
   it('D72: a folder that exists but the scan rejected is refused with its path and the scan’s detail, never "not found"', async () => {
     const { store, home } = await prepared();
     const odd = await librarySkill(home, 'odd', `---\nname: odd\ndescription: useful skill\nargument-hint: x\n---\n`);
-    expect(await run({ ref: 'odd', home, config: store, yesProfile: false }, new ScriptedPrompter())).toMatchObject({ ok: false, error: `${odd} is not a usable skill folder: unsupported top-level field argument-hint (only name, description, license, metadata, allowed-tools)` });
+    expect(await run({ ref: 'odd', home, config: store }, new ScriptedPrompter())).toMatchObject({ ok: false, error: `${odd} is not a usable skill folder: unsupported top-level field argument-hint (only name, description, license, metadata, allowed-tools)` });
     // The §6.3 miss is reserved for a name no Library root holds.
-    expect(await run({ ref: 'ghost', home, config: store, yesProfile: false }, new ScriptedPrompter())).toMatchObject({ ok: false, error: expect.stringContaining('No local skill folder named ghost in your library.') });
+    expect(await run({ ref: 'ghost', home, config: store }, new ScriptedPrompter())).toMatchObject({ ok: false, error: expect.stringContaining('No local skill folder named ghost in your library.') });
   });
 
   it('resolves a folder the user already installed — the commonest thing publish is pointed at', async () => {
@@ -300,7 +315,7 @@ describe('publish (§5) — the only bridge between the two mirrors', () => {
     const folder = await librarySkill(home, 'sample', published());
     await store.update((config) => { config.placements[folder] = { id: ID, team: 'team', version: 'v1', scope: { kind: 'global' }, placed_at: '2026-01-01', fingerprint: '' }; });
     await writeFile(join(folder, 'SKILL.md'), `${published()}\nlocal edit\n`);
-    expect(await run({ ref: 'sample', home, config: store, yesProfile: false }, new ScriptedPrompter())).toMatchObject({ ok: true, value: { id: ID, version: 'v1' } });
+    expect(await run({ ref: 'sample', home, config: store }, new ScriptedPrompter())).toMatchObject({ ok: true, value: { id: ID, version: 'v1' } });
   });
 
   it('a refused push leaves origin/main where it was and the clone clean', async () => {
@@ -311,7 +326,7 @@ describe('publish (§5) — the only bridge between the two mirrors', () => {
       if (command === 'git' && args[0] === 'push') return Promise.resolve({ code: 1, stdout: '', stderr: 'remote: Permission to acme/team.git denied to seed.' });
       return systemRunner.run(command, args, options);
     } };
-    expect(await run({ ref: 'sample', home, config: store, runner: denied, yesProfile: false }, new ScriptedPrompter())).toMatchObject({ ok: false, error: expect.stringContaining('denied') });
+    expect(await run({ ref: 'sample', home, config: store, runner: denied }, new ScriptedPrompter())).toMatchObject({ ok: false, error: expect.stringContaining('denied') });
     expect(await originSha(fixture.bare)).toBe(before);
     expect((await git(['status', '--porcelain'], clone)).trim()).toBe('');
     // The §5.1 step 6b write-back is deliberately on the other side of this line: it already ran, and
@@ -360,21 +375,21 @@ describe('publish (§5) — the only bridge between the two mirrors', () => {
     const folder = await librarySkill(home);
     // v1 first: only after publish injects the managed fields do later receipts of this folder match
     // the digest publish computes (the existing §6.1 test above relies on the same ordering).
-    expect(await run({ ref: 'sample', home, config: store, yesProfile: false }, new ScriptedPrompter())).toMatchObject({ ok: true });
+    expect(await run({ ref: 'sample', home, config: store }, new ScriptedPrompter())).toMatchObject({ ok: true });
     await writeFile(join(folder, 'SKILL.md'), `${await readFile(join(folder, 'SKILL.md'), 'utf8')}\nmore\n`);
     await localReceipt(store, folder, { run_id: '20260101T000000Z', verdict: 'FAIL' });
     await localReceipt(store, folder, { run_id: '20260202T000000Z', verdict: 'PASS' });
     // Run ids sort ascending, so the old `.find(FAIL)` matched the OLDEST run: once any eval of these
     // bytes failed, no passing re-run could clear the gate. The prompter has no scripted confirm, so
     // if the gate still asks, this fails loudly rather than silently publishing.
-    const result = await run({ ref: 'sample', home, config: store, yesProfile: false }, new ScriptedPrompter());
+    const result = await run({ ref: 'sample', home, config: store }, new ScriptedPrompter());
     expect(result).toMatchObject({ ok: true, value: { version: 'v2' } });
   });
 
   it('D61: says so when a local receipt could not be read, instead of failing the D19 gate open in silence', async () => {
     const { store, home } = await prepared();
     const folder = await librarySkill(home);
-    expect(await run({ ref: 'sample', home, config: store, yesProfile: false }, new ScriptedPrompter())).toMatchObject({ ok: true });
+    expect(await run({ ref: 'sample', home, config: store }, new ScriptedPrompter())).toMatchObject({ ok: true });
     await writeFile(join(folder, 'SKILL.md'), `${await readFile(join(folder, 'SKILL.md'), 'utf8')}\nmore\n`);
     const digest = await localReceipt(store, folder, { run_id: '20260101T000000Z', verdict: 'PASS' });
     // The NEWEST run for these bytes, and it is corrupt. D19 asks about the newest, so skipping it
@@ -383,7 +398,7 @@ describe('publish (§5) — the only bridge between the two mirrors', () => {
     await mkdir(broken, { recursive: true });
     await writeFile(join(broken, 'receipt.json'), '{not json');
     const io = new ScriptedPrompter();
-    expect(await run({ ref: 'sample', home, config: store, yesProfile: false }, io)).toMatchObject({ ok: true, value: { version: 'v2' } });
+    expect(await run({ ref: 'sample', home, config: store }, io)).toMatchObject({ ok: true, value: { version: 'v2' } });
     expect(io.lines).toContain('1 local eval run(s) of these exact bytes could not be read (20260303T000000Z), so they were not considered.');
   });
 });
@@ -431,7 +446,7 @@ describe('B9 — first-publish category', () => {
     const gate = new Promise<void>((resolve) => { release = resolve; });
     const agent: AgentApi = { runAgent: vi.fn(), askJson: vi.fn(async () => { release(); return { category: 'review' }; }) };
     const io = new ScriptedPrompter();
-    expect(await run({ ref: 'sample', home, config: store, runner: gatedFetch(gate), agent, yesProfile: false }, io)).toMatchObject({ ok: true, value: { version: 'v1' } });
+    expect(await run({ ref: 'sample', home, config: store, runner: gatedFetch(gate), agent }, io)).toMatchObject({ ok: true, value: { version: 'v1' } });
     expect(agent.askJson).toHaveBeenCalledTimes(1);
     expect(io.lines.join('\n')).toContain('metadata.terum-category: review (suggested from your SKILL.md; edit any time)');
   }, 30_000);
@@ -451,7 +466,7 @@ describe('B9 — first-publish category', () => {
       }),
     };
     const io = new ScriptedPrompter();
-    expect(await run({ ref: 'sample', home, config: store, agent, yesProfile: false }, io)).toMatchObject({ ok: true, value: { version: 'v1' } });
+    expect(await run({ ref: 'sample', home, config: store, agent }, io)).toMatchObject({ ok: true, value: { version: 'v1' } });
     expect(offered).toEqual([['review'], ['docs']]);
     expect(await show(fixture.bare, 'skills/sample/v1/SKILL.md')).toContain('terum-category: docs');
   });
@@ -460,7 +475,7 @@ describe('B9 — first-publish category', () => {
     const { fixture, store, home } = await syncedCategoryFixture(['review']);
     await pushFromSeed(fixture.seed, 'team.json', JSON.stringify({ ...TEAM_JSON, categories: ['review', 'docs'] }));
     const agent = agentFor({ category: 'review' });
-    expect(await run({ ref: 'sample', home, config: store, agent, yesProfile: false }, new ScriptedPrompter())).toMatchObject({ ok: true });
+    expect(await run({ ref: 'sample', home, config: store, agent }, new ScriptedPrompter())).toMatchObject({ ok: true });
     expect(agent.askJson).toHaveBeenCalledTimes(1);
     expect(await show(fixture.bare, 'skills/sample/v1/SKILL.md')).toContain('terum-category: review');
   });
@@ -470,7 +485,7 @@ describe('B9 — first-publish category', () => {
     const agent = agentFor({ category: 'review' });
     vi.mocked(agent.askJson).mockRejectedValue(new AgentRunError('offline'));
     const io = new ScriptedPrompter();
-    expect(await run({ ref: 'sample', home, config: store, agent, yesProfile: false }, io)).toMatchObject({ ok: true });
+    expect(await run({ ref: 'sample', home, config: store, agent }, io)).toMatchObject({ ok: true });
     expect(agent.askJson).toHaveBeenCalledTimes(1);
     expect(io.lines.join('\n')).toContain("metadata.terum-category: misc (couldn't reach the model; edit SKILL.md any time)");
   });
@@ -491,7 +506,7 @@ describe('B9 — first-publish category', () => {
       }),
     };
     const runner = gatedFetch(started, () => ({ code: 128, stdout: '', stderr: 'fatal: could not read from remote repository' }));
-    const result = await run({ ref: 'sample', home, config: store, runner, agent, yesProfile: false }, new ScriptedPrompter());
+    const result = await run({ ref: 'sample', home, config: store, runner, agent }, new ScriptedPrompter());
     expect(result).toMatchObject({ ok: false });
     expect(observed?.aborted).toBe(true);
   }, 30_000);
@@ -499,12 +514,12 @@ describe('B9 — first-publish category', () => {
   it('reports its step ladder, skipping the category rung a declared category makes unnecessary', async () => {
     const { store, home } = await syncedCategoryFixture(['review']);
     const asked = new ScriptedPrompter();
-    expect(await run({ ref: 'sample', home, config: store, agent: agentFor({ category: 'review' }), yesProfile: false }, asked)).toMatchObject({ ok: true });
+    expect(await run({ ref: 'sample', home, config: store, agent: agentFor({ category: 'review' }) }, asked)).toMatchObject({ ok: true });
     expect(asked.steps).toEqual(['Refreshing the team repository', 'Choosing a category', 'Checking sample', 'Publishing sample', 'Adding sample to your profile']);
     expect(asked.progressed[0]).toEqual({ step: 'Refreshing the team repository', current: 1, total: 5 });
     // Second publish: the category is now declared in the folder, so that rung never runs.
     const again = new ScriptedPrompter();
-    expect(await run({ ref: 'sample', home, config: store, yesProfile: false }, again)).toMatchObject({ ok: true });
+    expect(await run({ ref: 'sample', home, config: store }, again)).toMatchObject({ ok: true });
     expect(again.steps).toEqual(['Refreshing the team repository', 'Checking sample', 'Publishing sample', 'Adding sample to your profile']);
   });
 
@@ -512,14 +527,14 @@ describe('B9 — first-publish category', () => {
     const { fixture, store, home, folder } = await categoryFixture();
     const agent = agentFor({ category: ' REVIEW ' });
     const io = new ScriptedPrompter();
-    expect(await run({ ref: 'sample', home, config: store, agent, yesProfile: false }, io)).toMatchObject({ ok: true, value: { version: 'v1' } });
+    expect(await run({ ref: 'sample', home, config: store, agent }, io)).toMatchObject({ ok: true, value: { version: 'v1' } });
     expect(io.lines.join('\n')).toContain('metadata.terum-category: review (suggested from your SKILL.md; edit any time)');
     expect(io.lines.join('\n')).not.toContain('HYG7');
     const local = await readFile(join(folder, 'SKILL.md'), 'utf8');
     expect(local).toBe(await show(fixture.bare, 'skills/sample/v1/SKILL.md'));
     expect(local).toContain('terum-category: review');
     const again = new ScriptedPrompter();
-    expect(await run({ ref: 'sample', home, config: store, agent, yesProfile: false }, again)).toMatchObject({ ok: true, value: { created: false, identicalTo: 'v1' } });
+    expect(await run({ ref: 'sample', home, config: store, agent }, again)).toMatchObject({ ok: true, value: { created: false, identicalTo: 'v1' } });
     expect(agent.askJson).toHaveBeenCalledTimes(1);
     expect(again.lines.join('\n')).not.toContain('metadata.terum-category:');
   });
@@ -528,7 +543,7 @@ describe('B9 — first-publish category', () => {
     const agent = agentFor({ category: 'invented' });
     if (mode === 'offline') vi.mocked(agent.askJson).mockRejectedValue(new AgentRunError('offline'));
     const io = new ScriptedPrompter();
-    expect(await run({ ref: 'sample', home, config: store, agent, yesProfile: false }, io)).toMatchObject({ ok: true });
+    expect(await run({ ref: 'sample', home, config: store, agent }, io)).toMatchObject({ ok: true });
     expect(io.lines.join('\n')).toContain("metadata.terum-category: misc (couldn't reach the model; edit SKILL.md any time)");
     expect(await show(fixture.bare, 'skills/sample/v1/SKILL.md')).toContain('terum-category: misc');
     expect(agent.askJson).toHaveBeenCalledTimes(1);
@@ -536,14 +551,14 @@ describe('B9 — first-publish category', () => {
   it('uses the system askJson seam when no agent is supplied', async () => {
     const { store, home } = await categoryFixture();
     vi.mocked(systemAgent.askJson).mockResolvedValue({ category: 'docs' });
-    expect(await run({ ref: 'sample', home, config: store, yesProfile: false }, new ScriptedPrompter())).toMatchObject({ ok: true });
+    expect(await run({ ref: 'sample', home, config: store }, new ScriptedPrompter())).toMatchObject({ ok: true });
     expect(systemAgent.askJson).toHaveBeenCalledTimes(1);
   });
   it('the flag suppresses the model and off-list values warn without refusing', async () => {
     const { store, home } = await categoryFixture();
     const agent = agentFor({ category: 'review' });
     const io = new ScriptedPrompter();
-    expect(await run({ ref: 'sample', home, config: store, agent, category: 'ops', yesProfile: false }, io)).toMatchObject({ ok: true });
+    expect(await run({ ref: 'sample', home, config: store, agent, category: 'ops' }, io)).toMatchObject({ ok: true });
     expect(agent.askJson).not.toHaveBeenCalled();
     expect(io.lines.join('\n')).toContain('metadata.terum-category: ops (from --category; edit SKILL.md any time)');
     expect(io.lines.filter(line => line.startsWith('warning HYG7'))).toHaveLength(1);
@@ -552,7 +567,7 @@ describe('B9 — first-publish category', () => {
     const { store, home, folder } = await categoryFixture(published().replace('terum-category: testing', 'terum-category: ops'));
     const agent = agentFor({ category: 'review' });
     const io = new ScriptedPrompter();
-    expect(await run({ ref: 'sample', home, config: store, agent, category: 'docs', yesProfile: false }, io)).toMatchObject({ ok: true });
+    expect(await run({ ref: 'sample', home, config: store, agent, category: 'docs' }, io)).toMatchObject({ ok: true });
     expect(agent.askJson).not.toHaveBeenCalled();
     expect(io.lines.join('\n')).not.toContain('metadata.terum-category:');
     expect(io.lines.filter(line => line.startsWith('warning HYG7'))).toHaveLength(1);
@@ -586,7 +601,7 @@ describe('B9 — first-publish category', () => {
     const { fixture, store, home, folder } = await categoryFixture(undefined, [...categories, 'ops']);
     const agent = agentFor({ category: 'review' });
     const io = new ScriptedPrompter();
-    expect(await run({ ref: 'sample', home, config: store, agent, category: flag, yesProfile: false }, io)).toMatchObject({ ok: true, value: { version: 'v1' } });
+    expect(await run({ ref: 'sample', home, config: store, agent, category: flag }, io)).toMatchObject({ ok: true, value: { version: 'v1' } });
     expect(agent.askJson).not.toHaveBeenCalled();
     expect(io.lines.join('\n')).toContain(`metadata.terum-category: ${stored} (from --category; edit SKILL.md any time)`);
     const hyg7 = io.lines.filter(line => line.startsWith('warning HYG7'));

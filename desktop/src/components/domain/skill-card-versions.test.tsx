@@ -104,6 +104,22 @@ it('puts the Library version line on the card face and never the installed check
  expect(screen.queryByText('Installed · on this machine')).toBeNull();
  expect(screen.queryByRole('img',{name:'Installed on this machine'})).toBeNull();
 });
+// The `in <root>` chip is a team-card affordance (Ryan, 2026-09-14): a Marketplace card's identity line names the
+// endorsement, so the root is news; a Library card's identity line already IS the root. A local project card must
+// therefore draw no chip, so moving a folder between Global and a checkout changes nothing but the identity line.
+const ROOT='~/Documents/Terum/skill-management-software';
+it('draws the in-root chip on a team card only, so a local project card matches its Global twin', () => {
+ show(card({teamed:true,installedVersion:null,localMatch:'differs',installed:'placed',placed:false,onDiskOnly:true,projectRoots:[ROOT]}));
+ expect(screen.getByText('in '+ROOT)).toBeInTheDocument();
+ cleanup();
+ show(libraryCard({installedVersion:null,localMatch:'none',placed:false,installed:'placed',onDiskOnly:true,projectRoots:[ROOT]}));
+ expect(screen.queryByText('in '+ROOT)).toBeNull();
+ expect(screen.getByText('Unpublished')).toHaveClass('card-version-label');
+ cleanup();
+ // The Global twin of that same folder: no repoRoot upstream, hence no chip either — the two boards now agree.
+ show(libraryCard({installedVersion:null,localMatch:'none',placed:false,installed:'placed',onDiskOnly:true,projectRoots:[]}));
+ expect(screen.queryByText(/^in /)).toBeNull();
+});
 // Ledger D5 + review walk D4: the chip's words became the version line, and the green check sits INSIDE the
 // version unit (one `.card-version` element in the left group), so the words and the check never split rows.
 it('marks an installed Marketplace card with the check inside the version unit and no chip text', () => {
