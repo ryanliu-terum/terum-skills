@@ -1,0 +1,35 @@
+Marketplace — acme
+3 skills · 3 members · 2 projects · PASS 1 · NEUTRAL 1 · FAIL 0 · not evaluated 1
+
+Skills
+╭──────────────┬───────────┬──────────┬────────────────────────────╮
+│ Skill        │ Ver       │ Installs │ Eval                       │
+├──────────────┼───────────┼──────────┼────────────────────────────┤
+│ deploy-check │ Version 2 │ 2 ▲      │ ● NEUTRAL ±0% (6/8 scored) │
+│ tdd          │ Version 2 │        1 │ ✓ PASS +67% (Version 1)    │
+│ diagnose     │ Version 1 │        0 │ ⚠ invalid receipt          │
+╰──────────────┴───────────┴──────────┴────────────────────────────╯
+(columns not shown at this width: Desc, Author, Category, Updated)
+
+People
+╭────────┬────────────┬───────────┬───────────┬──────────╮
+│ Handle │ Name       │ Role      │ Installed │ Authored │
+├────────┼────────────┼───────────┼───────────┼──────────┤
+│ @mira  │ Mira Chen  │ —         │         2 │        1 │
+│ @seed  │ Seed       │ Platform  │         1 │        1 │
+│ @ravi  │ Ravi Patel │ Debugging │         0 │        1 │
+╰────────┴────────────┴───────────┴───────────┴──────────╯
+(columns not shown at this width: Local skills (self-reported))
+
+Projects
+╭─────────┬────────┬─────────┬───────────────────────╮
+│ Project │ Skills │ Members │ Remotes               │
+├─────────┼────────┼─────────┼───────────────────────┤
+│ terum   │      1 │       1 │ github.com/acme/terum │
+│ Global  │      1 │       0 │ —                     │
+╰─────────┴────────┴─────────┴───────────────────────╯
+
+Notes
+  • diagnose: schema-invalid receipt <ROOT>/state/teams/acme/evals/33333333-3333-4333-8333-333333333333/v1/20260903T100000Z.json: invalid JSON.
+
+Next: /skill-info deploy-check · /eval diagnose · /terum-skills install diagnose

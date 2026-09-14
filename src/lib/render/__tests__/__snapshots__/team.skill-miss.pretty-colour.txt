@@ -1,0 +1,7 @@
+[1mls[0m
+
+[31m✗ No skill named ghost.[0m
+
+--- stderr ---
+No skill named ghost.
+--- exit 1 ---

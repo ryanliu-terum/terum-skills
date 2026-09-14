@@ -1,0 +1,34 @@
+Library
+4 skills across 2 roots · attention 1 failing · 3 not evaluated · 1 edited
+
+Global — ~/.claude/skills
+╭──────────────┬──────────────────┬─────────────────────────────────╮
+│ Skill        │ State            │ Eval                            │
+├──────────────┼──────────────────┼─────────────────────────────────┤
+│ tdd          │ edited ✎         │ ⚠ stale — edited since the eval │
+│ deploy-check │ placed Version 1 │ ✗ FAIL −50%                     │
+│ notes        │ untracked        │ — not evaluated                 │
+╰──────────────┴──────────────────┴─────────────────────────────────╯
+(columns not shown at this width: Desc, Path)
+
+Cannot be connected
+╭──────────┬─────────────────────────────────────────────────────────╮
+│ Skill    │ Reason                                                  │
+├──────────┼─────────────────────────────────────────────────────────┤
+│ bad-yaml │ SKILL.md frontmatter is not valid YAML: Flow sequence … │
+│ linked   │ symbolic link                                           │
+╰──────────┴─────────────────────────────────────────────────────────╯
+(columns not shown at this width: Path)
+
+proj — <ROOT>/proj/.claude/skills
+╭──────────┬────────────────────┬─────────────────╮
+│ Skill    │ State              │ Eval            │
+├──────────┼────────────────────┼─────────────────┤
+│ diagnose │ shared = Version 1 │ — not evaluated │
+╰──────────┴────────────────────┴─────────────────╯
+(columns not shown at this width: Desc, Path)
+
+Notes
+  • acme/diagnose: unreadable receipt v1/20260903T100000Z.json; not considered.
+
+Next: /skill-info notes · /eval notes

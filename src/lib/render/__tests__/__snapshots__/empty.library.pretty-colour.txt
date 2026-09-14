@@ -1,0 +1,7 @@
+[1mLibrary[0m
+0 skills across 1 root · attention 0 failing · 0 not evaluated · 0 edited
+
+[1mGlobal — ~/.claude/skills (absent)[0m
+  none
+
+[1mNext:[0m [36m/terum-skills project add[0m

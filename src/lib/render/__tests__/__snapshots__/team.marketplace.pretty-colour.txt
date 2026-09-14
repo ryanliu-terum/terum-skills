@@ -1,0 +1,34 @@
+[1mMarketplace — acme[0m
+3 skills · 3 members · 2 projects · PASS 1 · NEUTRAL 1 · FAIL 0 · not evaluated 1
+
+[1mSkills[0m
+╭──────────────┬───────────┬──────────┬────────────────────────────╮
+│ [1mSkill       [0m │ [1mVer      [0m │ [1mInstalls[0m │ [1mEval                      [0m │
+├──────────────┼───────────┼──────────┼────────────────────────────┤
+│ deploy-check │ Version 2 │ 2 ▲      │ [2m● NEUTRAL ±0% (6/8 scored)[0m │
+│ tdd          │ Version 2 │        1 │ [32m✓ PASS +67% (Version 1)[0m    │
+│ diagnose     │ Version 1 │        0 │ [33m⚠ invalid receipt[0m          │
+╰──────────────┴───────────┴──────────┴────────────────────────────╯
+[2m(columns not shown at this width: Desc, Author, Category, Updated)[0m
+
+[1mPeople[0m
+╭────────┬────────────┬───────────┬───────────┬──────────┬──────────────────────────────╮
+│ [1mHandle[0m │ [1mName      [0m │ [1mRole     [0m │ [1mInstalled[0m │ [1mAuthored[0m │ [1mLocal skills (self-reported)[0m │
+├────────┼────────────┼───────────┼───────────┼──────────┼──────────────────────────────┤
+│ @mira  │ Mira Chen  │ —         │         2 │        1 │                            3 │
+│ @seed  │ Seed       │ Platform  │         1 │        1 │                            4 │
+│ @ravi  │ Ravi Patel │ Debugging │         0 │        1 │                            — │
+╰────────┴────────────┴───────────┴───────────┴──────────┴──────────────────────────────╯
+
+[1mProjects[0m
+╭─────────┬────────┬─────────┬───────────────────────╮
+│ [1mProject[0m │ [1mSkills[0m │ [1mMembers[0m │ [1mRemotes              [0m │
+├─────────┼────────┼─────────┼───────────────────────┤
+│ terum   │      1 │       1 │ github.com/acme/terum │
+│ Global  │      1 │       0 │ —                     │
+╰─────────┴────────┴─────────┴───────────────────────╯
+
+[1mNotes[0m
+  • diagnose: schema-invalid receipt <ROOT>/state/teams/acme/evals/33333333-3333-4333-8333-333333333333/v1/20260903T100000Z.json: invalid JSON.
+
+[1mNext:[0m [36m/skill-info deploy-check[0m · [36m/eval diagnose[0m · [36m/terum-skills install diagnose[0m

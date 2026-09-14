@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { FRAME_VERBS } from '../../frames.js';
-import { type RenderContext } from '../board.js';
+import { board, type RenderContext } from '../board.js';
 import { FALLBACK_VERBS, REGISTRY, RENDERED_VERBS, renderBoard } from '../registry.js';
 
 export const CTX: RenderContext = { format: 'md', host: 'claude', rows: 25, width: 100, color: false, form: undefined, home: '/home/u', now: Date.parse('2026-09-13T12:00:00Z'), argv: ['publish', 'x'], command: 'npx -y terum-skills@latest publish x --format md' };
@@ -26,5 +26,16 @@ describe('registry (D5)', () => {
       expect(b.sections).toEqual([{ kind: 'text', lines: ['line'], fenced: 'text' }]);
       expect(b.notes).toEqual(['The __throwing__ board could not be drawn (renderer bug); its printed lines are shown instead.']);
     } finally { delete REGISTRY['__throwing__']; }
+  });
+  it('draws the fallback block, never the renderer, for a hard failure without a value (§12, D8)', () => {
+    let calls = 0;
+    REGISTRY['__failing__'] = { render: () => { calls += 1; return board('__failing__', {}); }, covered: [/^No skill named /] };
+    try {
+      const b = renderBoard({ verb: '__failing__', ok: false, error: 'No skill named ghost.', exitCode: 1 }, ['No skill named ghost.'], [], CTX);
+      expect(calls).toBe(0);
+      expect(b.sections).toEqual([{ kind: 'text', lines: ['No skill named ghost.'], fenced: 'text' }]);
+      expect(b.notes).toEqual([]);
+      expect(b.failure).toEqual({ error: 'No skill named ghost.' });
+    } finally { delete REGISTRY['__failing__']; }
   });
 });

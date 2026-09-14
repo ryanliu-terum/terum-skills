@@ -1,0 +1,19 @@
+notes — Library
+
+  Personal notes on how this team ships. Not shared; not a team skill.
+
+  state:                     untracked
+  path:                      ~/.claude/skills/notes
+  health:                    ✓ unchanged or untracked
+  local eval:                — not evaluated
+  team eval for these bytes: —
+
+Body preview
+  # Notes
+  
+  Keep the release calendar here.
+
+Notes
+  • acme/diagnose: unreadable receipt v1/20260903T100000Z.json; not considered.
+
+Next: /eval notes

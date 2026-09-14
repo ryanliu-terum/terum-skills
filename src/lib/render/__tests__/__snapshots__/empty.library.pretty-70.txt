@@ -1,0 +1,7 @@
+Library
+0 skills across 1 root · attention 0 failing · 0 not evaluated · 0 edited
+
+Global — ~/.claude/skills (absent)
+  none
+
+Next: /terum-skills project add
