@@ -59,7 +59,7 @@ export const cliSetup = z.object({ role: z.enum(['creator', 'joiner']), team: z.
 // §6.3: a local eval runs against a folder in the Library, which may belong to no team at all —
 // hence the nullable `team` and `id`. `shareHint` is the caller's cue to offer publishing.
 export const cliEval = z.object({ name:z.string(),runDir:z.string(),executionStatus:z.enum(['complete','partial','failed']),team:z.string().nullish().transform(v=>v??null),id:z.string().nullish().transform(v=>v??null),shareHint:z.literal(true).optional(),alreadyEvaluated:z.boolean().optional() }).passthrough();
-const cliValidate = z.object({ name: z.string(), findings: z.number(), warnings: z.number(), repairable: z.number().optional().transform(value => value ?? 0) });
+const cliValidate = z.object({ name: z.string(), findings: z.number(), warnings: z.number(), repairable: z.number().optional().transform(value => value ?? 0), repairs: z.array(z.string()).optional().transform(value => value ?? []) });
 export const cliSearch = z.array(z.object({ team: z.string().optional(), id: z.string(), name: z.string(), author: z.string(), category: z.string(), installs: z.number(), latest: z.string(), description: z.string(), grants: z.string().nullable(), grantsHash: z.string().nullable(), updated: z.string() }));
 
 const cliScope = z.discriminatedUnion('kind', [z.object({ kind: z.literal('global') }), z.object({ kind: z.literal('project'), project: z.string() })]);

@@ -27,12 +27,12 @@ function replay(value: unknown, ok = true, prints: string[] = []) {
 
 it('appends read diagnostics after the error and preserves a parsed partial value', async () => {
   const f = replay({ name: 'a', findings: 2, warnings: 1 }, false, ['First finding.', 'Second finding.']);
-  // A CLI that predates `skill fix` sends no `repairable`; the adapter reads 0 so the app draws no Fix.
-  expect(await createTauriBackend(f.bridge).validate({ ref: 'a' })).toEqual({ ok: false, error: 'CLI failure.\nFirst finding.\nSecond finding.', value: { name: 'a', findings: 2, warnings: 1, repairable: 0 } });
+  // A CLI that predates `skill fix` sends no `repairable` and no `repairs`; the adapter reads 0 and [] so the app draws no Fix.
+  expect(await createTauriBackend(f.bridge).validate({ ref: 'a' })).toEqual({ ok: false, error: 'CLI failure.\nFirst finding.\nSecond finding.', value: { name: 'a', findings: 2, warnings: 1, repairable: 0, repairs: [] } });
 });
 
 it('keeps successful reads unchanged despite print frames', async () => {
-  const value = { name: 'a', findings: 0, warnings: 1, repairable: 0 };
+  const value = { name: 'a', findings: 0, warnings: 1, repairable: 0, repairs: [] };
   expect(await createTauriBackend(replay(value, true, ['Warning.']).bridge).validate({ ref: 'a' })).toEqual({ ok: true, value });
 });
 
