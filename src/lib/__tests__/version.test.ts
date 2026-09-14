@@ -3,7 +3,8 @@ import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { createConfigStore } from '../config.js';
 import { systemRunner } from '../runner.js';
-import { materializeVersion, resolveVersion } from '../version.js';
+import { contentVersion, materializeVersion, resolveSkillTrees, resolveVersion } from '../version.js';
+import { hasSkillTree } from '../content-tree.js';
 import { bareTeam, cloneWithIdentity, git, pushFromSeed, wrapRunner } from './fixtures.js';
 
 describe('version cache (§7)', () => {
@@ -71,5 +72,67 @@ describe('version cache (§7)', () => {
     const failing = wrapRunner(systemRunner, async (command, args, _options, next) => (command === 'git' && args[0] === 'checkout-index' ? { code: 1, stdout: '', stderr: 'boom' } : next()));
     await expect(materializeVersion(store, 'team', clone, 'sample', tree, failing)).rejects.toThrow('git checkout-index failed');
     expect(await readdir(join(store.root, 'cache', 'team', tree))).toEqual([]);
+  });
+});
+
+describe('a version is the skill without its eval assets (Ajay, 2026-09-13)', () => {
+  const SKILL = '---\nname: sample\ndescription: sample\nlicense: UNLICENSED\nmetadata:\n  id: 11111111-1111-4111-8111-111111111111\n  author: Me <me@example.com>\n  terum-category: testing\n---\n';
+  const pull = async (clone: string) => { await git(['fetch', '-q', 'origin'], clone); await git(['reset', '-q', '--hard', 'origin/main'], clone); };
+
+  it('holds still while eval assets change, and moves when the skill changes', async () => {
+    const fixture = await bareTeam();
+    await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', SKILL);
+    const store = createConfigStore(join(fixture.root, 'state'));
+    const clone = await cloneWithIdentity(fixture.bare, store.teamClone('team'));
+    // A skill with no eval assets hashes to exactly the tree it already had: nothing about it moves.
+    const version = await resolveVersion(clone, 'sample', undefined);
+    expect(version).toBe((await git(['rev-parse', 'HEAD:skills/sample'], clone)).trim());
+
+    await pushFromSeed(fixture.seed, 'skills/sample/evals/cases/happy.yaml', 'task: deploy\nchecks:\n  - transcript_mentions: deployed\n');
+    await pull(clone);
+    expect(await resolveVersion(clone, 'sample', undefined)).toBe(version);
+    expect((await git(['rev-parse', 'HEAD:skills/sample'], clone)).trim()).not.toBe(version);
+    const trees = await resolveSkillTrees(clone, 'sample');
+    expect(trees).toMatchObject({ content: version, evalAssets: (await git(['rev-parse', 'HEAD:skills/sample/evals'], clone)).trim() });
+
+    // What a version materializes is the skill a teammate runs — the eval dataset never places.
+    expect(await readdir(await materializeVersion(store, 'team', clone, 'sample', version))).toEqual(['SKILL.md']);
+
+    await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', `${SKILL}Deploy carefully.\n`);
+    await pull(clone);
+    expect(await resolveVersion(clone, 'sample', undefined)).not.toBe(version);
+  });
+
+  it('re-mints a version another machine wrote, from the hash alone', async () => {
+    const fixture = await bareTeam();
+    await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', SKILL);
+    await pushFromSeed(fixture.seed, 'skills/sample/evals/cases/happy.yaml', 'task: deploy\nchecks:\n  - transcript_mentions: deployed\n');
+    // Edit the skill AFTER its assets exist: this content tree never stood alone in history, so
+    // nothing but a re-mint can produce it — the case a plain object lookup cannot rescue.
+    await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', `${SKILL}Deploy carefully.\n`);
+    const theirs = await cloneWithIdentity(fixture.bare, join(fixture.root, 'theirs'));
+    const version = await resolveVersion(theirs, 'sample', undefined);
+    const store = createConfigStore(join(fixture.root, 'state'));
+    const mine = await cloneWithIdentity(fixture.bare, store.teamClone('team'));
+    // A content tree is minted locally and never pushed, so a fresh clone does not have the object
+    // their receipt names — every consumer of a version has to be able to rebuild it.
+    expect((await systemRunner.run('git', ['cat-file', '-t', version], { cwd: mine })).code).not.toBe(0);
+    expect(await readdir(await materializeVersion(store, 'team', mine, 'sample', version))).toEqual(['SKILL.md']);
+    await expect(resolveVersion(mine, 'sample', version)).resolves.toBe(version);
+    expect(await contentVersion(mine, (await git(['rev-parse', 'HEAD:skills/sample'], mine)).trim())).toBe(version);
+  });
+
+  it('answers "is this version in the repository" from history, not the object database', async () => {
+    const fixture = await bareTeam();
+    await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', SKILL);
+    await pushFromSeed(fixture.seed, 'skills/sample/evals/cases/happy.yaml', 'task: deploy\nchecks:\n  - transcript_mentions: deployed\n');
+    await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', `${SKILL}Deploy carefully.\n`);
+    const theirs = await cloneWithIdentity(fixture.bare, join(fixture.root, 'theirs'));
+    const version = await resolveVersion(theirs, 'sample', undefined);
+    const mine = await cloneWithIdentity(fixture.bare, join(fixture.root, 'mine'));
+    // An install pin travels in people/*.json, so a teammate's version reaches a clone that never
+    // minted it. Sync's blocked sub-case must keep meaning "newer than this clone, or rewritten".
+    await expect(hasSkillTree(mine, 'sample', version)).resolves.toBe(true);
+    await expect(hasSkillTree(mine, 'sample', 'b'.repeat(40))).resolves.toBe(false);
   });
 });

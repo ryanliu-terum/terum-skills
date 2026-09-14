@@ -356,13 +356,13 @@ it('returns sorted passthrough projects including empty projects, member decline
   }
   const local=await run({config:store,local:true,home:root},new ScriptedPrompter());expect(local).toMatchObject({ok:true,value:{problems:[]}});expect(local.value).not.toHaveProperty('projects');
 });
-it('uses one version child and at most eight simultaneous date children for a large listing',async()=>{
+it('uses two constant version children and at most eight simultaneous date children for a large listing',async()=>{
   const {store,clone}=await inventoryFixture();
   for(let i=0;i<19;i++){const name='skill-'+i;await mkdir(join(clone,'skills',name));await writeFile(join(clone,'skills',name,'SKILL.md'),inventorySource(name));}
   await git(['add','--all'],clone);await git(['commit','-qm','many'],clone);
   let active=0,peak=0;const calls:string[][]=[];
   const runner={run:async(command:Parameters<typeof systemRunner.run>[0],args:readonly string[],options?:Parameters<typeof systemRunner.run>[2])=>{active++;peak=Math.max(peak,active);calls.push([...args]);try{return await systemRunner.run(command,args,options);}finally{active--;}}};
-  const result=await run({config:store,runner},new ScriptedPrompter());expect(result.ok).toBe(true);expect(peak).toBeLessThanOrEqual(9);expect(peak).toBeGreaterThan(1);expect(calls.filter(c=>c[0]==='ls-tree')).toEqual([['ls-tree','HEAD:skills']]);expect(calls.filter(c=>c[0]==='log')).toHaveLength(19);
+  const result=await run({config:store,runner},new ScriptedPrompter());expect(result.ok).toBe(true);expect(peak).toBeLessThanOrEqual(9);expect(peak).toBeGreaterThan(1);expect(calls.filter(c=>c[0]==='ls-tree')).toEqual([['ls-tree','HEAD:skills'],['ls-tree','-d','-r','-t','--name-only','HEAD:skills']]);expect(calls.filter(c=>c[0]==='log')).toHaveLength(19);
 });
 
 

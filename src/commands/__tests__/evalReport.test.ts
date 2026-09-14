@@ -27,7 +27,12 @@ async function setup(newest?: string, receipts = true) {
   const store = createConfigStore(join(fixture.root, 'state'));
   const clone = await cloneWithIdentity(fixture.bare, store.teamClone('team'));
   await store.update(c => { c.teams.team = { remote: fixture.bare, handle: 'seed' }; });
-  const runner = denyingRunner([{ command: 'git', argsPrefix: ['rev-parse', '--verify', 'HEAD:skills/sample'] }], systemRunner);
+  // The whole offline read: resolve the current skill tree, then read what that tree carries to
+  // decide whether its version is the tree itself (lib/content-tree.ts). No fetch, and no write.
+  const runner = denyingRunner([
+    { command: 'git', argsPrefix: ['rev-parse', '--verify', 'HEAD:skills/sample'] },
+    { command: 'git', argsPrefix: ['ls-tree'] },
+  ], systemRunner);
   return { store, clone, tree, runner };
 }
 

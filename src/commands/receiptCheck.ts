@@ -8,6 +8,7 @@ import { fromError, failure, Result, success } from '../lib/result.js';
 import { Runner, systemRunner } from '../lib/runner.js';
 import { teamSchema } from '../lib/schema.js';
 import { readTeam, skillRecords } from '../lib/skills.js';
+import { contentVersion } from '../lib/version.js';
 
 export interface ReceiptCheckArgs extends WithForm { cwd?: string; base?: string; runner?: Runner; }
 export interface ReceiptCheckResult { endorsed: string[]; checked: number; }
@@ -61,7 +62,9 @@ async function checkSkill(input: { cwd: string; base: string; id: string; name: 
   try {
     const versionResult = await input.runner.run('git', ['rev-parse', `HEAD:skills/${input.name}`], { cwd: input.cwd });
     if (versionResult.code !== 0) return { ok: false, message: `could not resolve HEAD:skills/${input.name}: ${(versionResult.stderr || versionResult.stdout).trim()}` };
-    const version = versionResult.stdout.trim();
+    // The gate asks for a receipt at the current VERSION — the skill tree without `evals/` — so a
+    // PR that only adds eval cases keeps the receipt it already earned (Ajay, 2026-09-13).
+    const version = await contentVersion(input.cwd, versionResult.stdout.trim().toLowerCase(), input.runner);
     const root = join(input.cwd, 'evals', input.id);
     const newest = await newestReceiptAt(join(root, version));
     if (newest === undefined) {

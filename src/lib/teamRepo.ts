@@ -9,6 +9,7 @@ import { guard, GuardContext, GuardError, GuardTree } from './guard.js';
 import { explainGitAccessFailure, isGitHubRemote, normalizeRemote, remoteToGitUrl, stripRemoteCredentials } from './remote.js';
 import { CommandResult, Runner, systemRunner } from './runner.js';
 import { regenerateReadmeInTree } from './readme.js';
+import { skillContentVersions } from './content-tree.js';
 
 /**
  * §6.0: every write to the team repo goes through `safeWrite()` — a re-apply model, not a rebase.
@@ -355,7 +356,9 @@ export async function skillVersions(runner: Runner, clone: string, ref = 'HEAD')
     }
     return result;
   };
-  return skillTrees(git, ref);
+  // A version is the skill tree without `evals/` (lib/version.ts): batched here too, so the
+  // whole roster still costs one `ls-tree` plus one `for-each-ref` once a machine has seen it.
+  return skillContentVersions(clone, ref, await skillTrees(git, ref), runner);
 }
 
 /** Every direct child in `skills/` is a skill tree; one ls-tree call resolves all latest versions. */

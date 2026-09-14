@@ -142,9 +142,10 @@ it('keeps a rejected validation in Quality',async()=>{
 it('makes the eval command follow the commit choice',async()=>{
   open('#/skill/deploy-check?dialog=run-eval');
   const dialog=await screen.findByRole('dialog');
-  expect(dialog.querySelector('.terminal-hint .board-mono')).toHaveTextContent('npx -y terum-skills@latest eval deploy-check --commit');
-  fireEvent.click(within(dialog).getByRole('checkbox',{name:'Commit the receipt to the team'}));
+  // The CLI publishes by default, so the checked box is the bare command and unchecking opts out.
   expect(dialog.querySelector('.terminal-hint .board-mono')?.textContent).toBe('npx -y terum-skills@latest eval deploy-check');
+  fireEvent.click(within(dialog).getByRole('checkbox',{name:'Commit the receipt to the team'}));
+  expect(dialog.querySelector('.terminal-hint .board-mono')).toHaveTextContent('npx -y terum-skills@latest eval deploy-check --no-commit');
 });
 it.each(['global','project'])('passes the selected %s copy to Remove',async scope=>{
   const {f}=open('#/skill/deploy-check?dialog=remove',(name,value)=>{

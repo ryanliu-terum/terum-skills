@@ -676,13 +676,16 @@ it('returns only the completed attempt value after rejection', async () => {
 });
 
 
-it('skillVersions resolves every tree in one child, matching latestTree name by name', async () => {
+it('skillVersions resolves every tree in two children, matching latestTree name by name', async () => {
   const fixture = await bareTeam();
   for (const name of ['a', 'b', 'c']) await pushFromSeed(fixture.seed, 'skills/'+name+'/SKILL.md', name);
   let children = 0;
   const runner = wrapRunner(systemRunner, async (_command, _args, _options, next) => { children++; return next(); });
   const versions = await skillVersions(runner, fixture.seed);
-  expect(children).toBe(1); expect(versions.size).toBe(3);
+  // RM-10's cost rule is per SKILL, and it still holds: the roster costs two constant children —
+  // the tree listing, plus the directory listing that says which skills carry eval assets. Only a
+  // skill that actually has an `evals/` folder costs anything beyond that (lib/content-tree.ts).
+  expect(children).toBe(2); expect(versions.size).toBe(3);
   for (const [name, hash] of versions) expect(hash).toBe((await git(['rev-parse', 'HEAD:skills/'+name], fixture.seed)).trim());
   expect(versions.has('missing')).toBe(false);
 });

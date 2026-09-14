@@ -64,6 +64,8 @@ const teamCases: [string, (backend: Backend) => Promise<unknown>, string[]][] = 
   ['sync', b => b.sync({ prune: true, team: 'acme' }).done, ['sync', '--prune', '--team', 'acme']],
   ['invite', b => b.invite({ logins: ['mira', 'ravi'], team: 'acme' }).done, ['invite', '--team', 'acme', '--', 'mira', 'ravi']],
   ['eval', b => b.eval({ ref: 'a', commit: true, team: 'acme' }).done, ['eval', '--commit', '--team', 'acme', '--', 'a']],
+  // The CLI publishes by default, so an unchecked box has to say so out loud.
+  ['eval without commit', b => b.eval({ ref: 'a', commit: false, team: 'acme' }).done, ['eval', '--no-commit', '--team', 'acme', '--', 'a']],
   ['validate', b => b.validate({ ref: 'a', cwd: '/checkout', team: 'acme' }), ['validate', '--cwd', '/checkout', '--team', 'acme', '--', 'a']],
   ['team remove', b => b.team({ kind: 'remove', handle: 'mira', team: 'acme' }).done, ['team', 'remove', '--team', 'acme', '--', 'mira']],
 ];

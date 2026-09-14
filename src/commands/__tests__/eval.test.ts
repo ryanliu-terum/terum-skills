@@ -10,6 +10,12 @@ import { canonicalDigest } from '../../lib/skills.js';
 import { bareTeam, cloneWithIdentity, holdCloneLock, git, NonInteractivePrompter, pushFromSeed, ScriptedPrompter, wrapRunner } from '../../lib/__tests__/fixtures.js';
 import { receiptSchema } from '../../lib/evals/receipt.js';
 import { run } from '../eval.js';
+import { contentVersion } from '../../lib/version.js';
+
+/** The version a receipt pins: the skill tree WITHOUT `evals/` (lib/version.ts). */
+async function versionOf(clone: string, name = 'sample'): Promise<string> {
+  return contentVersion(clone, (await git(['rev-parse', `HEAD:skills/${name}`], clone)).trim().toLowerCase(), systemRunner);
+}
 
 const ID = '11111111-1111-4111-8111-111111111111';
 const skill = (body = '') => `---\nname: sample\ndescription: checks deployments\nlicense: UNLICENSED\nmetadata:\n  id: ${ID}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n${body}`;
@@ -117,6 +123,9 @@ describe('eval (§6 / IE2)', () => {
     const fixture = await bareTeam();
     await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', skill());
     await pushFromSeed(fixture.seed, 'skills/sample/evals/cases/happy.yaml', 'task: deploy\nchecks:\n  - transcript_mentions: deployed\n');
+    // The incumbent arm exists only where the SKILL ITSELF changed: a version is the skill tree
+    // without `evals/`, so the case file above leaves the prior version identical to this one.
+    await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', skill('Deploy carefully.'));
     const store = createConfigStore(join(fixture.root, 'state')); await cloneWithIdentity(fixture.bare, store.teamClone('team'));
     await store.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
     let runs = 0;
@@ -184,9 +193,9 @@ describe('eval (§6 / IE2)', () => {
     const store = createConfigStore(join(fixture.root, 'state')); await cloneWithIdentity(fixture.bare, store.teamClone('team'));
     await store.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
     const firstPrompts: string[] = []; const first = new ScriptedPrompter();
-    const baseline = await run({ ref: 'sample', config: store, agent: generationAgent(firstPrompts), k: 1, now: () => new Date('2026-09-07T12:34:56Z'), preflight: async () => success({ ccVersion: 'stub' }) }, first);
+    const baseline = await run({ ref: 'sample', config: store, commit: false, agent: generationAgent(firstPrompts), k: 1, now: () => new Date('2026-09-07T12:34:56Z'), preflight: async () => success({ ccVersion: 'stub' }) }, first);
     const secondPrompts: string[] = []; const second = new ScriptedPrompter();
-    const oldFlow = await run({ ref: 'sample', noGen: true, config: store, agent: generationAgent(secondPrompts), k: 1, now: () => new Date('2026-09-07T12:34:57Z'), preflight: async () => success({ ccVersion: 'stub' }) }, second);
+    const oldFlow = await run({ ref: 'sample', noGen: true, config: store, commit: false, agent: generationAgent(secondPrompts), k: 1, now: () => new Date('2026-09-07T12:34:57Z'), preflight: async () => success({ ccVersion: 'stub' }) }, second);
     expect(baseline).toMatchObject({ ok: true }); expect(oldFlow).toMatchObject({ ok: true });
     expect(firstPrompts.some((prompt) => prompt.includes('Generate '))).toBe(false);
     expect(first.lines).toEqual(second.lines);
@@ -208,7 +217,7 @@ describe('eval (§6 / IE2)', () => {
     const store = createConfigStore(join(fixture.root, 'state')); await cloneWithIdentity(fixture.bare, store.teamClone('team'));
     await store.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
     const io = new ScriptedPrompter(); const prompts: string[] = [];
-    await expect(run({ ref: 'sample', noGen: true, config: store, agent: generationAgent(prompts), preflight: async () => success({ ccVersion: 'stub' }) }, io)).resolves.toMatchObject({ ok: true });
+    await expect(run({ ref: 'sample', noGen: true, config: store, commit: false, agent: generationAgent(prompts), preflight: async () => success({ ccVersion: 'stub' }) }, io)).resolves.toMatchObject({ ok: true });
     expect(prompts).toEqual([]); expect(io.lines).toEqual(['verdict: NEUTRAL\nwhy: no execution comparisons ran']);
   });
 
@@ -239,7 +248,11 @@ describe('eval (§6 / IE2)', () => {
     const head = (await git(['rev-parse', 'HEAD:skills/sample'], clone)).trim();
     expect(head).not.toBe(before);
     const receipt = receiptSchema.parse(JSON.parse(await readFile(join(clone, result.value.receiptPath), 'utf8')));
-    expect(receipt.version).toBe(head);
+    // Committing eval assets moves the skill tree and NOT the version: the skill did not change,
+    // so the receipt pins the same version it would have before, and pins the assets separately.
+    expect(receipt.version).toBe(await versionOf(clone));
+    expect(receipt.version).toBe(before);
+    expect(receipt.provenance.eval_assets).toBe((await git(['rev-parse', 'HEAD:skills/sample/evals'], clone)).trim());
     expect(await git(['show', 'HEAD:skills/sample/evals/cases/happy-path.yaml'], clone)).toContain('# generated by terum-skills eval-gen — review before trusting');
     const commits = (await git(['rev-list', '--reverse', `${(await git(['rev-parse', 'HEAD~2'], clone)).trim()}..HEAD`], clone)).trim().split('\n');
     expect(commits).toHaveLength(2);
@@ -272,7 +285,8 @@ describe('eval (§6 / IE2)', () => {
     const head = (await git(['rev-parse', 'HEAD:skills/sample'], clone)).trim();
     expect(head).not.toBe(before);
     const receipt = receiptSchema.parse(JSON.parse(await readFile(join(clone, result.value.receiptPath), 'utf8')));
-    expect(receipt.version).toBe(head);
+    expect(receipt.version).toBe(await versionOf(clone));
+    expect(receipt.version).toBe(before);
     expect(await readFile(join(source, 'evals/cases/happy-path.yaml'), 'utf8')).toBe(await readFile(join(result.value.runDir, 'generated/cases/happy-path.yaml'), 'utf8'));
   });
 
@@ -299,8 +313,9 @@ describe('eval (§6 / IE2)', () => {
     if (!result.ok || result.value.receiptPath === undefined) return;
     const receipt = receiptSchema.parse(JSON.parse(await readFile(join(clone, result.value.receiptPath), 'utf8')));
     expect([...receipt.provenance.cases].sort()).toEqual(['added', 'authored']);
-    expect(receipt.version).toBe((await git(['rev-parse', 'HEAD:skills/sample'], clone)).trim());
-    expect(await git(['show', `${receipt.version}:evals/cases/added.yaml`], clone)).toContain('deploy again');
+    expect(receipt.version).toBe(await versionOf(clone));
+    expect(receipt.provenance.eval_assets).toBe((await git(['rev-parse', 'HEAD:skills/sample/evals'], clone)).trim());
+    expect(await git(['show', `${receipt.provenance.eval_assets!}:cases/added.yaml`], clone)).toContain('deploy again');
   });
 
   it('treats a declined confirmation as a run-tree-only generated run: no team-repo write, no receipt', async () => {
@@ -455,11 +470,41 @@ describe('eval-in-app completion and eligibility', () => {
     expect(receiptSchema.parse(JSON.parse(await readFile(join(result.value!.runDir, 'receipt.json'), 'utf8'))).execution_status).toBe('complete');
   });
 
-  it('writes a schema-valid local receipt without --commit', async () => {
+  it('writes a schema-valid local receipt for --no-commit', async () => {
     const store = await setup('cases');
-    const result = await run({ ref: 'sample', config: store, noGen: true, k: 1, agent: generationAgent([]), preflight: async () => success({ ccVersion: 'stub' }) }, new ScriptedPrompter());
+    const result = await run({ ref: 'sample', config: store, commit: false, noGen: true, k: 1, agent: generationAgent([]), preflight: async () => success({ ccVersion: 'stub' }) }, new ScriptedPrompter());
     expect(result).toMatchObject({ ok: true, value: { commit: null } });
     const receipt = receiptSchema.parse(JSON.parse(await readFile(join(result.value!.runDir, 'receipt.json'), 'utf8')));
     expect(receipt.provenance.runner_handle).toBe('seed');
+    expect(existsSync(join(store.teamClone('team'), 'evals', ID))).toBe(false);
+  });
+
+  it('publishes the receipt with no flag at all: running the eval is the sharing step (Ajay, 2026-09-13)', async () => {
+    const store = await setup('cases'); const io = new ScriptedPrompter();
+    const result = await run({ ref: 'sample', config: store, noGen: true, k: 1, agent: generationAgent([]), now: () => new Date('2026-09-13T12:34:56Z'), preflight: async () => success({ ccVersion: 'stub' }) }, io);
+    expect(result).toMatchObject({ ok: true, value: { commit: { ok: true, receiptPath: expect.stringContaining(`evals/${ID}/`) } } });
+    if (!result.ok || result.value.receiptPath === undefined) return;
+    const clone = store.teamClone('team');
+    expect(receiptSchema.parse(JSON.parse(await readFile(join(clone, result.value.receiptPath), 'utf8')))).toMatchObject({ skill_id: ID, version: await versionOf(clone) });
+    expect(io.lines.join('\n')).toContain(`Committed eval receipt ${result.value.receiptPath}`);
+    expect(io.asked).toEqual([]);
+  });
+
+  it('downgrades instead of refusing when the default cannot publish: --working says so and stays local', async () => {
+    const fixture = await bareTeam(); await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', skill());
+    await pushFromSeed(fixture.seed, 'skills/sample/evals/cases/happy.yaml', 'task: deploy\nchecks:\n  - transcript_mentions: deployed\n');
+    const store = createConfigStore(join(fixture.root, 'state')); await cloneWithIdentity(fixture.bare, store.teamClone('team'));
+    const source = join(fixture.root, 'working'); await mkdir(join(source, 'evals', 'cases'), { recursive: true });
+    await writeFile(join(source, 'SKILL.md'), skill());
+    await writeFile(join(source, 'evals', 'cases', 'happy.yaml'), 'task: deploy\nchecks:\n  - transcript_mentions: deployed\n');
+    const workingBaseline = await canonicalDigest(source);
+    await store.update((config) => {
+      config.teams.team = { remote: fixture.bare, handle: 'seed' };
+      config.shared[ID] = { source, team: 'team', baseline: workingBaseline };
+    });
+    const io = new ScriptedPrompter();
+    const result = await run({ ref: 'sample', working: true, config: store, noGen: true, k: 1, agent: generationAgent([]), preflight: async () => success({ ccVersion: 'stub' }) }, io);
+    expect(result).toMatchObject({ ok: true, value: { commit: null } });
+    expect(io.lines.join('\n')).toContain('This receipt stays on this machine: --working evaluates your uncommitted source');
   });
 });

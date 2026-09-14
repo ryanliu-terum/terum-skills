@@ -20,6 +20,7 @@ import { endorsedCandidates, findSkill, readPerson, readTeam, SkillRecord, skill
 import { snapshotSkillDirectory } from '../lib/placer/vendor/skillhub/skill-fingerprint.js';
 import { CloneBusy, openTeamRepo, refreshClone, RemoteAccessError, treeText, LOCK_WAIT_MS, LockWaitOptions, lockWait } from '../lib/teamRepo.js';
 import { materializeVersion } from '../lib/version.js';
+import { hasSkillTree } from '../lib/content-tree.js';
 import { autoShareRoots, reconcileShared } from './connect.js';
 import { assertCheckoutFolder, installOne, placementHome, resolveDestination, samePending, skillAtSource } from './install.js';
 import { uninstallOne } from './uninstall.js';
@@ -416,7 +417,7 @@ async function runSync(args: SyncArgs, io: Prompter | NonInteractivePrompter): P
           if (!skill) { notice(`Blocked ${path}: its skill is no longer in the repository.`); continue; }
           // §6 blocked, second sub-case: the ledger pins a tree the clone does not have (placed from a
           // newer or rewritten history). The tool must not resolve that alone: report, touch nothing.
-          if (entry.version && (await runner.run('git', ['cat-file', '-e', `${entry.version}^{tree}`], { cwd: clone })).code !== 0) {
+          if (entry.version && !(await hasSkillTree(clone, skill.name, entry.version, runner))) {
             blocked(entry.team, basename(path), `Blocked ${path}: pinned version ${entry.version.slice(0, 8)} is not in the team repository (newer than this clone, or rewritten); leaving it untouched.`);
             continue;
           }

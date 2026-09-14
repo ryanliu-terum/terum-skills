@@ -26,7 +26,7 @@ import { parseSkillFrontmatter } from '../lib/schema.js';
 import { assertSkillDirectory, sourceFiles } from '../lib/skill-source.js';
 import { findSkill, readTeam, skillRecords } from '../lib/skills.js';
 import { openTeamRepo, refreshClone, treeText, lockWait, skillVersions } from '../lib/teamRepo.js';
-import { materializeVersion, resolveVersion } from '../lib/version.js';
+import { contentVersion, materializeVersion, resolveSkillTrees } from '../lib/version.js';
 
 export interface EvalArgs extends WithForm {
   ref: string;
@@ -41,6 +41,10 @@ export interface EvalArgs extends WithForm {
   model?: string;
   judgeModel?: string;
   working?: boolean;
+  /**
+   * Tri-state on purpose: `undefined` publishes the receipt whenever the run is eligible (the
+   * default), `false` keeps it on this machine, `true` demands it and refuses a run that cannot.
+   */
   commit?: boolean;
   noGen?: boolean;
   gen?: boolean;
@@ -90,8 +94,13 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
     const runner = args.runner ?? systemRunner;
     const config = await store.read();
     const [teamName, binding] = selectTeam(config.teams, args.team, args.form);
-    const eligibility = commitEligibility({ ...args, team: teamName }, binding, args.form);
-    if (eligibility !== null) return failure(eligibility);
+    // Publishing is the default (Ajay, 2026-09-13): a finished run lands its receipt in the team
+    // repo so teammates see it without a second command. `--no-commit` keeps it local; an explicit
+    // `--commit` still REFUSES what the default merely declines, because a person who typed the
+    // flag asked for a receipt and must not be told afterwards that they did not get one.
+    const intent: CommitIntent = args.commit === true ? 'demanded' : args.commit === false ? 'declined' : 'default';
+    const identityBlock = commitBlock({ ...args, team: teamName }, binding, args.form);
+    if (identityBlock !== null && intent === 'demanded') return failure(identityBlock.demanded);
     const clone = store.teamClone(teamName);
     await refreshClone(runner, clone, { label: teamName, ...lockWait(io, args.lockWaitMs) });
     const team = await readTeam(clone);
@@ -102,7 +111,11 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
     // skill content: a concurrent sync can refresh the clone mid-run, and the receipt's tree
     // hash must pin the exact skill text AND cases evaluated (§4.1; review P1). A concurrent
     // update may make this an older (but still exact) historical receipt.
-    const originalVersion = await resolveVersion(clone, record.name, undefined, runner);
+    // A version is the skill tree WITHOUT `evals/`; the full tree is what the run READS its cases
+    // and triggers from, and what tells a confirmed generation apart from a no-op (lib/version.ts).
+    let trees = await resolveSkillTrees(clone, record.name, runner);
+    const originalVersion = trees.content;
+    const originalFull = trees.full;
     if (args.skipReceipted) {
       const directory = join('evals', record.id, args.expectedVersion ?? originalVersion);
       const existing = await newestReceiptAt(join(clone, directory));
@@ -121,7 +134,7 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
       await assertSkillDirectory(shared.source);
       candidateDir = shared.source;
     } else {
-      candidateDir = await materializeVersion(store, teamName, clone, record.name, version, runner);
+      candidateDir = await materializeVersion(store, teamName, clone, record.name, trees.full, runner);
     }
 
     // This is intentionally before preflight, trigger selection, run-tree creation, or any agent call.
@@ -141,9 +154,14 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
     let authoredCaseFiles = (await optionalDirectory(authoredCasesDir)).filter((name) => /\.ya?ml$/i.test(name)).sort();
     const authoredTrigger = candidateFiles.files.has('evals/triggers.yaml');
     const assets = { name: record.name, wantsCases, wantsTriggers, authoredCaseFiles, authoredTrigger };
-    const assetEligibility = commitEligibility(args, binding, args.form, assets);
-    if (assetEligibility !== null) return failure(assetEligibility);
-    const notice = generationCommitNotice(args, args.form, assets);
+    const assetBlock = commitBlock(args, binding, args.form, assets);
+    if (assetBlock !== null && intent === 'demanded') return failure(assetBlock.demanded);
+    // What actually decides whether this run publishes: declined by flag, blocked by the run's own
+    // shape, or on. A block under the default intent is reported once, here, before any paid work.
+    const block = identityBlock ?? assetBlock;
+    let commit = intent !== 'declined' && block === null;
+    if (block !== null && intent === 'default') io.print(block.downgraded);
+    const notice = generationCommitNotice(commit, args.form, assets, args);
     if (notice !== null) io.print(notice);
 
     const model = args.model ?? DEFAULT_MODEL;
@@ -164,7 +182,6 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
     const { generateCases, generateTriggers } = plannedGeneration(args, assets);
     let generated: GeneratedAssets = {};
     let generatedRoot = join(runDir, 'generated');
-    let commit = Boolean(args.commit);
     let announcedGenerated = false;
     if (generateCases || generateTriggers) {
       const records = await skillRecords(clone, teamName);
@@ -195,7 +212,10 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
         announceGeneratedAssets(io, wantsCases, wantsTriggers, generated, generatedRoot);
         announcedGenerated = true;
         const confirmed = io.interactive ? await io.confirm(`Commit generated eval assets for ${record.name}?`) : false;
-        if (!confirmed) commit = false;
+        if (!confirmed) {
+          commit = false;
+          io.print(`${record.name} keeps its generated assets in the run tree; this run lands no receipt, so nothing is published to ${teamName}.`);
+        }
         else {
           const shared = config.shared[record.id];
           if (shared?.team === teamName) {
@@ -226,9 +246,12 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
           const reconciled = await findSkill(clone, teamName, record.id);
           if (!reconciled) throw new Error(`Skill ${record.name} disappeared from the clone after committing its eval assets; refusing to write a receipt.`);
           record = reconciled;
-          version = await resolveVersion(clone, record.name, undefined, runner);
-          if (version === originalVersion) throw new Error(`Generated eval assets for ${record.name} were not committed; refusing to write a receipt at the pre-generation version.`);
-          candidateDir = await materializeVersion(store, teamName, clone, record.name, version, runner);
+          trees = await resolveSkillTrees(clone, record.name, runner);
+          // Committing eval assets no longer moves the version (that is the point), so the proof
+          // that they landed is the full tree — not the hash the receipt will carry.
+          if (trees.full === originalFull) throw new Error(`Generated eval assets for ${record.name} were not committed; refusing to write a receipt at the pre-generation version.`);
+          version = trees.content;
+          candidateDir = await materializeVersion(store, teamName, clone, record.name, trees.full, runner);
           candidateFiles = await sourceFiles(candidateDir);
           generatedRoot = join(candidateDir, 'evals');
           authoredCasesDir = join(candidateDir, 'evals', 'cases');
@@ -262,7 +285,7 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
       const selected = args.case === undefined ? caseFiles : caseFiles.filter((file) => file.replace(/\.ya?ml$/i, '') === args.case);
       if (args.case !== undefined && selected.length === 0) return failure(`No eval case named ${args.case} for ${record.name}.`);
       caseNames.push(...selected.map((file) => file.replace(/\.ya?ml$/i, '')));
-      const incumbent = await materializeIncumbent(store, teamName, clone, { name: record.name, id: record.id }, version, runner);
+      const incumbent = await materializeIncumbent(store, teamName, clone, { name: record.name, id: record.id }, version, runner, (line) => io.print(line));
       const opponents = incumbent === undefined ? 1 : 2;
       // Includes every selected authored case before requirement probes or setup failures.
       expectedRows = selected.length * k * opponents;
@@ -315,6 +338,7 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
         judge_model: args.judgeModel ?? model,
         k,
         cases: caseNames,
+        eval_assets: trees.evalAssets,
         arm_skill_lists: armSkillLists,
         timestamp: runAt.toISOString(),
         runner_handle: binding.handle ?? 'local',
@@ -354,30 +378,46 @@ function plannedGeneration(args: EvalArgs, assets: PlannedAssets): { generateCas
   return { generateCases, generateTriggers };
 }
 
-/** Deterministic refusal before refresh (identity) or any paid work (asset generation). */
-function commitEligibility(args: EvalArgs, binding: { handle?: string }, form: InvocationForm | undefined, assets?: PlannedAssets): string | null {
+/** Whether this run publishes: the flag the person typed, or the default (publish) when they typed none. */
+type CommitIntent = 'demanded' | 'default' | 'declined';
+/**
+ * One reason a run cannot publish, in the two voices it is heard in: `demanded` refuses a run that
+ * asked for a receipt with `--commit`, `downgraded` tells a default run what it is not getting.
+ * Both are decided before refresh (identity) or any paid work (asset generation).
+ */
+interface CommitBlock { demanded: string; downgraded: string }
+function commitBlock(args: EvalArgs, binding: { handle?: string }, form: InvocationForm | undefined, assets?: PlannedAssets): CommitBlock | null {
   if (assets === undefined) {
-    if (args.commit && !binding.handle) return `Team ${args.team} has no joined handle; run \`${invocation(form, 'team join')}\` before committing an eval receipt.`;
-    if (args.working && args.commit) return '--working --commit is refused: receipts pin committed skill trees only.';
+    if (!binding.handle) return {
+      demanded: `Team ${args.team} has no joined handle; run \`${invocation(form, 'team join')}\` before committing an eval receipt.`,
+      downgraded: `This receipt stays on this machine: team ${args.team} has no joined handle. Run \`${invocation(form, 'team join')}\` to publish receipts to the team.`,
+    };
+    if (args.working) return {
+      demanded: '--working --commit is refused: receipts pin committed skill trees only.',
+      downgraded: `This receipt stays on this machine: --working evaluates your uncommitted source, and a receipt pins a committed skill tree. Run \`${invocation(form, 'sync')}\` to share the source, then \`${invocation(form, `eval ${args.ref}`)}\` to publish a receipt for it.`,
+    };
     return null;
   }
   const { generateCases, generateTriggers } = plannedGeneration(args, assets);
   // Forced regeneration is always review-only: it must never replace an authored dataset.
-  if (args.commit && args.gen && (generateCases || generateTriggers)) {
-    return `--gen --commit is refused: forced regeneration is review-only and never replaces authored eval assets. Run \`${invocation(form, `eval ${assets.name} --gen`)}\` to review the regenerated set, or \`${invocation(form, `eval ${assets.name} --commit`)}\` without --gen.`;
-  }
+  if (args.gen && (generateCases || generateTriggers)) return {
+    demanded: `--gen --commit is refused: forced regeneration is review-only and never replaces authored eval assets. Run \`${invocation(form, `eval ${assets.name} --gen`)}\` to review the regenerated set, or \`${invocation(form, `eval ${assets.name} --commit`)}\` without --gen.`,
+    downgraded: `This receipt stays on this machine: --gen is review-only, so it never replaces the authored eval assets a published receipt would have to pin. Rerun \`${invocation(form, `eval ${assets.name}`)}\` without --gen to publish one.`,
+  };
   return null;
 }
 
 /**
- * The pre-run heads-up for a --commit run that will generate assets (also the app's Run-eval dialog
- * detail): the run pauses on one y/N before anything enters the skill (Terum 6fafb8d3).
+ * The pre-run heads-up for a publishing run that will generate assets (also the app's Run-eval
+ * dialog detail): the run pauses on one y/N before anything enters the skill (Terum 6fafb8d3).
+ * A published receipt has to pin assets the team can read, so this is the one place where
+ * publishing by default reaches into the skill — and it never does so without being asked.
  */
-function generationCommitNotice(args: EvalArgs, form: InvocationForm | undefined, assets: PlannedAssets): string | null {
+function generationCommitNotice(commit: boolean, form: InvocationForm | undefined, assets: PlannedAssets, args: EvalArgs): string | null {
   const { generateCases, generateTriggers } = plannedGeneration(args, assets);
-  if (!args.commit || (!generateCases && !generateTriggers)) return null;
+  if (!commit || (!generateCases && !generateTriggers)) return null;
   const kinds = generateCases && generateTriggers ? 'eval cases and triggers.yaml' : generateCases ? 'eval cases' : 'triggers.yaml';
-  return `--commit with generated eval assets: ${assets.name} would generate ${kinds}. This run generates the assets, shows them, and asks before committing them into the skill; declining keeps them in the run tree and lands no receipt. Run \`${invocation(form, `eval ${assets.name}`)}\` without --commit to only review them.`;
+  return `--commit with generated eval assets: ${assets.name} would generate ${kinds}. This run generates the assets, shows them, and asks before committing them into the skill; declining keeps them in the run tree and lands no receipt. Run \`${invocation(form, `eval ${assets.name} --no-commit`)}\` to only review them.`;
 }
 
 /** Product provenance is read-only and never falls back to the team clone's unrelated HEAD. */
@@ -464,17 +504,27 @@ async function endorsedCatalog(team: Awaited<ReturnType<typeof readTeam>>, recor
   return records.filter((record) => ids.has(record.id)).map((record) => `- ${record.name}: ${record.frontmatter.description}`).join('\n');
 }
 
-async function materializeIncumbent(store: ConfigStore, team: string, clone: string, skill: { name: string; id: string }, candidateTree: string, runner: Runner): Promise<string | undefined> {
+async function materializeIncumbent(store: ConfigStore, team: string, clone: string, skill: { name: string; id: string }, candidateTree: string, runner: Runner, report: (line: string) => void): Promise<string | undefined> {
   // §6.1: latest receipted tree by UTC run-id wins. IE2 does not create receipts,
   // but it must honor receipts already present in a team clone. §5.3 keys the
   // receipt tree by the skill's uuid, never its folder name.
   const receipted = await latestReceiptedTree(clone, skill.id, candidateTree);
-  if (receipted !== undefined) return materializeVersion(store, team, clone, skill.name, receipted, runner);
+  // A receipted version was minted on whichever machine ran it; when this one cannot rebuild it
+  // (lib/version.ts `recover`), the run continues without an incumbent arm rather than failing —
+  // the receipt records which arms ran, so a missing comparison is visible, not silent.
+  if (receipted !== undefined) {
+    try { return await materializeVersion(store, team, clone, skill.name, receipted, runner); }
+    catch (error) { report(`Skipping the incumbent arm: version ${receipted.slice(0, 12)} of ${skill.name} is not in this clone (${error instanceof Error ? error.message : String(error)}).`); return undefined; }
+  }
   // No prior receipt: use origin/main's prior tree, if that skill existed there.
   const previous = await runner.run('git', ['rev-parse', '--verify', `origin/main^:skills/${skill.name}`], { cwd: clone });
   const tree = previous.code === 0 ? previous.stdout.trim().toLowerCase() : undefined;
-  if (!tree || !/^[0-9a-f]{40}$/.test(tree) || tree === candidateTree) return undefined;
-  return materializeVersion(store, team, clone, skill.name, tree, runner);
+  if (!tree || !/^[0-9a-f]{40}$/.test(tree)) return undefined;
+  // Compare like with like: the prior tree is a whole skill tree, the candidate is a version. A
+  // commit that only added eval cases leaves them equal, and equal means there is nothing to run.
+  const priorVersion = await contentVersion(clone, tree, runner);
+  if (priorVersion === candidateTree) return undefined;
+  return materializeVersion(store, team, clone, skill.name, priorVersion, runner);
 }
 
 async function latestReceiptedTree(clone: string, skillId: string, candidateTree: string): Promise<string | undefined> {

@@ -4,27 +4,32 @@ import { randomUUID } from 'node:crypto';
 import { ConfigStore } from './config.js';
 import { isExistingDestination } from './placer.js';
 import { Runner, systemRunner } from './runner.js';
+import { contentVersion, latestTree, recoverContentTree } from './content-tree.js';
+
+export { contentVersion, contentVersions, resolveSkillTrees, skillContentVersions, EVAL_ASSETS_DIR } from './content-tree.js';
+export type { SkillTrees } from './content-tree.js';
 
 /** §7: resolve exactly a skill tree, never a commit or a history walk. */
 export async function resolveVersion(clone: string, name: string, version: string | undefined, runner: Runner = systemRunner): Promise<string> {
   if (version) {
     // A 39-character value is a truncated full hash, not the display short form accepted by §7.
     if (/^[0-9a-f]{39}$/i.test(version)) throw new Error(`Version ${version} for ${name} must be a full skill tree hash or a short display prefix.`);
-    const kind = await runner.run('git', ['cat-file', '-t', version], { cwd: clone });
+    let kind = await runner.run('git', ['cat-file', '-t', version], { cwd: clone });
+    // A full hash git does not have may be a version minted on another machine; re-mint and retry.
+    if (kind.code !== 0 && /^[0-9a-f]{40}$/i.test(version) && await recoverContentTree(clone, name, version.toLowerCase(), runner)) {
+      kind = await runner.run('git', ['cat-file', '-t', version], { cwd: clone });
+    }
     if (kind.code !== 0 || kind.stdout.trim() !== 'tree') throw new Error(`Version ${version} for ${name} must be a skill tree hash, not a commit, tag, or blob.`);
     const result = await runner.run('git', ['rev-parse', '--verify', version], { cwd: clone });
     const tree = result.stdout.trim();
     if (result.code !== 0 || !/^[0-9a-f]{40}$/i.test(tree)) throw new Error(`Version ${version} for ${name} must resolve to a full skill tree hash.`);
     const skill = await runner.run('git', ['cat-file', '-e', `${tree}:SKILL.md`], { cwd: clone });
     if (skill.code !== 0) throw new Error(`Version ${version} for ${name} must be a skill tree containing SKILL.md at its root.`);
-    return tree.toLowerCase();
+    // A skill tree someone pinned before this version rule, or read off a raw `git` command, still
+    // names one exact skill; it resolves to the version of the content it carries.
+    return contentVersion(clone, tree.toLowerCase(), runner);
   }
-  const expression = `HEAD:skills/${name}`;
-  const result = await runner.run('git', ['rev-parse', '--verify', expression], { cwd: clone });
-  if (result.code !== 0) throw new Error(`Could not resolve version ${version ?? 'latest'} for ${name}: ${(result.stderr || result.stdout).trim()}`);
-  const tree = result.stdout.trim();
-  if (!/^[0-9a-f]{40}$/i.test(tree)) throw new Error(`Resolved version for ${name} is not a full tree hash.`);
-  return tree.toLowerCase();
+  return contentVersion(clone, await latestTree(clone, name, runner), runner);
 }
 
 /**
@@ -40,7 +45,9 @@ export async function materializeVersion(store: ConfigStore, team: string, clone
   await mkdir(staging, { recursive: true, mode: 0o700 });
   try {
     const env = { GIT_INDEX_FILE: index };
-    const readTree = await runner.run('git', ['read-tree', tree], { cwd: clone, env });
+    let readTree = await runner.run('git', ['read-tree', tree], { cwd: clone, env });
+    // A version minted on another machine is absent here until it is re-minted (see `recover`).
+    if (readTree.code !== 0 && await recoverContentTree(clone, name, tree.toLowerCase(), runner)) readTree = await runner.run('git', ['read-tree', tree], { cwd: clone, env });
     if (readTree.code !== 0) throw new Error(`git read-tree failed: ${(readTree.stderr || readTree.stdout).trim()}`);
     const checkout = await runner.run('git', ['checkout-index', '-a', `--prefix=${staging}/`], { cwd: clone, env });
     if (checkout.code !== 0) throw new Error(`git checkout-index failed: ${(checkout.stderr || checkout.stdout).trim()}`);

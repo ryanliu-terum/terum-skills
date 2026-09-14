@@ -80,6 +80,11 @@ export const receiptSchema = z.object({
     judge_model: z.string(),
     k: z.number().int().min(1),
     cases: z.array(z.string()),
+    // Rev 9: a version is the skill tree WITHOUT `evals/` (lib/version.ts), so the eval assets a
+    // run read are pinned here instead of by the version — the `evals/` subtree hash, or null when
+    // the skill has none. Optional for forward-compat with receipts written before rev 9, where
+    // the version itself pinned the dataset.
+    eval_assets: z.string().regex(VERSION_PATTERN, 'an eval-assets digest is the 40-char lowercase tree hash').nullable().optional(),
     arm_skill_lists: z.record(z.string(), z.array(z.string()).nullable()),
     timestamp: z.string(),
     runner_handle: z.string(),
