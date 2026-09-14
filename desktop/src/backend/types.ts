@@ -149,7 +149,7 @@ export interface TeamResult {name:string;kind:TeamArgs['kind'];
  /** `move` only: what came back. */
  restored?:string[];missing?:string[];failed?:{name:string;error:string}[]}
 export interface SetupArgs {target?:string}
-export const SETUP_STEP_KEYS = ['welcome','app','role','github','team','invite','projects','existing','evals','community','hook','wrapper','done'] as const;
+export const SETUP_STEP_KEYS = ['welcome','app','role','github','team','invite','projects','existing','evals','community','hook','wrapper','editHook','done'] as const;
 export type SetupStep = typeof SETUP_STEP_KEYS[number];
 export interface SetupResult {team:string;role:'creator'|'joiner';steps?:Partial<Record<SetupStep,'done'|'skipped'|'printed'|'queued'|'batched'>>|null}
 export interface EvalArgs {team?:string;ref:string;cases?:number}

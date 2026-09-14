@@ -8,7 +8,7 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
 import { getCurrentWebview } from '@tauri-apps/api/webview';
 import { nativePrefs } from './prefs';
 import { SETUP_STEP_KEYS, FEATURE_KEYS } from '../types';
-import type { Features } from '../types';
+import type { Features, SetupStep } from '../types';
 import type { CliFrame } from './frames';
 import { openPath, openUrl, revealItemInDir } from '@tauri-apps/plugin-opener';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
@@ -58,7 +58,26 @@ export const cliPublish = z.object({ team: z.string(), id: z.string(), name: z.s
 const cliInvite = z.object({ team: z.string(), invited: z.array(z.string()), already: z.array(z.string()).default([]), failed: z.array(z.object({ login: z.string(), error: z.string() })).default([]) }).passthrough();
 const cliTeam = z.object({ team: z.string() }).passthrough();
 const cliTeamMove = z.object({ from: z.string(), to: z.string(), handle: z.string(), restored: z.array(z.string()), missing: z.array(z.string()), failed: z.array(z.object({ name: z.string(), error: z.string() })) }).passthrough();
-export const cliSetup = z.object({ role: z.enum(['creator', 'joiner']), team: z.string(), steps: z.partialRecord(z.enum(SETUP_STEP_KEYS), z.enum(['done','skipped','printed','queued','batched'])).nullish().transform(value => value ?? null) });
+const SETUP_STEP_STATES = ['done','skipped','printed','queued','batched'] as const;
+type SetupStepState = typeof SETUP_STEP_STATES[number];
+const isSetupStep = (key: string): key is SetupStep => (SETUP_STEP_KEYS as readonly string[]).includes(key);
+const isSetupStepState = (state: string): state is SetupStepState => (SETUP_STEP_STATES as readonly string[]).includes(state);
+/**
+ * Steps are read permissively, like every `.passthrough()` result above it. The frame protocol evolves
+ * additively (docs/frame-protocol.md: "Protocol stays 1 because every change is additive") and the app
+ * runs whatever CLI the machine recorded, so a CLI newer than this app WILL report steps this app has
+ * never heard of. A closed key set made that fatal: 0.17.0 added `editHook`, and every finished setup run
+ * in the app died on "the desktop app could not read the result" with the CLI's work already on disk.
+ * Unknown keys and unknown states are dropped — the board draws only the steps it knows — and the rest
+ * of the result still lands.
+ */
+const cliSetupSteps = z.record(z.string(), z.string()).nullish().transform((value): Partial<Record<SetupStep, SetupStepState>> | null => {
+  if (value === null || value === undefined) return null;
+  const steps: Partial<Record<SetupStep, SetupStepState>> = {};
+  for (const [key, state] of Object.entries(value)) if (isSetupStep(key) && isSetupStepState(state)) steps[key] = state;
+  return steps;
+});
+export const cliSetup = z.object({ role: z.enum(['creator', 'joiner']), team: z.string(), steps: cliSetupSteps });
 // §6.3: a local eval runs against a folder in the Library, which may belong to no team at all —
 // hence the nullable `team` and `id`. `shareHint` is the caller's cue to offer publishing.
 export const cliEval = z.object({ name:z.string(),runDir:z.string(),executionStatus:z.enum(['complete','partial','failed']),team:z.string().nullish().transform(v=>v??null),id:z.string().nullish().transform(v=>v??null),shareHint:z.literal(true).optional(),alreadyEvaluated:z.boolean().optional() }).passthrough();
