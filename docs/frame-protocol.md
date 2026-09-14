@@ -253,7 +253,8 @@ It then runs the same inspection and hygiene gate as `ls --local` and `validate`
 needs a person under `Still needs you (N):`. When it repaired nothing and findings remain, the run
 fails with that list; when nothing remains it says hygiene passes. The result is the same
 `{ kind: 'fix', path, destination: null, quarantined: null, installed, notices }` shape as the other
-three, and `validate`'s result carries `repairable`, the count of changes `skill fix` would make.
+three, and `validate`'s result carries `repairs`, one sentence per change `skill fix` would make, and
+`repairable`, their count.
 
 `prune` lists quarantine paths and asks `Delete <n> quarantined item(s)?`; empty quarantine asks
 nothing. Its result is `{ deleted, declined }`. It does not clean old-skills.

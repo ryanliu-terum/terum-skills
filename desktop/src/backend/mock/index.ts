@@ -285,7 +285,8 @@ export function createMockBackend(opts:{latencyMs?:number}={}):Backend & {readon
     return ok<EvalManyResult>({mode:'ran',team,skills:names,ok:done,failed:0,queued,...(stoppedAfter===undefined?{}:{stoppedAfter})});
    });
   },
-  validate:args=>read('library',()=>{const name=args.ref??design.DETAIL.name;const detail=skillByRef(name);return detail.ok?ok({name,findings:0,warnings:0,repairable:0}):fail(detail.error);}),
+  // A folder path names the skill by its last segment, as publish does above: the Fix dialog validates by path.
+  validate:args=>read('library',()=>{const name=args.ref?.split(/[\\/]/).filter(Boolean).at(-1)??design.DETAIL.name;const detail=skillByRef(name);return detail.ok?ok({name,findings:0,warnings:0,repairable:0,repairs:[]}):fail(detail.error);}),
   update:()=>read('settings',()=>ok({running:design.CLI_VERSION,latest:design.CLI_LATEST,observation:'newer',launch:'npx',description:`${design.CLI_VERSION} installed · ${design.CLI_LATEST} available`,advice:updateAdvice,lines:[`terum-skills ${design.CLI_VERSION}`,`Latest advertised release: ${design.CLI_LATEST}`,...updateAdvice]})),
   appUpdate:{
    check:()=>read('settings',()=>ok({appVersion:design.APP_VERSION,supported:false,cliVersion:design.CLI_VERSION,latest:design.CLI_LATEST,latestAt:null,probe:'skipped' as const,probeError:null,staged:null,installed:[],lastApply:null,newer:false,ppid:0,platform:'unsupported'})),
