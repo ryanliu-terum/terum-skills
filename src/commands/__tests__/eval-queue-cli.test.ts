@@ -15,9 +15,10 @@ it.each([
 });
 it('lists every queue flag in public eval help', () => {
   const help = buildProgram(async () => {}).commands.find(command => command.name() === 'eval')!.helpInformation();
-  for (const flag of ['--queue-list', '--drain', '--window', '--max', '--dequeue', '--parallel']) expect(help).toContain(flag);
+  for (const flag of ['--queue-list', '--drain', '--window', '--max', '--dequeue', '--parallel', '--batch', '--pending']) expect(help).toContain(flag);
+  expect(help).toContain('[skills...]');
 });
-it.each([[], ['--parallel', '2'], ['--drain', '--parallel', '0'], ['--drain', '--parallel', '1.5'], ['--drain', '--max', '0'], ['--queue-list', '--drain'], ['--window', 'overnight'], ['alpha', '--drain']])('fails invalid eval arguments %j through the result channel', async (...flags) => {
+it.each([[], ['--parallel', '2'], ['--drain', '--parallel', '0'], ['--drain', '--parallel', '1.5'], ['--drain', '--max', '0'], ['--queue-list', '--drain'], ['--window', 'overnight'], ['alpha', '--drain'], ['--batch', '2'], ['alpha', '--window', 'overnight', '--batch', '2'], ['alpha', 'beta', '--drain']])('fails invalid eval arguments %j through the result channel', async (...flags) => {
   const outcomes: ResultOutcome[] = [];
   const execute = createExecute({ io: new ScriptedPrompter(), stderr: () => {}, setExitCode: () => {}, result: result => outcomes.push(result) });
   await buildProgram(execute).parseAsync(['eval', ...flags], { from: 'user' });

@@ -1185,12 +1185,7 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "policy": "prose",
     "pattern": "| Evals | `validate <path\\|name>` | Deterministic safety and formatting checks, no model |"
   },
-  {
-    "file": "README.md",
-    "line": 378,
-    "policy": "prose",
-    "pattern": "| | `eval <skill>` | Evaluate the local skill with your own Claude Code login; generate only missing assets (`--no-gen` disables generation). Publish to share matching receipts. `eval --drain [--parallel n] [--window overnight] [--max n]` runs queued evals; `eval --queue-list` lists them; `eval --dequeue <team>/<skill>` removes matching queued skills |"
-  },
+
   {
     "file": "README.md",
     "line": 379,
@@ -1670,5 +1665,35 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "line": 143,
     "policy": "prose",
     "pattern": "`team migrate` is registered but terminal-only: under `--frames` it fails before doing any work and tells the"
-  }
+  },
+  {
+    "file": ".claude/skills/terum-skills/SKILL.md",
+    "line": 0,
+    "policy": "prose",
+    "pattern": "| `eval <skill> <skill>… [--batch <n>] [--parallel <n>]`, `eval --pending` | confirm the paid runs: several skills run as one batch after one agent probe; `--pending` means every shared skill with no receipt for its current version; `--batch <n>` asks before each further batch | show ✓/✗ per skill and the `Evaluated X of N` line; a declined continuation queues the rest for later |"
+  },
+  {
+    "file": ".claude/skills/terum-skills/SKILL.md",
+    "line": 0,
+    "policy": "prose",
+    "pattern": "| `eval <skill…> --window overnight\\|later`, `eval --pending --window overnight` | confirm queueing; nothing is paid for now | show the queued count; overnight items run in the desktop app between 01:00 and 05:00, later items wait for `eval --drain` |"
+  },
+  {
+    "file": "README.md",
+    "line": 0,
+    "policy": "prose",
+    "pattern": "| | `eval <skill>` | Evaluate the local skill with your own Claude Code login; generate only missing assets (`--no-gen` disables generation). Publish to share matching receipts. `eval <a> <b>… [--batch n] [--parallel n]` evaluates several skills as one batch (`--batch n` asks before each further batch); `eval <skill…> --window overnight\\|later` queues them instead, and `eval --pending` picks every shared skill without a receipt. `eval --drain [--parallel n] [--window overnight] [--max n]` runs queued evals; `eval --queue-list` lists them; `eval --dequeue <team>/<skill>` removes matching queued skills |"
+  },
+  {
+    "file": "docs/frame-protocol.md",
+    "line": 0,
+    "policy": "prose",
+    "pattern": "`eval <skill> <skill>… [--parallel n] [--batch n] [--window overnight|later] [--pending]` (past setup, 2026-09-13) runs the wizard's Now / In batches / Overnight choices as flags over any set of Library skills, or over `--pending`, the wizard's own candidate set (every shared skill with no receipt for its current version; needs a team). Several skills run as one batch after a single agent probe, `--parallel` deep (default four, never more than the batch). `--batch n` runs n at a time and asks `Continue with the next …?` before each further batch; a declined continuation queues the remainder for `later`, and a non-interactive caller runs every batch unasked. `--window` queues instead of running and never probes. The result is `{ mode: \"ran\" | \"queued\", team, skills, ok, failed, queued, stoppedAfter? }`; a run with failures is `ok:false` with that partial value, exactly like a drain. Print and `progress` frames name each skill and `progress.total` is the whole set. One skill with none of those flags is the ordinary single eval; the queue modes refuse skills, `--batch` and `--pending`."
+  },
+  {
+    "file": ".claude/skills/terum-skills/SKILL.md",
+    "line": 0,
+    "policy": "prose",
+    "pattern": "- Several skills at once: `eval <a> <b>…` runs them as one batch after one preflight (`--parallel <n>`, default"
+  },
 ];

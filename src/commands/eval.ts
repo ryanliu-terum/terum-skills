@@ -1,7 +1,7 @@
 import { runEvalBatch, EVAL_PARALLEL_DEFAULT, EVAL_LOCK_WAIT_MS } from '../lib/evals/batch.js';
-import { dequeueEvals, queueKey, readEvalQueue, updateEvalQueue, withEvalQueueLock, type EvalQueueItem } from '../lib/evals/queue.js';
+import { dequeueEvals, enqueueEvals, queueKey, readEvalQueue, updateEvalQueue, withEvalQueueLock, type EvalQueueItem } from '../lib/evals/queue.js';
 import { packageRoot } from '../lib/package-root.js';
-import type { WithForm } from '../lib/invocation.js';
+import { invocation, type WithForm } from '../lib/invocation.js';
 /** Local-only orchestration for the eval engine. Receipt commits deliberately begin in IE3. */
 import { mkdir, mkdtemp, readFile, readdir, rename, rm, rmdir, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
@@ -615,6 +615,8 @@ export async function queueItemsFor(
 export interface EvalQueueArgs extends Omit<EvalArgs, 'ref'> {
   ref?: string;
   parallel?: number;
+  /** Batch-run flags; queue modes refuse them so a typo never silently drains. */
+  batch?: number; pending?: boolean;
   queueList?: boolean;
   drain?: boolean;
   dequeue?: string;
@@ -637,8 +639,9 @@ export async function runQueue(args: EvalQueueArgs, io: Prompter): Promise<Resul
     if (args.window !== undefined && args.window !== 'overnight') return failure('--window must be overnight.');
     if (args.max !== undefined && (!Number.isSafeInteger(args.max) || args.max < 1)) return failure('--max must be a positive integer.');
     if (args.parallel !== undefined && (!Number.isSafeInteger(args.parallel) || args.parallel < 1)) return failure('--parallel must be a positive integer.');
-    if (modes === 0) return failure('Provide a skill, --queue-list, --drain, or --dequeue.');
+    if (modes === 0) return failure('Provide a skill (or several), --pending, --queue-list, --drain, or --dequeue.');
     if (args.ref !== undefined) return failure('Queue modes do not accept a skill argument.');
+    if (args.batch !== undefined || args.pending) return failure('Queue modes do not accept --batch or --pending.');
     if (args.noGen || args.case !== undefined || args.triggersOnly || args.executionOnly || args.expectedVersion !== undefined || args.team !== undefined) return failure('Queue modes use the queued team and the full committed skill; per-skill selection flags are unavailable.');
     const store = args.config ?? createConfigStore();
     if (args.queueList || args.dequeue !== undefined) {
@@ -691,5 +694,133 @@ export async function runQueue(args: EvalQueueArgs, io: Prompter): Promise<Resul
       const value = { items: (await readEvalQueue(store.root)).items, attempted, completed, failures };
       return failures.length ? failureWith(value, `${failures.length} queued evals failed; they remain queued.`) : success(value);
     });
+  } catch (error) { return fromError(error); }
+}
+
+/**
+ * `eval a b c` past setup: the wizard's Now / In batches / Overnight choices as flags, over any set of Library
+ * skills (or `--pending`, the wizard's own candidate set). One agent probe for the whole run; `--batch` asks
+ * before each further batch and queues the rest for later when declined, exactly as the wizard does.
+ */
+export interface EvalManyArgs extends Omit<EvalArgs, 'ref'> {
+  /** Skills by name or path. */
+  refs: readonly string[];
+  /** Add every shared skill with no receipt for its current version (needs a team). */
+  pending?: boolean;
+  /** Queue for that window instead of running: `overnight` (the app drains it) or `later` (a manual drain). */
+  window?: string;
+  /** Run this many at a time and ask before each further batch. */
+  batch?: number;
+  /** Concurrency within a batch (default EVAL_PARALLEL_DEFAULT, never more than the batch). */
+  parallel?: number;
+  /** Test seam; production always reuses the ordinary eval engine. */
+  evaluate?: typeof run;
+}
+export interface EvalManyResult {
+  mode: 'ran' | 'queued';
+  team: string | null;
+  /** The resolved skills, each once, in the order they were asked for. */
+  skills: string[];
+  ok: number;
+  failed: number;
+  /** Items placed on the queue: every skill under --window, or the remainder after a declined batch. */
+  queued: EvalQueueItem[];
+  /** Set when a declined "Continue?" stopped the run: how many skills had been attempted by then. */
+  stoppedAfter?: number;
+}
+export async function runMany(args: EvalManyArgs, io: Prompter): Promise<Result<EvalManyResult>> {
+  try {
+    if (args.window !== undefined && (args.batch !== undefined || args.parallel !== undefined)) return failure('--batch and --parallel run evals now; --window queues them instead.');
+    if (args.window !== undefined && args.window !== 'overnight' && args.window !== 'later') return failure('--window must be overnight or later.');
+    if (args.batch !== undefined && (!Number.isSafeInteger(args.batch) || args.batch < 1)) return failure('--batch must be a positive integer.');
+    if (args.parallel !== undefined && (!Number.isSafeInteger(args.parallel) || args.parallel < 1)) return failure('--parallel must be a positive integer.');
+    if (args.refs.length === 0 && !args.pending) return failure('Provide at least one skill, or --pending.');
+    const store = args.config ?? createConfigStore(), runner = args.runner ?? systemRunner, home = args.home ?? homedir();
+    const config = await store.read();
+    // Same team rule as a single eval (§6.3 / D42): best-effort, and a teamless machine evaluates single-arm.
+    const selected = args.team !== undefined || Object.keys(config.teams).length > 0 ? selectTeam(config.teams, args.team, args.form) : null;
+    const teamName = selected === null ? null : selected[0];
+    if (args.pending && teamName === null) return failure('--pending needs a team; this machine has none.');
+    // Every explicit skill is resolved before any paid work: a name no root holds fails the request here, never a batch halfway through.
+    const skills: { ref: string; name: string; path: string }[] = [];
+    const add = (ref: string, local: { name: string; path: string }) => { if (!skills.some(skill => skill.path === local.path)) skills.push({ ref, name: local.name, path: local.path }); };
+    for (const ref of args.refs) {
+      const local = await resolveLibrarySkill(home, config, store.root, ref);
+      if (!local) return failure(`No local skill folder named \`${ref}\` in your library; install it from the marketplace first.`);
+      const unusable = unusableSkillFolder(local);
+      if (unusable !== undefined) return failure(unusable);
+      add(ref, local);
+    }
+    if (args.pending && teamName !== null) {
+      const clone = store.teamClone(teamName);
+      await refreshClone(runner, clone, { label: teamName, ...lockWait(io, args.lockWaitMs) });
+      const scan = await skillsWithoutReceipt(clone, teamName, line => io.print(line));
+      // The wizard's rule: a candidate with no copy on this machine is reported and left out, never run to fail.
+      for (const candidate of scan.pending) {
+        const local = await resolveLibrarySkill(home, config, store.root, candidate.name);
+        if (!local) { io.print(`${candidate.name}: no copy of this skill on this machine, so it cannot be evaluated; install it first.`); continue; }
+        const unusable = unusableSkillFolder(local);
+        if (unusable !== undefined) { io.print(`${candidate.name}: ${unusable}`); continue; }
+        add(candidate.name, local);
+      }
+      if (scan.pending.length === 0) io.print(scan.shared === 0 ? 'The team has no shared skills yet; nothing to evaluate.'
+        : scan.versionProblem !== undefined ? 'Could not read the current skill versions, so no shared skill could be checked for a receipt.'
+        : scan.considered === 0 ? 'No shared skill could be checked for a receipt; see the lines above.'
+        : 'Every shared skill already has an eval receipt for its current version.');
+    }
+    const names = skills.map(skill => skill.name);
+    const queue = async (refs: readonly string[], window: 'overnight' | 'later'): Promise<EvalQueueItem[]> => {
+      const items = await queueItemsFor({ home, config, stateRoot: store.root, ...(teamName === null ? {} : { team: teamName }), names: refs, requestedAt: new Date().toISOString(), window }, line => io.print(line));
+      if (items.length === 0) { io.print('None of those skills has a copy on this machine, so none could be queued.'); return items; }
+      await enqueueEvals(store.root, items, line => io.print(line));
+      const count = `${items.length} eval${items.length === 1 ? '' : 's'}`, drain = `\`${invocation(args.form, 'eval --drain')}\``;
+      if (window === 'overnight') io.print(`Queued ${count} for overnight: the app runs them in parallel between 01:00 and 05:00 while it is open and idle. Run them now with ${drain}.`);
+      else io.print(`Queued ${count} for later. Run ${items.length === 1 ? 'it' : 'them'} with ${drain}.`);
+      return items;
+    };
+    if (args.window === 'overnight' || args.window === 'later') {
+      const queued = await queue(skills.map(skill => skill.ref), args.window);
+      return success({ mode: 'queued', team: teamName, skills: names, ok: 0, failed: 0, queued });
+    }
+    if (skills.length === 0) return success({ mode: 'ran', team: teamName, skills: [], ok: 0, failed: 0, queued: [] });
+    // One paid probe for the whole run, reused by every eval (the wizard's rule).
+    const probe = await (args.preflight ?? systemPreflight)(args.model);
+    if (!probe.ok) return failure(probe.error);
+    const reuse: EvalArgs['preflight'] = async () => probe;
+    const width = args.batch ?? skills.length, parallel = Math.min(args.parallel ?? EVAL_PARALLEL_DEFAULT, width);
+    const byPath = new Map(skills.map(skill => [skill.path, skill]));
+    let ok = 0, failed = 0, queued: EvalQueueItem[] = [], stoppedAfter: number | undefined;
+    io.print(`Evaluating ${skills.length} skill${skills.length === 1 ? '' : 's'}, ${parallel} at a time…`);
+    for (let offset = 0; offset < skills.length; offset += width) {
+      if (offset > 0 && io.interactive) {
+        const remaining = skills.length - offset;
+        if (!(await io.confirm(`Continue with the next ${Math.min(width, remaining)}? (${offset} of ${skills.length} done, ${remaining} left)`))) {
+          queued = await queue(skills.slice(offset).map(skill => skill.ref), 'later');
+          stoppedAfter = offset;
+          break;
+        }
+      }
+      const batch = await runEvalBatch({
+        // `id` carries the folder path (unique after the dedupe above); `version` is only a label here.
+        items: skills.slice(offset, offset + width).map(skill => ({ id: skill.path, name: skill.name, version: '' })),
+        parallel,
+        io: {
+          interactive: io.interactive, ...(io.channel === undefined ? {} : { channel: io.channel }),
+          print: line => io.print(line), confirm: io.confirm.bind(io), text: io.text.bind(io), select: io.select.bind(io),
+          progress: update => io.progress?.({ ...update, current: offset + (update.current ?? 0), total: skills.length }),
+        },
+        run: (candidate, captured) => (args.evaluate ?? run)({
+          form: args.form, ref: byPath.get(candidate.id)!.ref, home, config: store, runner, preflight: reuse, lockWaitMs: EVAL_LOCK_WAIT_MS,
+          ...(teamName === null ? {} : { team: teamName }),
+          ...(args.k === undefined ? {} : { k: args.k }), ...(args.model === undefined ? {} : { model: args.model }), ...(args.judgeModel === undefined ? {} : { judgeModel: args.judgeModel }),
+          ...(args.noGen ? { noGen: true } : {}), ...(args.triggersOnly ? { triggersOnly: true } : {}), ...(args.executionOnly ? { executionOnly: true } : {}), ...(args.case === undefined ? {} : { case: args.case }),
+          ...(args.agent === undefined ? {} : { agent: args.agent }), ...(args.now === undefined ? {} : { now: args.now }),
+        }, captured),
+      });
+      ok += batch.ok; failed += batch.failed;
+    }
+    io.print(`Evaluated ${ok} of ${skills.length}; ${failed} failed.`);
+    const value: EvalManyResult = { mode: 'ran', team: teamName, skills: names, ok, failed, queued, ...(stoppedAfter === undefined ? {} : { stoppedAfter }) };
+    return failed ? failureWith(value, `${failed} of ${skills.length} eval${skills.length === 1 ? '' : 's'} failed.`) : success(value);
   } catch (error) { return fromError(error); }
 }

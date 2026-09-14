@@ -66,6 +66,8 @@ The user's terminal answers the CLI's questions; the skill answers none of them.
 | `login --set <key=value>` | confirm the identity change; keys are `name`, `email`, `default-handle`; repeat the flag for multiple fields | show the identity notice; published versions keep their recorded author |
 | `team workflow-update --print` | nothing | show the workflow scaffold and its manual migration instruction; this does not migrate the team's skill layout |
 | `eval <skill> [--k <n>] [--triggers-only] [--execution-only] [--case <stem>] [--model <m>] [--judge-model <m>] [--no-gen]` | see the eval section | see the eval section |
+| `eval <skill> <skill>… [--batch <n>] [--parallel <n>]`, `eval --pending` | confirm the paid runs: several skills run as one batch after one agent probe; `--pending` means every shared skill with no receipt for its current version; `--batch <n>` asks before each further batch | show ✓/✗ per skill and the `Evaluated X of N` line; a declined continuation queues the rest for later |
+| `eval <skill…> --window overnight\|later`, `eval --pending --window overnight` | confirm queueing; nothing is paid for now | show the queued count; overnight items run in the desktop app between 01:00 and 05:00, later items wait for `eval --drain` |
 | `eval-report <skill> [--team <team>]` | nothing | show committed receipts and local run history for a skill in the team clone; no fetch |
 | `eval --queue-list` | nothing | show the local queue |
 | `eval --dequeue <skill>` | confirm removal from the queue | show remaining items; a team-qualified selector is also accepted |
@@ -162,6 +164,10 @@ Rules:
 - Editing bytes changes the digest used for the Library's score. Installed receipts keep their
   original runner attribution; they are not proof this user ran the eval.
 - Model flags pass through unchanged (`--model`, `--judge-model`; default `sonnet`).
+- Several skills at once: `eval <a> <b>…` runs them as one batch after one preflight (`--parallel <n>`, default
+  four); `--batch <n>` asks before each further batch, and a declined continuation queues the rest for later.
+  `--window overnight|later` queues instead of running (no paid work) and `--pending` selects every shared skill
+  with no receipt for its current version. Confirm the paid runs once for the whole batch, the same way.
 
 ## What this skill never does
 
