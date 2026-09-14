@@ -1,9 +1,9 @@
-import { mkdir, realpath, readFile, symlink, writeFile } from 'node:fs/promises';
+import { cp, mkdir, realpath, readFile, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { createConfigStore } from '../../lib/config.js';
 import { configSchema } from '../../lib/schema.js';
-import { ScriptedPrompter, temporaryDirectory } from '../../lib/__tests__/fixtures.js';
+import { bareTeam, cloneWithIdentity, pushFromSeed, ScriptedPrompter, temporaryDirectory } from '../../lib/__tests__/fixtures.js';
 import { run } from '../project.js';
 
 async function fixture() {
@@ -32,6 +32,55 @@ describe('project registry (§7.1)', () => {
     const alias = join(args.home, 'alias'); await symlink(root, alias);
     expect(await run({ ...args, kind: 'add', path: alias }, new ScriptedPrompter())).toMatchObject({ ok: true, value: { path: root } });
     expect((await args.config.read()).projects).toMatchObject([{ root, label: 'plain' }]);
+  });
+  it('returns a root-scoped reconcile list after a new frame-mode add and excludes other projects', async () => {
+    const args = await fixture();
+    const team = await bareTeam();
+    const id = '92929292-9292-4292-8292-929292929292';
+    const source = `---\nname: matching\ndescription: matching\nlicense: UNLICENSED\nmetadata:\n  id: ${id}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`;
+    await pushFromSeed(team.seed, 'skills/matching/v1/SKILL.md', source);
+    const clone = await cloneWithIdentity(team.bare, args.config.teamClone('team'));
+    const other = join(args.home, 'other');
+    for (const root of [args.root, other]) {
+      const target = join(root, '.claude', 'skills', 'matching');
+      await mkdir(join(root, '.claude', 'skills'), { recursive: true });
+      await cp(join(clone, 'skills', 'matching', 'v1'), target, { recursive: true });
+    }
+    await args.config.update(config => {
+      config.teams.team = { remote: team.bare, handle: 'seed' };
+      config.projects = [{ root: other, label: 'other' }];
+    });
+    const io = Object.assign(new ScriptedPrompter(), { channel: 'frames' as const });
+    const result = await run({ ...args, kind: 'add', path: args.root }, io);
+    expect(result).toMatchObject({ ok: true, value: { added: true, reconcile: { identical: [{ path: join(args.root, '.claude', 'skills', 'matching') }] } } });
+    expect(result.ok && 'reconcile' in result.value && result.value.reconcile?.identical).toHaveLength(1);
+    expect(result.ok && 'reconcile' in result.value && result.value.reconcile?.identical.some(row => row.path.startsWith(other))).toBe(false);
+  });
+  it('lists instead of asking when the terminal is not interactive', async () => {
+    const args = await fixture();
+    const team = await bareTeam();
+    const id = '93939393-9393-4393-8393-939393939393';
+    await pushFromSeed(team.seed, 'skills/matching/v1/SKILL.md', `---\nname: matching\ndescription: matching\nlicense: UNLICENSED\nmetadata:\n  id: ${id}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
+    const clone = await cloneWithIdentity(team.bare, args.config.teamClone('team'));
+    const target = join(args.root, '.claude', 'skills', 'matching');
+    await mkdir(join(args.root, '.claude', 'skills'), { recursive: true });
+    await cp(join(clone, 'skills', 'matching', 'v1'), target, { recursive: true });
+    await args.config.update(config => { config.teams.team = { remote: team.bare, handle: 'seed' }; });
+    const io = new ScriptedPrompter([], [], false);
+    const result = await run({ ...args, kind: 'add', path: args.root }, io);
+    expect(result).toMatchObject({ ok: true, value: { added: true } });
+    expect(result.ok && 'reconcile' in result.value).toBe(false);
+    expect(io.asked).toEqual([]);
+    expect(io.lines).toContain(`  matching — matches Version 1 (${target})`);
+  });
+  it('does not scan when project add reports added false', async () => {
+    const args = await fixture();
+    expect((await run({ ...args, kind: 'add', path: args.root }, new ScriptedPrompter())).ok).toBe(true);
+    await args.config.update(config => { config.teams.team = { remote: '/unused/team.git', handle: 'seed' }; });
+    const reconcile = vi.fn();
+    const result = await run({ ...args, kind: 'add', path: args.root, reconcile: reconcile as never }, new ScriptedPrompter());
+    expect(result).toMatchObject({ ok: true, value: { added: false } });
+    expect(reconcile).not.toHaveBeenCalled();
   });
   it.each(['state', 'home', 'missing'])('refuses %s without writing', async (kind) => {
     const args = await fixture(); await args.config.update(() => undefined);

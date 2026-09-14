@@ -75,6 +75,37 @@ it.each(teamCases)('orders %s as verb, flags, separator, positionals', async (_n
   expect(f.spawns.map(s => s.args)).toEqual([...reads, argv]);
 });
 
+it('runs reconcile --list once and preserves every result group', async () => {
+  const value = {
+    identical: [{ path: '/home/.claude/skills/a', name: 'a', team: 'acme', skillId: 'id-a', version: 'v2' }],
+    differing: [{ path: '/home/.claude/skills/b', name: 'b', team: 'acme', skillId: null, teamVersion: 'v3', nextVersion: 'v4', sameId: false, teamAuthor: 'mira' }],
+    renamed: [{ path: '/home/.claude/skills/old-a', name: 'old-a', team: 'acme', skillId: 'id-a', version: 'v2', teamName: 'a' }],
+    adopted: [], published: [],
+  };
+  const f = replay(value);
+  expect(await createTauriBackend(f.bridge).reconcile.list()).toEqual({ ok: true, value });
+  expect(f.spawns.map(spawn => spawn.args)).toEqual([['reconcile', '--list']]);
+});
+
+it('preserves an optional project-add reconcile result', async () => {
+  const reconcile = { identical: [{ path: '/work/.claude/skills/a', name: 'a', team: 'acme', skillId: 'id-a', version: 'v1' }], differing: [], renamed: [], adopted: [], published: [] };
+  const f = replay({ path: '/work', label: 'work', added: true, reconcile });
+  expect(await createTauriBackend(f.bridge).projects.add('/work').done).toEqual({ ok: true, value: { path: '/work', label: 'work', added: true, reconcile } });
+  expect(f.spawns.map(spawn => spawn.args)).toEqual([['project', 'add', '--', '/work']]);
+});
+
+it('adopts through the install flag and derives the returned scope and name from ls --local', async () => {
+  const path = '/home/.claude/skills/a';
+  const f = fakeBridge((args, emit) => {
+    const value = args[0] === 'ls'
+      ? { roster: [], skills: [], problems: [], local: [{ root: '/home/.claude/skills', scope: 'global', rows: [], problems: [] }] }
+      : { id: 'id-a', team: 'acme', path, version: 'v2', profiled: false, adopted: true };
+    emit({ kind: 'stdout', line: JSON.stringify({ t: 'result', verb: args[0], ok: true, exitCode: 0, value }) });
+  });
+  expect(await createTauriBackend(f.bridge).install({ team: 'acme', adopt: path }).done).toEqual({ ok: true, value: [{ id: 'id-a', name: 'a', scope: 'Global', path, version: 'v2', profiled: false }] });
+  expect(f.spawns.map(spawn => spawn.args)).toEqual([['ls', '--local'], ['install', '--team', 'acme', '--adopt', path]]);
+});
+
 it('passes the stored eval defaults as flags and omits the unset or sentinel ones', async () => {
   const f = replay(undefined, false);
   const b = createTauriBackend(f.bridge);
@@ -399,7 +430,16 @@ function peopleReplay(change?: (frame: Record<string, unknown>, name: string) =>
   });
 }
 it('S7b replays rebuilt CLI roster/catalog with real handles, role, projects and installs', async () => {
-  const f = peopleReplay(), backend = createTauriBackend(f.bridge);
+  // The recording predates §8.5's amendment (2026-09-13) and carries `profile: []` for everyone, which
+  // under the one-list rule would make every member's page empty and prove nothing about the limb. Mira's
+  // profile is projected from her own recorded installs — the shape a machine that accepted install's
+  // profile prompt writes — so the assertion below still tests the join rather than the recording's age.
+  const f = peopleReplay((frame, name) => {
+    if (name !== 'ls' || frame.t !== 'result') return;
+    const value = frame.value as { people?: { handle: string; installed: { id: string }[]; profile: unknown[] }[]; skills?: { id: string; name: string; latest?: string | null }[] };
+    const mira = value.people?.find(person => person.handle === 'mira');
+    if (mira) mira.profile = mira.installed.map(entry => ({ id: entry.id, name: value.skills?.find(row => row.id === entry.id)?.name ?? 'unknown', version: value.skills?.find(row => row.id === entry.id)?.latest ?? 'v1', added: '2026-09-12', via: 'install' }));
+  }), backend = createTauriBackend(f.bridge);
   const roster = await backend.roster();
   expect(roster.ok).toBe(true);
   expect(roster.value?.members.map(member => member.handle)).toEqual(['mira', 'ravi', 'seed']);
@@ -648,7 +688,10 @@ it('reports an unidentifiable same-named folder as unknown rather than absent',a
  const current=await createTauriBackend(installedReplay().bridge).skill({ref:'deploy-check'});
  expect(current.value).toMatchObject({installed:'placed',unidentifiedLocal:null});
 });
-it('copies recorded member installs rather than authored skills',async()=>{
+// §8.5 (amended 2026-09-13): the bulk copy follows the member's PROFILE list, not their authored set —
+// and not their raw `installed[]` either. The fixture projects the recorded installs into a profile,
+// which is what a machine that accepted install's profile prompt records.
+it('copies the member profile list rather than authored skills',async()=>{
  const none=await createTauriBackend(installedReplay('on-disk-only','none').bridge).catalog();
  expect(none.value?.people[0]).toMatchObject({skills:['deploy-check'],installable:[],onDisk:[0,0]});
  const installed=await createTauriBackend(installedReplay('on-disk-only','installed').bridge).catalog();
@@ -1103,7 +1146,7 @@ it.each([['v2','v3'],['v2',null],[null]])('does not invent a single installed ve
 it('reads profile versions separately from automatic installs and gets roster facts from people[]', async () => {
  const result = await createTauriBackend(versionedCatalog().bridge).catalog();
  if (!result.ok) throw new Error(result.error);
- expect(result.value.people[0]).toMatchObject({ name:'Profile reader',role:'Maintainer',projects:['Global'],profileVersions:{'deploy-check':'v2'},buckets:[['On their profile',['deploy-check']],['Installed',['deploy-check','tdd']]] });
+ expect(result.value.people[0]).toMatchObject({ name:'Profile reader',role:'Maintainer',projects:['Global'],profileVersions:{'deploy-check':'v2'},buckets:[['On their profile',['deploy-check']]], installable:['deploy-check'] });
 });
 it('keeps B4 marketplace annotations neutral on Library cards pending B5', async () => {
  const result = await createTauriBackend(versionedCatalog().bridge).library({scope:{kind:'global'}});
@@ -1133,7 +1176,7 @@ it('summarizes a Library card from the body, falling back to frontmatter, as the
  expect(library.value?.skills.map(card=>[card.name,card.desc])).toEqual([['bodied','Use this when a deploy needs a checklist.'],['bare','frontmatter only'],['broken','/library/broken · SKILL.md name x does not equal folder broken']]);
  expect(await backend.localSkill({path:'/library/bodied'})).toMatchObject({ok:true,value:{desc_long:'Use this when a deploy needs a checklist.'}});
 });
-it.each(['move','rename','delete','fix'] as const)('maps the skillFile.%s seam and invalidates local reads',async kind=>{
+it.each(['move','copy','rename','delete','fix'] as const)('maps the skillFile.%s seam and invalidates local reads',async kind=>{
  const bare=kind==='delete'||kind==='fix';
  const value={kind,path:'/library/a',destination:bare?null:'/library/b',quarantined:null,installed:false,notices:[]},f=replay(value),backend=createTauriBackend(f.bridge),changed=vi.fn();backend.subscribe(changed);
  const result=await (kind==='delete'||kind==='fix'?backend.skillFile[kind]({path:value.path}):backend.skillFile[kind]({path:value.path,to:'b'})).done;

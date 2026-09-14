@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { setupSession } from '../setup-session';
+import { askedSetupStep, printedSetupStep, setupSession } from '../setup-session';
 import { createTauriBackend } from '../tauri';
 import { browserPrefs } from '../prefs';
 import { fakeBridge, STATE } from '../tauri/__tests__/fake-bridge';
@@ -45,4 +45,21 @@ it('preserves the terminal result if preference flushing rejects',async()=>{
  const {backend}=failedSetup();const withFlush={...backend,prefs:{...backend.prefs,flush:async()=>{throw new Error('Flush failed.');}}};
  const session=setupSession(withFlush,{writtenAt:STATE.writtenAt,intent:'setup'});await session.start(async()=>true);
  expect(session.snapshot()).toMatchObject({outcome:'failed',result:{ok:false,error:'Setup failed.'},persistenceError:'Flush failed.'});
+});
+
+it.each([
+ ['Checking your library against the team…','existing'],
+ ["3 of your skills match the team's exactly; 2 share a name with a team skill but differ.",'existing'],
+ ['Recorded 2 installs. Published 1 skill.','existing'],
+ ['Published 1 skill.','existing'],
+ ['Nothing to reconcile: none of your skills match a team skill by bytes or by name.','existing'],
+] as const)('maps printed setup reconciliation prefix %s', (line, step) => {
+ expect(printedSetupStep(line)).toBe(step);
+});
+
+it.each([
+ ['Record decision-walk as installed (Version 4)?','existing'],
+ ["Publish your version of tdd as Version 3 of the team's tdd?",'existing'],
+] as const)('maps asked setup reconciliation prefix %s', (question, step) => {
+ expect(askedSetupStep(question)).toBe(step);
 });

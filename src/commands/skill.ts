@@ -7,7 +7,7 @@ import YAML from 'yaml';
 import { createConfigStore, type ConfigStore } from '../lib/config.js';
 import { writeJsonPrivate } from '../lib/fs.js';
 import { canonicalLedger, localSkillRoots } from '../lib/local-skills.js';
-import { appendExclude, lockTarget, moveDirectory, moveToQuarantine } from '../lib/placer.js';
+import { appendExclude, lockTarget, moveDirectory, moveToQuarantine, place } from '../lib/placer.js';
 import { isSkillsRoot } from '../lib/placer/agent-paths.js';
 import { projectPath } from '../lib/projects.js';
 import { snapshotSkillDirectory } from '../lib/placer/vendor/skillhub/skill-fingerprint.js';
@@ -23,7 +23,7 @@ import { inspectSkillSource, scanSkillFolder, sourceFiles } from '../lib/skill-s
 import type { WithForm } from '../lib/invocation.js';
 import { uninstallMany } from './uninstall.js';
 
-export interface SkillArgs extends WithForm { kind: 'move' | 'rename' | 'delete' | 'fix'; path: string; to?: string; config?: ConfigStore; home?: string; runner?: Runner }
+export interface SkillArgs extends WithForm { kind: 'move' | 'copy' | 'rename' | 'delete' | 'fix'; path: string; to?: string; config?: ConfigStore; home?: string; runner?: Runner }
 export interface SkillResult { kind: SkillArgs['kind']; path: string; destination: string | null; quarantined: string | null; installed: boolean; notices: string[] }
 interface Operation { source: string; ledgerPath?: string; destination: string | null; placement?: Config['placements'][string]; fingerprint: string | null; kept: string | null; destinationExisted: boolean; done: boolean; result?: SkillResult }
 
@@ -137,7 +137,7 @@ export async function run(args: SkillArgs, io: Prompter): Promise<Result<SkillRe
     if (args.kind === 'rename') {
       if (!args.to || !isSkillName(args.to)) throw new Error('The new name must be 1–64 lowercase alphanumerics or single hyphens.');
       destination = join(parent, args.to);
-    } else if (args.kind === 'move') {
+    } else if (args.kind === 'move' || args.kind === 'copy') {
       // hybrid review r1 (high): `config.projects[].root` is stored realpath'd (addLibraryProject) while
       // `--to` arrives verbatim, so a registered project reached through a symlink (`~/dev -> /Volumes/…`)
       // was refused as unregistered. Match the way the source root is matched above: literal first, then
@@ -219,11 +219,26 @@ export async function run(args: SkillArgs, io: Prompter): Promise<Result<SkillRe
         }
         await mkdir(dirname(dest), { recursive: true });
         if (args.kind === 'rename') await rename(op.source, dest);
+        // D18 for copy: the source stays where it is, so the bytes go through `place` — the same
+        // staged copy-then-rename `install` uses, which never exposes a partial folder at the
+        // destination. A journaled re-run finds its own finished copy already there and does nothing.
+        else if (args.kind === 'copy') {
+          if (!(await present(dest))) {
+            // No `projectRoot`: `.git/info/exclude` is for folders Terum placed from the team, and a
+            // copy of the user's own skill is theirs to commit or not — `move` leaves it alone too.
+            const copied = await place(op.source, targetRoot.root, name, { quarantineRoot: join(store.root, 'quarantine') });
+            notices.push(...copied.notices);
+          }
+        }
         else await moveDirectory(op.source, dest);
       }
       if (!(await present(dest))) throw new Error(`${dest} is missing; the operation could not be recovered.`);
       if (args.kind === 'rename') await rewriteName(dest);
-      await store.update(c => {
+      // A copy adds a folder and takes nothing away: the source keeps its ledger row, and the new
+      // folder gets none. It is a plain Library folder the user now owns in a second root — the same
+      // shape a hand-written skill has. Its `metadata.id` is the source's, so `ls` and the app still
+      // join the two to one skill and `sync` sees a known id (a no-op), not a second skill to share.
+      if (args.kind !== 'copy') await store.update(c => {
         if (op!.placement) c.placements[dest] = op!.placement;
         delete c.placements[source];
         if (op!.ledgerPath && op!.ledgerPath !== dest) delete c.placements[op!.ledgerPath];
@@ -231,7 +246,7 @@ export async function run(args: SkillArgs, io: Prompter): Promise<Result<SkillRe
       });
       if (targetRoot.repoRoot && op.kept) await appendExclude(targetRoot.repoRoot, '.claude/old-skills/', runner);
       if (op.kept) notices.push(`Your previous copy is kept at ${op.kept}.`);
-      notices.push(`${args.kind === 'rename' ? 'Renamed' : 'Moved'} ${source} to ${dest}.`);
+      notices.push(`${args.kind === 'rename' ? 'Renamed' : args.kind === 'copy' ? 'Copied' : 'Moved'} ${source} to ${dest}.`);
     }
     const result: SkillResult = { kind: args.kind, path: source, destination: args.kind === 'delete' ? op.destination : destination, quarantined, installed: op.placement !== undefined, notices };
     op.done = true; op.result = result;

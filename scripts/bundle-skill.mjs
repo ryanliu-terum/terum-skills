@@ -28,3 +28,19 @@ if (!frontmatter || !/^\s+managed-by:\s*terum-skills\s*$/m.test(frontmatter[1]) 
 await mkdir(dirname(target), { recursive: true });
 await writeFile(target, raw);
 console.error(`Bundled ${source} -> ${target}`);
+
+// The PostToolUse edit hook (src/lib/editHook.ts) ships the same way. Its canonical copy is a plain
+// asset rather than a file in .claude/: it is placed under the user's STATE root and run as
+// `node <path>`, so this repository's own harness has no use for it and never loads it.
+// The marker is asserted here for the same reason as the frontmatter above — install, refresh and
+// uninstall all recognise their own copy by it, and a script without it is left alone forever.
+const hookSource = join(root, 'assets', 'claude', 'hooks', 'terum-skills-edit.mjs');
+const hookTarget = join(out, 'claude', 'hooks', 'terum-skills-edit.mjs');
+const hook = await readFile(hookSource, 'utf8');
+if (!hook.startsWith('// terum-skills managed hook')) {
+  console.error(`${hookSource}: must begin with "// terum-skills managed hook"; install and uninstall could not recognise their own copy without it.`);
+  process.exit(1);
+}
+await mkdir(dirname(hookTarget), { recursive: true });
+await writeFile(hookTarget, hook);
+console.error(`Bundled ${hookSource} -> ${hookTarget}`);

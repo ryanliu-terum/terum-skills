@@ -1,5 +1,5 @@
 import type { FileDropEvent, SkillFileResult } from './types';
-import type { AppUpdateStaged, AppUpdateStatus, LaunchContext, IdentityArgs, IdentityWrite, Settings, Onboarding, Features, Capabilities, Surfaces, ReadOptions, Catalog, ChangeSource, EvalArgs, EvalManyArgs, EvalManyResult, EvalResult, EvalReportModel, InboxItem, InstallArgs, InstalledResult, InviteArgs, InviteResult, MachineUninstallResult, PrefStore, PublishArgs, PublishResult, Receipt, Result, Roster, Run, LibraryScope, ProjectAdded, ProjectRemoved, ProjectCreated, SearchArgs, SearchHit, SetupArgs, SetupResult, Library, SkillDetail, StatusResult, Subscription, SyncArgs, SyncResult, TeamArgs, TeamResult, UninstallArgs, UninstalledResult, UpdateAdvice, ValidateArgs, ValidateResult } from './types';
+import type { AppUpdateStaged, AppUpdateStatus, LaunchContext, IdentityArgs, IdentityWrite, Settings, Onboarding, Features, Capabilities, Surfaces, ReadOptions, Catalog, ChangeSource, EvalArgs, EvalManyArgs, EvalManyResult, EvalResult, EvalReportModel, InboxItem, InstallArgs, InstalledResult, InviteArgs, InviteResult, MachineUninstallResult, PrefStore, PublishArgs, PublishResult, Receipt, ReconcileResult, Result, Roster, Run, LibraryScope, ProjectAdded, ProjectRemoved, ProjectCreated, SearchArgs, SearchHit, SetupArgs, SetupResult, Library, SkillDetail, StatusResult, Subscription, SyncArgs, SyncResult, TeamArgs, TeamResult, UninstallArgs, UninstalledResult, UpdateAdvice, ValidateArgs, ValidateResult } from './types';
 export interface Backend {
   setWindowBackground(color: string): Promise<Result<void>>;
   quit(): Promise<void>;
@@ -20,11 +20,12 @@ export interface Backend {
   status(q?: undefined, options?: ReadOptions): Promise<Result<StatusResult>>;
   settings(q?: undefined, options?: ReadOptions): Promise<Result<Settings>>;
   onboarding(q?: undefined, options?: ReadOptions): Promise<Result<Onboarding>>;
-  skillFile: {move(args:{path:string;to:string}):Run<SkillFileResult>;rename(args:{path:string;to:string}):Run<SkillFileResult>;delete(args:{path:string}):Run<SkillFileResult>;fix(args:{path:string}):Run<SkillFileResult>};
+  skillFile: {move(args:{path:string;to:string}):Run<SkillFileResult>;copy(args:{path:string;to:string}):Run<SkillFileResult>;rename(args:{path:string;to:string}):Run<SkillFileResult>;delete(args:{path:string}):Run<SkillFileResult>;fix(args:{path:string}):Run<SkillFileResult>};
   library(q: { scope: LibraryScope; team?: string }, options?: ReadOptions): Promise<Result<Library>>;
   localSkill(q: { path: string }, options?: ReadOptions): Promise<Result<SkillDetail>>;
   /** §7.1 L-PROJ: the folders this machine reads local skills from. Nothing else adds one. */
   projects: { add(path:string):Run<ProjectAdded>; remove(path:string):Run<ProjectRemoved> };
+  reconcile: { list():Promise<Result<ReconcileResult>> };
   /** Team projects (team.json), not the local folders above: `create` names one and commits it to the team's main. */
   teamProjects: { create(args:{name:string;remote?:string}):Run<ProjectCreated> };
   /** `at` restricts the answer to one Library root: presence, path, scope and version describe the

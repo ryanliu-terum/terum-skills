@@ -36,7 +36,7 @@ describe('frame mode — the Prompter serialised (docs/frame-protocol.md)', () =
       memberRole: true, localIdentity: true, libraryProjects: true, projects: true, roles: true,
       favorites: false, follow: false, lastSeen: false, installScope: true, inviteScoping: false,
       disablePerMachine: false, projectMembers: false, liftOnCards: true, runEvalInApp: true, perCase: false, progress: true,
-      refresh: true, appUpdate: true, serve: true,
+      refresh: true, appUpdate: true, reconcile: true, serve: true,
     });
   });
 

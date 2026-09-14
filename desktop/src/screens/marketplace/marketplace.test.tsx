@@ -230,7 +230,7 @@ it('uses status identity and the installed list for own-handle removal', async (
   vi.spyOn(backend, 'catalog').mockResolvedValue({ ...catalog, value: { ...catalog.value, people: catalog.value.people.map(p => p.handle === person.handle ? { ...p, skills: [], buckets: [] } : p) } });
   const remove = vi.spyOn(backend, 'uninstallSkill');
   open('#/marketplace/people/' + person.handle);
-  fireEvent.click(await screen.findByRole('button', { name: `Remove everything you installed (${person.installable.length} skills)` }));
+  fireEvent.click(await screen.findByRole('button', { name: `Remove the ${person.installable.length} skills on your profile from this machine` }));
   const dialog = await screen.findByRole('dialog');
   expect(remove).toHaveBeenCalledExactlyOnceWith({ ref: person.handle, kind: 'member', member: person.handle });
   expect(dialog).toHaveTextContent(`Install records dropped from your people file (${person.installable.length}): ${person.installable.join(', ')}`);

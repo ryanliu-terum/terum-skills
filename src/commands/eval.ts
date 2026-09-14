@@ -1,7 +1,7 @@
 import { runEvalBatch, EVAL_PARALLEL_DEFAULT, EVAL_LOCK_WAIT_MS } from '../lib/evals/batch.js';
 import { dequeueEvals, enqueueEvals, queueKey, readEvalQueue, updateEvalQueue, withEvalQueueLock, type EvalQueueItem } from '../lib/evals/queue.js';
 import { packageRoot } from '../lib/package-root.js';
-import { invocation, type WithForm } from '../lib/invocation.js';
+import { invocation, type InvocationForm, type WithForm } from '../lib/invocation.js';
 /** Local-only orchestration for the eval engine. Receipt commits deliberately begin in IE3. */
 import { mkdir, mkdtemp, readFile, readdir, rename, rm, rmdir, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
@@ -16,6 +16,7 @@ import { assessHygiene, HygieneRefused, reportHygieneWarnings } from '../lib/eva
 import { makeRng } from '../lib/evals/judge.js';
 import { receiptPath, buildReceipt, NO_TEAM_RUNNER_HANDLE } from '../lib/evals/receipt.js';
 import { aggregate, renderReport, runIdFrom, writeRunTree } from '../lib/evals/results.js';
+import type { Verdict } from '../lib/evals/stats.js';
 import { packageVersion } from '../lib/package.js';
 import { parseTriggers, runTriggerEvals, type TriggerSummary } from '../lib/evals/triggers.js';
 import { Prompter } from '../lib/prompt.js';
@@ -345,6 +346,15 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
       : await shareReceipt({ clone, team: teamName, remote: selected![1].remote, handle, runner, name: local.name, skillId, digest: evaluatedDigest, runId, source, lockWaitMs: args.lockWaitMs }, io);
     if (shared?.ok === false) io.print(`The eval is complete and saved locally, but publishing its receipt failed: ${shared.error}`);
     if (shared?.ok === true) io.print(`Published this receipt to ${teamName} for ${versionLabel(Number(shared.version.slice(1)))} of ${local.name}.`);
+    // §6.3's share hint, printed. `shareHint` has been on the result since the Library refactor and
+    // nothing ever showed it, so the run that most needs a next step — a verdict on bytes only this
+    // machine has seen — ended in silence. `shared === null` is exactly that state: shareReceipt
+    // returns null when no published version matches these bytes. The guards drop the runs where
+    // publishing is not available anyway (no team, not joined), was declined (`--no-commit`), or
+    // produced nothing to share — a folder with no cases and no triggers has no results, and
+    // "to share these results" over an empty report is the kind of line users learn to skim.
+    const hasResults = summary.expected_rows > 0 || triggers !== null;
+    if (shared === null && hasResults && args.commit !== false && teamName !== null && handle !== null) io.print(shareHint(local.name, summary.verdict, args.form));
 
     return success({
       team: teamName, id: skillId, name: local.name, runDir, ccVersion: preflight.value.ccVersion,
@@ -584,6 +594,20 @@ async function latestReceiptedVersion(clone: string, skillId: string, versions: 
  * Failure is reported, never fatal: the eval ran and its local receipt is already on disk, so a
  * lock timeout or an offline remote must not turn a completed run into a failed one.
  */
+/**
+ * §6.3's cue — *"To share these results, publish the skill again."* — with the command it names.
+ * A FAIL does not hide the command: publish asks its own question about a failed verdict
+ * (`publish.ts`) and the user may have a reason. It only stops this line from recommending a
+ * publish in the same breath as the failure it just reported.
+ */
+function shareHint(name: string, verdict: Verdict, form: InvocationForm | undefined): string {
+  const command = invocation(form, 'publish', name);
+  const preamble = 'These bytes are not a published version, so nothing was shared.';
+  return verdict === 'FAIL'
+    ? `${preamble} This run's verdict is FAIL: evaluate a fix rather than publishing these bytes — ${command} asks before it publishes a failed verdict.`
+    : `${preamble} To share these results, publish the skill again: ${command}`;
+}
+
 async function shareReceipt(
   input: { clone: string; team: string; remote: string; handle: string; runner: Runner; name: string; skillId: string; digest: string; runId: string; source: string; lockWaitMs?: number },
   io: Prompter,

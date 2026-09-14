@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { ConfigStore, createConfigStore } from '../lib/config.js';
 import { defaultHookOptions, HookOptions, hookInstalled, removeHook } from '../lib/hook.js';
 import { defaultWrapperOptions, inspectWrapper, removeWrapper, wrapperDestination, WrapperOptions } from '../lib/wrapper.js';
+import { defaultEditHookOptions, editHookDestination, type EditHookOptions, inspectEditHook, removeEditHook } from '../lib/editHook.js';
 import { Launch, packageRemovalLines } from '../lib/launch.js';
 import { Prompter } from '../lib/prompt.js';
 import { stripRemoteCredentials } from '../lib/remote.js';
@@ -14,7 +15,7 @@ import { APP_PRODUCT } from './app.js';
 import { teardownTeam } from './leave.js';
 
 export const fsForTests = { rm, rmdir };
-export interface UninstallMachineArgs extends WithForm { config?: ConfigStore; hook?: HookOptions; wrapper?: WrapperOptions; launch?: Launch; runner?: Runner; home?: string; platform?: NodeJS.Platform; }
+export interface UninstallMachineArgs extends WithForm { config?: ConfigStore; hook?: HookOptions; wrapper?: WrapperOptions; editHook?: Partial<EditHookOptions>; launch?: Launch; runner?: Runner; home?: string; platform?: NodeJS.Platform; }
 export interface MachineUninstallResult { teams: string[]; removedPlacements: number; hookRemoved: boolean; wrapperRemoved: boolean; configRemoved: boolean; kept: string[]; record: string; launch: Launch | null; advice: string[]; }
 
 /** Confirm and remove this machine's tracked state. Package removal is always advice, never executed. */
@@ -34,6 +35,11 @@ export async function run(args: UninstallMachineArgs, io: Prompter): Promise<Res
     // The /terum-skills Claude Code skill setup placed: only a copy carrying our marker is ours to remove.
     const wrapper = { ...defaultWrapperOptions(args.home), ...args.wrapper };
     const wrapperDir = wrapperDestination(wrapper.skillsRoot);
+    const editHook = { ...defaultEditHookOptions(store.root, args.home), ...args.editHook };
+    const editHookPath = editHookDestination(editHook.storeRoot);
+    let editHookPresence: Awaited<ReturnType<typeof inspectEditHook>>;
+    try { editHookPresence = await inspectEditHook(editHook.storeRoot); }
+    catch (error) { return failure(`${editHookPath} could not be read: ${message(error)}`); }
     let wrapperPresence: Awaited<ReturnType<typeof inspectWrapper>>;
     try { wrapperPresence = await inspectWrapper(wrapper.skillsRoot); }
     catch (error) { return failure(`${message(error)}; nothing was removed`); }
@@ -66,6 +72,8 @@ export async function run(args: UninstallMachineArgs, io: Prompter): Promise<Res
     detail.push(`  ${hookPresent ? 'Session-start hook in' : 'No session hook in'} ${options.settingsFile}`);
     if (wrapperPresence.kind === 'foreign') detail.push(`  ${wrapperDir} is not the bundled /terum-skills Claude Code skill (${wrapperPresence.why}); left alone`);
     else detail.push(`  ${wrapperPresence.kind === 'managed' ? '/terum-skills Claude Code skill at' : 'No /terum-skills Claude Code skill at'} ${wrapperDir}`);
+    if (editHookPresence.kind === 'foreign') detail.push(`  ${editHookPath} is not the bundled terum-skills edit hook (${editHookPresence.why}); left alone`);
+    else detail.push(`  ${editHookPresence.kind === 'managed' ? 'Edit hook (and its Write/Edit entry) at' : 'No edit hook at'} ${editHookPath}`);
     if (appPresent) detail.push(`  Downloaded desktop app bundle at ${app} (all versions)`);
     if (launchStatePresent) detail.push(`  Desktop launch state in ${join(store.root, 'run')} (app.json, latest-version.json)`);
     detail.push(`  ${configPath}`);
@@ -95,6 +103,13 @@ export async function run(args: UninstallMachineArgs, io: Prompter): Promise<Res
       try { wrapperRemoved = (await removeWrapper(wrapper)) === 'removed'; }
       catch (error) { return failure(`${message(error)}; the /terum-skills skill was left in place and nothing else was removed`); }
       if (wrapperRemoved) io.print(`Removed the /terum-skills Claude Code skill from ${wrapperDir}.`);
+    }
+    // Both halves, entry first (removeEditHook): an entry naming a deleted script would fire on
+    // every edit and fail. A foreign file at that path keeps its settings entry too — we did not
+    // write either one, and guessing which is ours is how a hand-rolled hook gets deleted.
+    if (editHookPresence.kind === 'managed') {
+      try { if (await removeEditHook(editHook) === 'removed') io.print(`Removed the terum-skills edit hook from ${editHookPath} and ${editHook.settingsFile}.`); }
+      catch (error) { return failure(`${message(error)}; the edit hook was left in place and nothing else was removed`); }
     }
 
     const teams: string[] = [];

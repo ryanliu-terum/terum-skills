@@ -607,7 +607,17 @@ Deleting the local join also deletes the marketplace's per-member fan-out. `cata
 
 ### 8.5 The reader for `profile[]`
 
-The marketplace person page (`#/marketplace/people/<handle>`, `MarketplaceScreen.tsx:95`) renders two buckets, and the copy must distinguish them: **On their profile** (`profile[]` — what they chose to stand behind, with the version) and **Installed** (`installed[]` — what is on their machines). Without this, §9.3 builds a curated list nothing ever shows.
+The marketplace person page (`#/marketplace/people/<handle>`, `MarketplaceScreen.tsx:95`) renders **one** list: **On their profile** (`profile[]` — what they chose to stand behind, with the version). §9.3's curated list is what the page shows, so it is not built for nothing.
+
+**Amended 2026-09-13 (Ajay).** This section previously required *two* buckets — **On their profile** beside **Installed** (`installed[]` — what is on their machines). That is withdrawn. The two lists coincide on every real people file in the team today, because `install` offers the profile prompt (§9.1) and it is normally accepted: `people/ryanliu-terum.json` holds the same four ids in both fields, so the page drew the same four cards twice under two headings. The split only ever paid off on a divergence the data does not produce, while the duplication cost a reader the ability to answer "how many skills does this person have" — the page showed `3 skills` (authored), `4` (profile), `4` (installed), `2 on this machine` and `3 installs` at once, three of them called "skills".
+
+The amended rule, and the invariants that hold it together:
+
+- **One list, one number.** The header chip, the section, the search placeholder and the Install button all read `profile[]`. No count appears on the section heading, and the per-bucket `· N on this machine` suffix is deleted.
+- **`install member <handle>` reads `profile[]`** (`src/commands/install.ts`), not `installed[]`. Installing a person means taking what they stand behind. A people file with no profile entries — the field is optional so pre-`profile[]` files parse — is **refused by name** rather than silently installing nothing.
+- **`uninstall-skill member <handle>` is its exact inverse** (`src/commands/uninstall.ts`) and reads `profile[]` too. A `profile[]` entry carries no scope, so every scope comes from this machine's own placement ledger.
+- **`installed[]` is not deleted and is still written.** It remains the factual record the roster, the Library and `ls member` read; it simply is no longer drawn as a second bucket on this page.
+- The version pin a profile entry carries (`On profile · Version 1` beside `Version 2 · installed`) stays on the card. With the duplicate section gone it is the page's one genuine signal, not a whisper under a redundant heading.
 
 ### 8.6 The skill detail page
 
