@@ -2,7 +2,7 @@ import type { SkillCard } from '../../backend/types';
 
 /** One row of the card's ⋯ menu. `to` is a router path; a disabled row carries the reason it
  *  cannot run instead, so the menu keeps a fixed shape and the card says why (Ryan, 2026-09-09). */
-export interface CardAction { key:'open'|'run-eval'|'move'|'place'|'publish'|'rename'|'delete'; label:string; to:string|null; reason:string|null }
+export interface CardAction { key:'run-eval'|'move'|'copy'|'place'|'publish'|'rename'|'delete'; label:string; to:string|null; reason:string|null }
 
 /** Every way into the detail page goes through here, so a folder that belongs to no team is
  *  addressed by path and a team skill by name. Never read `project` for this — it carries the root
@@ -19,16 +19,24 @@ function withParams(base:string,params:string[]):string {
  return query?base+(base.includes('?')?'&':'?')+query:base;
 }
 
+/** The card's own link target: the detail page, carrying the origin the detail page reads back. The
+ *  menu used to repeat this as an `Open` row; the card title is the one way in (Ajay, 2026-09-13). */
+export function detailHref(skill:SkillCard,origin=''):string {
+ return withParams(detailPath(skill),[skill.teamed||!skill.path?origin:'']);
+}
+
 /** Every state-changing action a card offers, in menu order. `origin` is the origin the detail page
  *  reads back — `root=marketplace`, or `root=<checkout repo root>` from a project Library — or '' from the Global library. */
 export function cardActions(skill:SkillCard,{origin='',runEvalInApp=false}:{origin?:string;runEvalInApp?:boolean}={}):CardAction[] {
  const base=detailPath(skill),ridesOrigin=skill.teamed||!skill.path,at=(...params:string[])=>withParams(base,[...params,ridesOrigin?origin:'']);
- const actions:CardAction[]=[{key:'open',label:'Open',to:at(),reason:null}];
+ // No `Open` row: the card's title is already that link, and a menu whose first row repeats it
+ // pushes down the rows only the menu offers (Ajay, 2026-09-13). `detailHref` is that same target.
+ const actions:CardAction[]=[];
  // §11.4: evals run against the copy on this machine, so the row stays and says why when there is none.
  const evalReason=localActionReason(skill,'eval');
  if(runEvalInApp)actions.push({key:'run-eval',label:'Run eval',to:evalReason?null:at('tab=evals','dialog=run-eval'),reason:evalReason});
  if(!skill.teamed){
-  actions.push(moveAction(skill,at),{key:'rename',label:'Rename…',to:at('dialog=file-rename'),reason:null},{key:'delete',label:'Delete…',to:at('dialog=file-delete'),reason:null});
+  actions.push(moveAction(skill,at),copyAction(skill,at),{key:'rename',label:'Rename…',to:at('dialog=file-rename'),reason:null},{key:'delete',label:'Delete…',to:at('dialog=file-delete'),reason:null});
  }else actions.push(placeAction(skill,at));
  actions.push(publishAction(skill,at));
  return actions;
@@ -38,6 +46,11 @@ type At = (...params:string[])=>string;
 /** D18: move the local bytes, including edits, through the skillFile seam. */
 function moveAction(skill:SkillCard,at:At):CardAction {
  return {key:'move',label:'Move to…',to:at('dialog=file-move'),reason:null};
+}
+/** The same seam, leaving the source where it is: the one way to hold a local skill in two roots at
+ *  once. A team skill reaches a second root through `Install…`, so this row stays out of that branch. */
+function copyAction(skill:SkillCard,at:At):CardAction {
+ return {key:'copy',label:'Copy to…',to:at('dialog=file-copy'),reason:null};
 }
 /** One state-dependent row: the card menu is the only place install and uninstall live. */
 function placeAction(skill:SkillCard,at:At):CardAction {

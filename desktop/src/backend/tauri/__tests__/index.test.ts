@@ -1144,7 +1144,7 @@ it('summarizes a Library card from the body, falling back to frontmatter, as the
  expect(library.value?.skills.map(card=>[card.name,card.desc])).toEqual([['bodied','Use this when a deploy needs a checklist.'],['bare','frontmatter only'],['broken','/library/broken · SKILL.md name x does not equal folder broken']]);
  expect(await backend.localSkill({path:'/library/bodied'})).toMatchObject({ok:true,value:{desc_long:'Use this when a deploy needs a checklist.'}});
 });
-it.each(['move','rename','delete','fix'] as const)('maps the skillFile.%s seam and invalidates local reads',async kind=>{
+it.each(['move','copy','rename','delete','fix'] as const)('maps the skillFile.%s seam and invalidates local reads',async kind=>{
  const bare=kind==='delete'||kind==='fix';
  const value={kind,path:'/library/a',destination:bare?null:'/library/b',quarantined:null,installed:false,notices:[]},f=replay(value),backend=createTauriBackend(f.bridge),changed=vi.fn();backend.subscribe(changed);
  const result=await (kind==='delete'||kind==='fix'?backend.skillFile[kind]({path:value.path}):backend.skillFile[kind]({path:value.path,to:'b'})).done;

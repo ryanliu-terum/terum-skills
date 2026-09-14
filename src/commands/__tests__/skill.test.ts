@@ -125,6 +125,35 @@ describe('D6 Library file operations',()=>{
   expect(await run({kind:'move',path:f.path,to:f.project,home:f.home,config:f.store,runner},new ScriptedPrompter(['alpha']))).toMatchObject({ok:true});
   expect(await fs.readFile(join(f.project,'.claude','old-skills','alpha','SKILL.md'),'utf8')).toBe('other bytes');expect(await fs.readFile(join(f.project,'.git/info/exclude'),'utf8')).toContain('.claude/old-skills/');
  });
+ it('copy leaves the source where it is, lands the edited bytes in the other root, and gives the new folder no ledger row',async()=>{
+  const f=await fixture(),dest=join(f.project,'.claude','skills','alpha');await fs.appendFile(join(f.path,'SKILL.md'),'user edit\n');
+  const runner={run:vi.fn(async()=>({code:0,stdout:'.git/info/exclude\n',stderr:''}))};
+  expect(await run({kind:'copy',path:f.path,to:f.project,home:f.home,config:f.store,runner},new ScriptedPrompter(['alpha']))).toMatchObject({ok:true,value:{kind:'copy',destination:dest,notices:[`Copied ${f.path} to ${dest}.`]}});
+  expect(await fs.readFile(join(f.path,'SKILL.md'),'utf8')).toContain('user edit');
+  expect(await fs.readFile(join(dest,'SKILL.md'),'utf8')).toBe(await fs.readFile(join(f.path,'SKILL.md'),'utf8'));
+  // The source keeps its install; the copy is a plain local folder carrying the same metadata.id.
+  expect((await f.store.read()).placements).toEqual({[f.path]:expect.objectContaining({id,fingerprint:f.fingerprint})});
+  expect(YAML.parse((await fs.readFile(join(dest,'SKILL.md'),'utf8')).split('---')[1]!).metadata.id).toBe(id);
+ });
+ it('copy keeps a colliding destination in that root’s old-skills directory and never half-writes the new folder',async()=>{
+  const f=await fixture(false),dest=join(f.project,'.claude','skills','alpha');await fs.mkdir(dest,{recursive:true});await fs.writeFile(join(dest,'SKILL.md'),'other bytes');
+  const runner={run:vi.fn(async()=>({code:0,stdout:'.git/info/exclude\n',stderr:''}))};
+  expect(await run({kind:'copy',path:f.path,to:f.project,home:f.home,config:f.store,runner},new ScriptedPrompter(['alpha']))).toMatchObject({ok:true});
+  expect(await fs.readFile(join(f.project,'.claude','old-skills','alpha','SKILL.md'),'utf8')).toBe('other bytes');
+  expect(await fs.readFile(join(dest,'SKILL.md'),'utf8')).toBe(raw());
+  expect(await fs.readFile(join(f.project,'.git/info/exclude'),'utf8')).toContain('.claude/old-skills/');
+ });
+ it('copy re-runs after an interrupted placement and refuses a destination that is not a registered root',async()=>{
+  const f=await fixture(false),dest=join(f.project,'.claude','skills','alpha'),rename=fsForTests.rename;let fired=false;
+  const copy=(to:string)=>run({kind:'copy',path:f.path,to,home:f.home,config:f.store},new ScriptedPrompter(['alpha']));
+  vi.spyOn(fsForTests,'rename').mockImplementation(async(...args)=>{if(args[1]===dest&&!fired){fired=true;throw new Error('interrupted');}return rename(...args);});
+  expect(await copy(f.project)).toMatchObject({ok:false});expect(fired).toBe(true);
+  await expect(fs.lstat(dest)).rejects.toMatchObject({code:'ENOENT'});vi.restoreAllMocks();
+  expect(await copy(f.project)).toMatchObject({ok:true,value:{destination:dest}});
+  expect(await fs.readFile(join(f.path,'SKILL.md'),'utf8')).toBe(raw());
+  expect(await copy(join(f.home,'elsewhere'))).toMatchObject({ok:false,error:expect.stringContaining('Choose global or a registered project root')});
+  expect(await copy('global')).toMatchObject({ok:false,error:'The source and destination are the same folder.'});
+ });
  it.each(['directory','journal'] as const)('non-placement delete is quarantined and re-runnable after %s',async point=>{
   const f=await fixture(false),rename=fsForTests.rename,journalWrite=privateFs.writeJsonPrivate;let fired=false;
   if(point==='directory')vi.spyOn(fsForTests,'rename').mockImplementation(async(...args)=>{await rename(...args);if(args[0]===f.path&&!fired){fired=true;throw new Error('interrupted');}});

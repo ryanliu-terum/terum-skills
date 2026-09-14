@@ -21,7 +21,7 @@ const asking = (async (_args: unknown, io: Prompter) => {
 }) as never;
 
 const INVOCATIONS: Record<string, string[]> = {
-  'skill move':['skill','move','/skills/a','--to','global'], 'skill rename':['skill','rename','/skills/a','--to','b'], 'skill delete':['skill','delete','/skills/a'], 'skill fix':['skill','fix','/skills/a'],
+  'skill move':['skill','move','/skills/a','--to','global'], 'skill copy':['skill','copy','/skills/a','--to','global'], 'skill rename':['skill','rename','/skills/a','--to','b'], 'skill delete':['skill','delete','/skills/a'], 'skill fix':['skill','fix','/skills/a'],
   'project add': ['project', 'add'], 'project remove': ['project', 'remove', '/project'], 'project list': ['project', 'list'],
   'team project create': ['team', 'project', 'create', 'Payments'],
   'app-update': ['app-update', '--check'],

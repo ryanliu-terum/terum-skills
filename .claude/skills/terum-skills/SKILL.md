@@ -113,6 +113,7 @@ the CLI will ask you questions the session cannot answer.*
 | `project add` (no path) | none | `npx -y terum-skills@latest project add` — asks for a folder |
 | `publish <ref> [--project <p>] [--category <c>]` | none; confirm the local skill and team with the user | `npx -y terum-skills@latest publish <ref> --project <p> --category <c>` — omit optional flags the user has not chosen |
 | `skill move <abs-path> --to global\|<project root>` | none | `npx -y terum-skills@latest skill move <abs-path> --to <destination>` |
+| `skill copy <abs-path> --to global\|<project root>` | none | `npx -y terum-skills@latest skill copy <abs-path> --to <destination>` — the source folder stays where it is |
 | `skill rename <abs-path> --to <new-name>` | none | `npx -y terum-skills@latest skill rename <abs-path> --to <new-name>` |
 | `skill delete <abs-path>` | none | `npx -y terum-skills@latest skill delete <abs-path>` |
 | `prune` | none; an empty quarantine simply returns | `npx -y terum-skills@latest prune` |

@@ -86,7 +86,7 @@ export function createMockBackend(opts:{latencyMs?:number}={}):Backend & {readon
   ()=>({installedVersion:null,localMatch:'none',placed:false,installed:'placed',onDiskOnly:true,edited:false,knownToTeam:false}),
  ];
  function localProjection<T extends SkillCard>(card:T):T {return {...card,teamed:false,installs:'—',installsN:0,teamState:'unknown',latestVersion:null,installedVersion:null,localMatch:card.flags.includes('local')?'none':null,knownToTeam:!card.flags.includes('local'),evalVersion:null,evalStale:false,latestEvalState:null,profileVersion:null,edited:card.flags.includes('local'),flags:card.flags.filter(flag=>flag!=='update'),localEval:card.summary?{...card.summary,runnerHandle:null,version:null}:null};}
- function fileRun(kind:'move'|'rename'|'delete',path:string,to?:string){return long('library',async ctx=>{
+ function fileRun(kind:'move'|'copy'|'rename'|'delete',path:string,to?:string){return long('library',async ctx=>{
   const name=path.split('/').at(-1)!;
   if(await ctx.ask('text',`Type ${name} to ${kind} this folder`)!==name)return cancelled('The name did not match; nothing changed.');
   const destination=kind==='delete'?null:kind==='rename'?path.slice(0,path.lastIndexOf('/')+1)+to:(to==='global'?'~':to)+'/.claude/skills/'+name;
@@ -103,9 +103,11 @@ export function createMockBackend(opts:{latencyMs?:number}={}):Backend & {readon
    notices.push('Your previous copy is kept at '+kept+'.');
   }
   const prior=[...fileChanges.entries()].find(([,change])=>change.path===path),original=prior?.[1].original??name;
-  fileChanges.set(prior?.[0]??path,{path:destination,name:kind==='rename'?to!:name,original});
+  // A copy adds a second card and leaves the source's entry untouched; every other kind relocates the one card.
+  if(kind==='copy')fileChanges.set(destination!,{path:destination,name,original});
+  else fileChanges.set(prior?.[0]??path,{path:destination,name:kind==='rename'?to!:name,original});
   for(const listener of listeners)listener('config');
-  notices.push(kind==='delete'?'Moved to quarantine.':`${kind==='rename'?'Renamed':'Moved'} ${path} to ${destination}.`);
+  notices.push(kind==='delete'?'Moved to quarantine.':`${kind==='rename'?'Renamed':kind==='copy'?'Copied':'Moved'} ${path} to ${destination}.`);
   return ok({kind,path,destination,quarantined:kind==='delete'?'~/.terum/skills/quarantine/'+name:null,installed:false,notices});
  });}
 
@@ -164,7 +166,7 @@ export function createMockBackend(opts:{latencyMs?:number}={}):Backend & {readon
    // A card that landed here (a move onto the evicted resident's path) wins; only a path nothing occupies any more is gone.
    if(change===undefined&&fileChanges.has(path))return {ok:false,error:path+' is no longer in the Library.',reason:'not-in-library'};const detail=skillByRef(change?.original??name);return detail.ok?ok({...localProjection(detail.value),name,team:null,repo:null,installs_n:0,used_by:[],users:[],versions:null,version:'—',version_full:null,history:[],activity:[],...(change&&name!==change.original?{edited:true,localEval:null,summary:null,receipt:null,reportNumbers:null,skillMd:{...detail.value.skillMd,frontmatter:detail.value.skillMd.frontmatter.replace(/^name: .*$/m,'name: '+name)}}:{}),skillRef:'local:'+path,path,pathLabel:path,repoPath:path,owningRoot:mockOwningRoot(path)}):{ok:false,error:path+' is not in any Library root.',reason:'not-in-library'};}),
   skillFile:{
-   move:({path,to})=>fileRun('move',path,to),rename:({path,to})=>fileRun('rename',path,to),delete:({path})=>fileRun('delete',path),
+   move:({path,to})=>fileRun('move',path,to),copy:({path,to})=>fileRun('copy',path,to),rename:({path,to})=>fileRun('rename',path,to),delete:({path})=>fileRun('delete',path),
    // No fixture folder is broken, so the mock has nothing to rewrite: it answers as the CLI does for a file that already parses.
    fix:({path})=>long('library',async ctx=>{const line=path.split('/').at(-1)+': SKILL.md frontmatter is already valid YAML; nothing changed.';ctx.print(line);return ok({kind:'fix' as const,path,destination:null,quarantined:null,installed:false,notices:[line]});}),
   },
