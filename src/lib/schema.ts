@@ -33,7 +33,7 @@ export function isSkillName(value: string): boolean { return /^[a-z0-9]+(?:-[a-z
 export const skillIdSchema = z.uuid();
 export const emailSchema = z.email();
 /** GitHub login syntax, used wherever a value becomes part of a GitHub API path. */
-export const githubLoginSchema = z.string().regex(/^[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}$/, 'a GitHub login is 1-39 letters, digits, or single internal hyphens');
+export const githubLoginSchema = z.string().regex(/^[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}$/, 'a GitHub login is 1-39 letters, digits, or single internal hyphens, written without a leading @');
 
 export const scopeSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('global') }).passthrough(),

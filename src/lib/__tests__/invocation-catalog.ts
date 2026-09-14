@@ -107,6 +107,12 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
   },
   {
     "file": "src/commands/setup.ts",
+    "line": 138,
+    "policy": "prose",
+    "pattern": "`Setup stopped here, so the project, eval, session hook and /terum-skills steps were not offered \u2014 run \\`${invocation(form, 'setup')}\\` again to finish.`,"
+  },
+  {
+    "file": "src/commands/setup.ts",
     "line": 425,
     "policy": "prose",
     "pattern": "// The /terum-skills Claude Code skill ships inside this package, and setup is the one onboarding"

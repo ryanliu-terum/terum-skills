@@ -10,5 +10,11 @@ export function scriptedPrompter(answers:Record<string,boolean|string>,onUnexpec
   if(!valid(value))throw new Error('Invalid answer to: '+q.question);
   return value as boolean|string;
  }
- return {interactive:true,lines,confirm:async(question,options)=>(await answer({kind:'confirm',question,...(options?.detail?.length?{detail:options.detail}:{}),...(options?.descriptions?{descriptions:options.descriptions}:{}),...(options?.default===undefined?{}:{default:options.default})}))===true,text:async(question,defaultValue,options)=>String(await answer({kind:'text',question,...(options?.detail?.length?{detail:options.detail}:{}),...(options?.descriptions?{descriptions:options.descriptions}:{}),...(options?.default===undefined?{}:{default:options.default}),...(defaultValue===undefined?{}:{default:defaultValue})})),select:async(question,choices,options)=>String(await answer({kind:'select',question,choices,...(options?.detail?.length?{detail:options.detail}:{}),...(options?.descriptions?{descriptions:options.descriptions}:{}),...(options?.default===undefined?{}:{default:options.default})})),print:line=>{lines.push(line);}};
+ return {interactive:true,lines,confirm:async(question,options)=>(await answer({kind:'confirm',question,...(options?.detail?.length?{detail:options.detail}:{}),...(options?.descriptions?{descriptions:options.descriptions}:{}),...(options?.default===undefined?{}:{default:options.default})}))===true,text:async(question,defaultValue,options)=>{
+  const offered=defaultValue??options?.default??'';
+  const value=String(await answer({kind:'text',question,...(options?.detail?.length?{detail:options.detail}:{}),...(options?.descriptions?{descriptions:options.descriptions}:{}),...(options?.default===undefined?{}:{default:options.default}),...(defaultValue===undefined?{}:{default:defaultValue})}));
+  // The terminal prompter resolves a blank answer to the offered default (src/lib/prompt.ts); the frames
+  // channel promises the same contract, or a cleared field answers '' and setup resolves it against cwd.
+  return value.trim()||offered;
+ },select:async(question,choices,options)=>String(await answer({kind:'select',question,choices,...(options?.detail?.length?{detail:options.detail}:{}),...(options?.descriptions?{descriptions:options.descriptions}:{}),...(options?.default===undefined?{}:{default:options.default})})),print:line=>{lines.push(line);}};
 }
