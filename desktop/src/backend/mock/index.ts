@@ -2,9 +2,10 @@ import { isUnderRoot, normalizeSeparators } from '../../lib/skill-path';
 import { z } from 'zod';
 import { browserPrefs } from '../prefs';
 import { FEATURE_KEYS } from '../types';
-import type { Settings, SyncResult, ChangeSource, Features, Identity, Library, Project, Root, LibraryScope, SkillDetail, TeamResult, ReconcileResult } from '../types';
+import type { Settings, SyncResult, ChangeSource, Features, Identity, Project, Root, LibraryScope, SkillDetail, TeamResult, ReconcileResult } from '../types';
 import { decodeText } from '../../lib/fixture-text';
 import { overviewCopy } from '../../lib/overview-copy';
+import { unpublishedOverview } from '../../lib/overview-counts';
 import { abbreviateHome } from '../paths';
 import type { Backend } from '../Backend';
 import type { EvalManyResult, FileDropEvent, InviteResult, Result, Roster, Run, SearchHit, SetupResult, SkillCard, Subscription } from '../types';
@@ -65,7 +66,7 @@ function listenHtmlDrops(listener:(event:FileDropEvent)=>void):Subscription{
 }
 const fail=(error:string):Result<never>=>({ok:false,error:abbreviateHome(decodeText(error),'')});
 const zeroCopy=overviewCopy;
-const zeroOverview={skills:'0',skills_note:zeroCopy.skills,evaluated:'—',meter:{pass_:0,neutral:0,fail:0,total:0},meter_text:zeroCopy.evaluated,installs:'0',installs_note:zeroCopy.installs,attention:'0',attention_lines:[zeroCopy.attention],attention_link:design.LIBRARY_OVERVIEW.attention_link,zero:zeroCopy};
+const zeroOverview={skills:'0',skills_note:zeroCopy.skills,evaluated:'—',meter:{pass_:0,neutral:0,fail:0,total:0},meter_text:zeroCopy.evaluated,installs:'0',installs_note:zeroCopy.installs,unpublished:'0',unpublished_note:'',attention:'0',attention_lines:[zeroCopy.attention],attention_link:design.LIBRARY_OVERVIEW.attention_link,zero:zeroCopy};
 const reconcileFixture=():ReconcileResult=>({
  identical:[{path:'~/.claude/skills/deploy-check',name:'deploy-check',team:design.TEAMS[0]!.key,skillId:'mock-deploy-check',version:'v5'}],
  differing:[
@@ -185,8 +186,10 @@ export function createMockBackend(opts:{latencyMs?:number}={}):Backend & {readon
     const original=design.SKILLS.find(s=>s.name===change.original);if(!original)continue;
     const card=cardFor(original,change.path,change.name);if(change.name!==change.original)Object.assign(card,{edited:true,summary:null,localEval:null,localEvalStale:card.localEval!==null});skills.push(card);
    }
-   const overview=scenario==='empty'?zeroOverview:(Object.hasOwn(design.OVERVIEW_BY_SCOPE,canonical)?(design.OVERVIEW_BY_SCOPE as Record<string,Library['overview']>)[canonical]!:zeroOverview);
-   return ok({roots,scanned:null,root,skills,overview:{...overview,skills:String(skills.length),installs:'—'},title:`${skills.length} skill${skills.length===1?'':'s'}`});
+   const overview=scenario==='empty'?zeroOverview:(Object.hasOwn(design.OVERVIEW_BY_SCOPE,canonical)?(design.OVERVIEW_BY_SCOPE as Record<string,typeof design.LIBRARY_OVERVIEW>)[canonical]!:zeroOverview);
+   // The fixture's overview predates the Unpublished tile, so its two strings and its zero caption
+   // are derived from the cards this scope actually draws rather than read from design.json.
+   return ok({roots,scanned:null,root,skills,overview:{...overview,skills:String(skills.length),installs:'—',...unpublishedOverview(skills),zero:{...overview.zero,unpublished:overviewCopy.unpublished}},title:`${skills.length} skill${skills.length===1?'':'s'}`});
   }),
   localSkill:({path})=>read('skill',()=>{const change=[...fileChanges.values()].find(change=>change.path===path),name=path.split(/[\\/]/).filter(Boolean).at(-1)??'';
    // A card that landed here (a move onto the evicted resident's path) wins; only a path nothing occupies any more is gone.

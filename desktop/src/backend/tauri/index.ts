@@ -33,6 +33,7 @@ import { cliRefresh, createRefreshPolicy, createWorkflowGate } from './refresh';
 // shape `cli-tree-imports.test.ts` admits across the tree boundary.
 import { recordedVersionLabel, parseVersionFolder } from '../../../../src/lib/versions.js';
 import { overviewCopy } from '../../lib/overview-copy';
+import { evaluatedOverview, unpublishedOverview } from '../../lib/overview-counts';
 import { bodyExcerpt } from '../../lib/body-excerpt';
 import { isUnderRoot, samePath } from '../../lib/skill-path';
 
@@ -799,7 +800,10 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
       for (const entry of section.notOffered??[]) { if(seen.has(entry.path))continue;seen.add(entry.path);skills.push(notOfferedCard(entry,section,directory)); }
       const broken=skills.filter(card=>card.flags.includes('broken')).length;
       const value:Library={root,roots:(local.value.local??[]).map(section=>rootOf(section,directory)),scanned:scannedRoots(local.value,directory),skills,problems:section.problems.map(p=>({source:p.path,message:p.reason})),title:plural(skills.length,'skill'),
-        overview:{skills:String(skills.length),skills_note:'',evaluated:String(skills.filter(s=>s.localEval!==null).length),meter:{pass_:0,neutral:0,fail:0,total:0},meter_text:overviewCopy.evaluated,installs:'—',installs_note:'',attention:String(broken),attention_lines:broken?[`${broken} need attention`]:[],attention_link:'',zero:overviewCopy}};
+        // The Evaluated tile's number, meter and caption come from one derivation over the same
+        // receipts (overview-counts.ts) — the meter was previously hard-zeroed and the caption
+        // hard-set to the zero copy, so a library with evaluated skills read "2 · Nothing evaluated yet".
+        overview:{skills:String(skills.length),skills_note:'',...evaluatedOverview(skills),...unpublishedOverview(skills),installs:'—',installs_note:'',attention:String(broken),attention_lines:broken?[`${broken} need attention`]:[],attention_link:'',zero:overviewCopy}};
       return {ok:true,value};
     },
     async localSkill({path},options) {
