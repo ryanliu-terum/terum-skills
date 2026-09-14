@@ -13,7 +13,11 @@ export type Inspection =
   | { kind: 'candidate'; description: string; privileged: boolean }
   | { kind: 'rejected'; reason: SourceProblem; detail: string; description?: string }
   | { kind: 'failed'; reason: string };
-export interface LocalEntry { body?: string | null; frontmatter: string | null; skillId: string | null; name: string; path: string; placement?: PlacementRef; placementFingerprint?: string; characters?: number; category: string | null; inspection: Inspection; }
+/** `updated` is the mtime of the folder's own SKILL.md as an ISO-8601 instant — the one stat the scan
+ *  already does (W-02: no new per-row I/O, no recursive walk on a UNC root). Absent when the folder has
+ *  no readable SKILL.md file, or when the filesystem reports an mtime outside the Date range: the field
+ *  is a claim about a real file, never a default. */
+export interface LocalEntry { body?: string | null; frontmatter: string | null; skillId: string | null; name: string; path: string; placement?: PlacementRef; placementFingerprint?: string; characters?: number; updated?: string; category: string | null; inspection: Inspection; }
 export interface LocalInventory {
   root: string;
   scope: 'global' | 'project';
@@ -152,6 +156,11 @@ export async function localSkills(root: string, config: Pick<Config, 'placements
             reject('skill-md-missing', 'SKILL.md missing');
         } else if (!skill.isFile()) reject('skill-md-not-a-file', 'SKILL.md is not a regular file');
         else {
+          // The stat above is the only one this scan may spend; its mtime is the folder's last-changed
+          // stamp. A filesystem that reports an mtime Date cannot hold (a 9P/UNC root can) yields an
+          // Invalid Date, whose toISOString throws — so the field stays absent there rather than
+          // carrying a fabricated date or failing the whole entry.
+          if (Number.isFinite(skill.mtime.getTime())) entry.updated = skill.mtime.toISOString();
           const raw = await readFile(join(path, 'SKILL.md'), 'utf8');
           // String.prototype.length counts UTF-16 code units, the same basis HYG6's 20,000-character
           // guideline uses; the file is already in hand, so the count costs no extra read.

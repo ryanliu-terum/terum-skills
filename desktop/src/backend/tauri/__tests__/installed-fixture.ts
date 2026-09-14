@@ -26,9 +26,21 @@ export function installedReplay(local = 'on-disk-only', member = 'none', change?
    const frame = JSON.parse(line) as Record<string, unknown>;
    if(frame.t==='hello') (frame.features as Record<string,boolean>).localIdentity=true;
    if(frame.t==='result' && !scan && !person && args[0]==='ls') {
-    const people = (frame.value as { people?: { handle: string; installed: unknown[] }[] }).people;
-    const mira = people?.find(entry => entry.handle === 'mira');
-    if(mira) mira.installed = memberInstalls();
+    const value = frame.value as { people?: { handle: string; installed: unknown[]; profile: unknown[] }[]; skills?: { id: string; name: string; latest?: string | null }[] };
+    const mira = value.people?.find(entry => entry.handle === 'mira');
+    if(mira) {
+     const installs = memberInstalls();
+     mira.installed = installs;
+     // §8.5 (amended 2026-09-13): the person page and `install member` both read `profile[]`, so the
+     // recorded member list has to arrive as one. Projecting it from the SAME recorded installs is what
+     // the machine this recording describes actually looks like — install offers the profile on every
+     // placement (§9.1) and this member accepted. The one field the recording cannot supply is the
+     // curated version, which comes from the frame's own skill row rather than being invented.
+     mira.profile = installs.map(entry => {
+      const skill = value.skills?.find(row => row.id === (entry as { id: string }).id);
+      return { id: (entry as { id: string }).id, name: skill?.name ?? 'unknown', version: skill?.latest ?? 'v1', added: '2026-09-12', via: 'install' };
+     });
+    }
    }
    if(scan)change?.(frame);
    if(args[0] === 'status')changeStatus?.(frame);

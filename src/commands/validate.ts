@@ -13,8 +13,9 @@ import { parseVersionFolder } from '../lib/versions.js';
 import { planRepairs } from '../lib/skill-repair.js';
 
 export interface ValidateArgs extends WithForm { target: string; team?: string; cwd?: string; config?: ConfigStore; }
-/** `repairable` counts the changes `skill fix` would make to this folder — the app draws Fix when it is above zero. */
-export interface ValidateResult { name: string; findings: number; warnings: number; repairable: number; }
+/** `repairs` lists, one plain sentence each, the changes `skill fix` would make to this folder, and `repairable`
+ *  is their count — the app draws Fix when it is above zero and shows the list before the folder is touched. */
+export interface ValidateResult { name: string; findings: number; warnings: number; repairable: number; repairs: string[]; }
 
 interface Target { directory: string; name: string }
 
@@ -96,14 +97,14 @@ export async function run(args: ValidateArgs, io: Prompter): Promise<Result<Vali
     try { assessment = assessHygiene(name, input, policy.skill_license); }
     catch (error) { if (!(error instanceof HygieneRefused)) throw error; assessment = error.assessment; }
     reportHygieneWarnings((line) => io.print(line), assessment);
-    const repairable = planRepairs({ name, ...input, policyLicense: policy.skill_license }).repaired.length;
+    const repairs = planRepairs({ name, ...input, policyLicense: policy.skill_license }).repaired, repairable = repairs.length;
     if (assessment.errors.length) {
       const errors = formatHygieneFindings(assessment.errors);
       for (const line of errors.split('\n')) io.print(line);
-      return failure(`Hygiene failed for ${name}:\n${errors}`, { name, findings: assessment.errors.length, warnings: assessment.warnings.length, repairable });
+      return failure(`Hygiene failed for ${name}:\n${errors}`, { name, findings: assessment.errors.length, warnings: assessment.warnings.length, repairable, repairs });
     }
     const warnings = assessment.warnings.length;
     io.print(`${name}: hygiene passed${warnings ? ` (${warnings} warning${warnings === 1 ? '' : 's'})` : ''}.`);
-    return success({ name, findings: 0, warnings, repairable });
+    return success({ name, findings: 0, warnings, repairable, repairs });
   } catch (error) { return fromError(error); }
 }

@@ -8,6 +8,7 @@ import { checkoutRootOf } from '../lib/placer/agent-paths.js';
 import { ConfigStore, createConfigStore, selectTeam } from '../lib/config.js';
 import type { HookOptions } from '../lib/hook.js';
 import type { WrapperOptions } from '../lib/wrapper.js';
+import type { EditHookOptions } from '../lib/editHook.js';
 import { inspect, lockTarget, moveDirectory, place, appendExclude, resolveTarget } from '../lib/placer.js';
 import { Prompter } from '../lib/prompt.js';
 import { refuseSecondTeam, teamByRemote } from '../lib/auth.js';
@@ -42,6 +43,7 @@ export interface InstallArgs extends WithForm {
   hook?: HookOptions;
   /** Where that bootstrap offers the bundled /terum-skills Claude Code skill (test knob). */
   wrapper?: WrapperOptions;
+  editHook?: Partial<EditHookOptions>;
   /** Injectable retry clock for deterministic recovery tests; authorization remains command-owned. */
   safeWrite?: Pick<SafeWriteOptions, 'deadlineMs' | 'backoff' | 'now' | 'sleep'>;
   /** Test-only process-interruption seam; each stage follows a durable boundary. */
@@ -69,9 +71,17 @@ export async function run(args: InstallArgs, io: Prompter): Promise<Result<Insta
     if (operation.kind === 'member') {
       const [team] = selectTeam(config.teams, args.team, args.form);
       const person = await readPerson(store.teamClone(team), operation.member);
+      // §8.5 (amended 2026-09-13): installing a person takes what they *stand behind* — `profile[]`,
+      // the curated list the marketplace person page shows — not `installed[]`, which is an automatic
+      // record of what happens to sit on their machines. The desktop page renders one list and one
+      // count; this verb is what that count promises, so the two must read the same field.
+      // `profile` is optional in the schema (people files written before it shipped have none), and an
+      // empty curated list is refused by name rather than silently installing nothing.
+      const profile = person.profile ?? [];
+      if (!profile.length) throw new Error(`${operation.member} has nothing on their profile yet, so there is nothing to install. A teammate adds a skill to their profile when they publish it or when install asks.`);
       const destination = await destinationFor(team);
       const results: InstalledResult[] = [];
-      for (const item of person.installed) {
+      for (const item of profile) {
         const result = await installOne({ team, destination, id: item.id, yesProfile: args.yesProfile, store, runner, cwd: args.cwd, home: args.home, safeWrite: args.safeWrite }, io);
         results.push(result);
       }
@@ -97,7 +107,7 @@ export async function run(args: InstallArgs, io: Prompter): Promise<Result<Insta
       // built on team, which is built on this module.
       if (!(error instanceof NotJoinedError) || Object.keys(config.teams).length > 0) throw error;
       const { run: setup } = await import('./setup.js');
-      const bootstrapped = await setup({ form: args.form, target: error.remote.replace(/^github\.com\//, ''), quiet: true, config: store, runner, home: args.home, hook: args.hook, wrapper: args.wrapper }, io);
+      const bootstrapped = await setup({ form: args.form, target: error.remote.replace(/^github\.com\//, ''), quiet: true, config: store, runner, home: args.home, hook: args.hook, wrapper: args.wrapper, editHook: args.editHook }, io);
       if (!bootstrapped.ok) {
         if (bootstrapped.refused) throw new RefusedError(bootstrapped.error);
         if (bootstrapped.cancelled) throw new CancelledError(bootstrapped.error);

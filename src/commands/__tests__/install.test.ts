@@ -9,7 +9,7 @@ import { installHook } from '../../lib/hook.js';
 import { placementHome, run } from '../install.js';
 import type { ProgressUpdate } from '../../lib/prompt.js';
 import { createConfigStore } from '../../lib/config.js';
-import { bareTeam, cloneWithIdentity, fakeGh, git, mappedRunner, person, pushFromSeed, ScriptedPrompter, NonInteractivePrompter, temporaryDirectory, wrapRunner, wrapperFor } from '../../lib/__tests__/fixtures.js';
+import { bareTeam, cloneWithIdentity, fakeGh, git, mappedRunner, person, pushFromSeed, ScriptedPrompter, NonInteractivePrompter, temporaryDirectory, wrapRunner, wrapperFor, editHookFor } from '../../lib/__tests__/fixtures.js';
 import { systemRunner } from '../../lib/runner.js';
 import { allowedTools } from '../../lib/schema.js';
 
@@ -37,7 +37,9 @@ describe('install (§6 refs)', () => {
       // The bundled wrapper is resolved from the package root (W-02), so whether it exists depends on whether this
       // checkout was built; an unavailable bundle keeps the wrapper step from asking and makes the case build-independent.
       const wrapper = { skillsRoot: join(home, '.claude', 'skills'), source: join(fixture.root, 'no-bundle', 'SKILL.md') };
-      expect(await run({ ref: 'acme/team/sample', config: store, home, runner, hook, wrapper }, io)).toMatchObject({ ok: true, value: [{ id }] });
+      // Same trick for the edit hook, for the same reason: an unavailable bundle reports and asks nothing.
+      const editHook = { storeRoot: join(fixture.root, 'state'), source: join(fixture.root, 'no-bundle', 'terum-skills-edit.mjs'), settingsFile: hook.settingsFile, backupDir: hook.backupDir };
+      expect(await run({ ref: 'acme/team/sample', config: store, home, runner, hook, wrapper, editHook }, io)).toMatchObject({ ok: true, value: [{ id }] });
       expect(spy).toHaveBeenCalledTimes(1);
       expect(spy.mock.calls[0]![0]).toMatchObject({ quiet: true });
       expect(io.asked).toEqual([]);
@@ -65,9 +67,9 @@ describe('install (§6 refs)', () => {
     const root = join(fixture.root, 'fresh'); const store = createConfigStore(join(root, 'state')); const home = join(root, 'home');
     const remote = 'https://github.com/acme/team.git';
     const runner = mappedRunner(remote, fixture.bare, fakeGh('bob', { 'api user/repository_invitations': { code: 0, stdout: '[]\n', stderr: '' } }));
-    // Identity: GitHub login and handle default to gh's login, then name and email; the §8 hook offer and the /terum-skills skill offer are declined.
-    const io = new ScriptedPrompter(['', '', 'Bob', 'bob@example.com'], [false, false]);
-    const result = await run({ ref: 'acme/team/sample', config: store, home, runner, hook: { settingsFile: join(root, 'settings.json'), backupDir: join(root, 'backups') }, wrapper: wrapperFor(home) }, io);
+    // Identity: GitHub login and handle default to gh's login, then name and email; the §8 hook offer, the /terum-skills skill offer and the edit-hook offer are declined.
+    const io = new ScriptedPrompter(['', '', 'Bob', 'bob@example.com'], [false, false, false]);
+    const result = await run({ ref: 'acme/team/sample', config: store, home, runner, hook: { settingsFile: join(root, 'settings.json'), backupDir: join(root, 'backups') }, wrapper: wrapperFor(home), editHook: editHookFor(join(root, 'state'), join(root, 'settings.json')) }, io);
     expect(result).toMatchObject({ ok: true, value: [{ id, team: 'team', path: join(home, '.claude', 'skills', 'sample') }] });
     expect((await store.read()).teams.team).toMatchObject({ handle: 'bob' });
     expect(await readFile(join(home, '.claude', 'skills', 'sample', 'SKILL.md'), 'utf8')).toContain('name: sample');
@@ -313,7 +315,9 @@ describe('install (§6 refs)', () => {
     // `persistedVersionSchema` still admits a 40-hex tree hash, so this is ordinary data on any
     // machine that installed before layout 3. The old guard tested the SHAPE of a forwarded version
     // and threw on it, aborting every skill in the batch — for a field install never even read.
-    await pushFromSeed(fixture.seed, 'people/mira.json', `${JSON.stringify(person('mira', { installed: [{ id, version: 'a'.repeat(40), scope: { kind: 'global' }, since: '2026-09-04' }] }))}\n`);
+    // §8.5 (amended 2026-09-13) moved the batch itself to `profile[]`, which makes the point sharper:
+    // the legacy `installed[]` version is not merely unread, it is not even the list being walked.
+    await pushFromSeed(fixture.seed, 'people/mira.json', `${JSON.stringify(person('mira', { installed: [{ id, version: 'a'.repeat(40), scope: { kind: 'global' }, since: '2026-09-04' }], profile: [{ id, name: 'sample', version: 'v1', added: '2026-09-04', via: 'install' }] }))}\n`);
     const home = join(fixture.root, 'home');
     const store = createConfigStore(join(fixture.root, 'state'));
     await cloneWithIdentity(fixture.bare, store.teamClone('team'));
@@ -323,6 +327,25 @@ describe('install (§6 refs)', () => {
     expect(result).toMatchObject({ ok: true });
     // Installed at the LATEST version, which is what §9.1 says install always does.
     expect(Object.values((await store.read()).placements)).toMatchObject([{ id, version: 'v1' }]);
+  });
+
+  // §8.5 (amended 2026-09-13): `profile[]` is optional in the schema, so a people file written before
+  // it shipped — or one whose owner declined every profile prompt — resolves to an empty batch. Saying
+  // so by name beats exiting 0 having placed nothing, which reads as a silent failure.
+  it('refuses a member whose profile is empty instead of installing nothing', async () => {
+    const fixture = await bareTeam();
+    const id = '33333333-3333-4333-8333-333333333333';
+    await pushFromSeed(fixture.seed, 'skills/sample/v1/SKILL.md', `---\nname: sample\ndescription: sample\nlicense: UNLICENSED\nmetadata:\n  id: ${id}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
+    // A full `installed[]` and no profile: exactly the pre-`profile[]` people file the schema still admits.
+    await pushFromSeed(fixture.seed, 'people/mira.json', `${JSON.stringify(person('mira', { installed: [{ id, version: 'v1', scope: { kind: 'global' }, since: '2026-09-04' }] }))}\n`);
+    const home = join(fixture.root, 'home');
+    const store = createConfigStore(join(fixture.root, 'state'));
+    await cloneWithIdentity(fixture.bare, store.teamClone('team'));
+    await store.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
+
+    const result = await run({ kind: 'member', member: 'mira', config: store, home }, new ScriptedPrompter());
+    expect(result).toMatchObject({ ok: false, error: expect.stringContaining('mira has nothing on their profile yet') });
+    expect(Object.values((await store.read()).placements)).toEqual([]);
   });
 
   it('resolves qualified, self-locating, and unique ID refs while rejecting ambiguous batch versions and prefixes without placement', async () => {
@@ -340,7 +363,7 @@ describe('install (§6 refs)', () => {
     ] as const) await pushFromSeed(first.seed, `skills/${name}/v1/SKILL.md`, `---\nname: ${name}\ndescription: ${description}\nlicense: UNLICENSED\nmetadata:\n  id: ${id}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
     await pushFromSeed(second.seed, 'skills/dup/v1/SKILL.md', `---\nname: dup\ndescription: from second\nlicense: UNLICENSED\nmetadata:\n  id: ${dupId}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
     await pushFromSeed(first.seed, 'people/me.json', `${JSON.stringify(person('me'))}\n`);
-    await pushFromSeed(first.seed, 'people/seed.json', `${JSON.stringify(person('seed', { installed: [{ id: memberId, version: null, scope: { kind: 'global' }, since: '2026-09-04' } ] }))}\n`);
+    await pushFromSeed(first.seed, 'people/seed.json', `${JSON.stringify(person('seed', { installed: [{ id: memberId, version: null, scope: { kind: 'global' }, since: '2026-09-04' } ], profile: [{ id: memberId, name: 'member-only', version: 'v1', added: '2026-09-04', via: 'install' }] }))}\n`);
     const home = join(first.root, 'home');
     const store = createConfigStore(join(first.root, 'state'));
     await cloneWithIdentity(first.bare, store.teamClone('team-a'));

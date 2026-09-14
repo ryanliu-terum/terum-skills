@@ -17,7 +17,7 @@ export interface Backend {
   status(q?: undefined, options?: ReadOptions): Promise<Result<StatusResult>>;
   settings(q?: undefined, options?: ReadOptions): Promise<Result<Settings>>;
   onboarding(q?: undefined, options?: ReadOptions): Promise<Result<Onboarding>>;
-  skillFile: {move(args:{path:string;to:string}):Run<SkillFileResult>;rename(args:{path:string;to:string}):Run<SkillFileResult>;delete(args:{path:string}):Run<SkillFileResult>;fix(args:{path:string}):Run<SkillFileResult>};
+  skillFile: {move(args:{path:string;to:string}):Run<SkillFileResult>;copy(args:{path:string;to:string}):Run<SkillFileResult>;rename(args:{path:string;to:string}):Run<SkillFileResult>;delete(args:{path:string}):Run<SkillFileResult>;fix(args:{path:string}):Run<SkillFileResult>};
   library(q: { scope: LibraryScope; team?: string }, options?: ReadOptions): Promise<Result<Library>>;
   localSkill(q: { path: string }, options?: ReadOptions): Promise<Result<SkillDetail>>;
   /** §7.1 L-PROJ: the folders this machine reads local skills from. Nothing else adds one. */

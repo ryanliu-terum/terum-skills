@@ -37,6 +37,8 @@ function generationAgent(prompts: string[]): AgentApi {
     },
   };
 }
+/** `transcript` with the resolved-skills list and the assistant text set independently: §7.3's contamination guard reads the first, a `transcript_mentions` check reads the second. */
+const armTranscript = (skills: string[], text: string): Transcript => Transcript.fromStream(`${JSON.stringify({ type: 'system', subtype: 'init', skills })}\n${JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text }] } })}\n${JSON.stringify({ type: 'result', result: 'done' })}`);
 const CASE = 'task: deploy\nchecks:\n  - transcript_mentions: deployed\n';
 const TRIGGERS = 'should_trigger: [deploy now]\nshould_not_trigger: [chat]\n';
 const armAgent: AgentApi = {
@@ -151,6 +153,9 @@ describe('eval (§6 / IE2)', () => {
     // The team supplies only the incumbent arm: with no team there is none, so the run is single-arm.
     const meta: unknown = JSON.parse((await readFile(join(result.value.runDir, 'run.jsonl'), 'utf8')).split('\n')[0]!);
     expect(meta).toMatchObject({ _meta: { expected_rows: 1, team: null } });
+    // `shareHint` is still on the result, but there is no team to publish to: the printed hint
+    // would name a command that cannot run.
+    expect(io.lines.join('\n')).not.toContain('publish the skill again');
   });
 
   it('§6.1: a folder with no metadata.id records skill_id null, and one that has an id records it', async () => {
@@ -263,19 +268,52 @@ describe('eval (§6 / IE2)', () => {
     await store.update((config) => { config.display_name = 'Seed'; config.email = 'seed@example.com'; });
     expect(await publishRun({ ref: 'sample', home, config: store }, new ScriptedPrompter([], [false]))).toMatchObject({ ok: true, value: { version: 'v1' } });
     await writeFile(join(folder, 'extra.md'), 'edited after publishing\n');
-    const result = await run(args(store, home, { agent: generationAgent([]), k: 1 }), new ScriptedPrompter());
+    const io = new ScriptedPrompter();
+    const result = await run(args(store, home, { agent: generationAgent([]), k: 1 }), io);
     expect(result).toMatchObject({ ok: true, value: { shareHint: true } });
     if (result.ok) expect(result.value.publishedTo).toBeUndefined();
+    // §6.3's hint, printed. The result field alone was invisible: before this the run that most
+    // needs a next step — an edited folder only this machine has seen — ended in silence.
+    expect(io.lines.join('\n')).toContain(`To share these results, publish the skill again: npx -y terum-skills@latest publish 'sample'`);
   });
 
-  it('--no-commit keeps a matching run on this machine', async () => {
+  it('§6.3: a FAIL names the publish command without recommending it', async () => {
+    const { store, home, folder } = await evalFixture({ assets: { 'evals/cases/happy.yaml': CASE } });
+    await store.update((config) => { config.display_name = 'Seed'; config.email = 'seed@example.com'; });
+    expect(await publishRun({ ref: 'sample', home, config: store }, new ScriptedPrompter([], [false]))).toMatchObject({ ok: true, value: { version: 'v1' } });
+    await writeFile(join(folder, 'extra.md'), 'edited after publishing\n');
+    // Inverted arms: the candidate (the arm with the skill staged) misses the check and the
+    // baseline meets it, so candidate-vs-baseline — the headline comparison — is a loss.
+    // The resolved-skills list still has to match what is staged, or §7.3's contamination guard
+    // refuses the run; only the transcript TEXT the check reads is inverted.
+    const losing: AgentApi = {
+      runAgent: (_task, cwd) => {
+        const candidate = existsSync(join(cwd, '.claude', 'skills', 'sample'));
+        return Promise.resolve(armTranscript(candidate ? ['sample'] : [], candidate ? 'nothing happened' : 'deployed'));
+      },
+      askJson: () => Promise.resolve({ selected: ['sample'] }),
+    };
+    const io = new ScriptedPrompter();
+    const result = await run(args(store, home, { agent: losing, k: 1, noGen: true }), io);
+    if (!result.ok) throw new Error(result.error);
+    expect(result).toMatchObject({ ok: true, value: { shareHint: true } });
+    const printed = io.lines.join('\n');
+    expect(printed).toContain('verdict: FAIL');
+    expect(printed).toContain("This run's verdict is FAIL: evaluate a fix rather than publishing these bytes");
+    expect(printed).not.toContain('To share these results');
+  });
+
+  it('--no-commit keeps a matching run on this machine, and says nothing about publishing', async () => {
     const { store, home } = await evalFixture();
     await store.update((config) => { config.display_name = 'Seed'; config.email = 'seed@example.com'; });
     expect(await publishRun({ ref: 'sample', home, config: store }, new ScriptedPrompter([], [false]))).toMatchObject({ ok: true, value: { version: 'v1' } });
     const before = (await git(['rev-parse', 'HEAD'], store.teamClone('team'))).trim();
-    const result = await run(args(store, home, { agent: generationAgent([]), k: 1, commit: false }), new ScriptedPrompter());
+    const io = new ScriptedPrompter();
+    const result = await run(args(store, home, { agent: generationAgent([]), k: 1, commit: false }), io);
     expect(result).toMatchObject({ ok: true, value: { shareHint: true } });
     expect((await git(['rev-parse', 'HEAD'], store.teamClone('team'))).trim()).toBe(before);
+    // --no-commit is the user declining to share this run; the hint must not argue with that.
+    expect(io.lines.join('\n')).not.toContain('publish the skill again');
   });
 
   it('D61: a generated asset never lands on an authored file, whatever the volume spells it', async () => {

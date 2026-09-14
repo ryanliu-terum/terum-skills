@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { PROJECTS_QUESTION, run as setup } from '../commands/setup.js';
 import { createConfigStore } from '../lib/config.js';
 import { HOOK_ENTRY, installHook } from '../lib/hook.js';
-import { fakeGh, git, mappedRunner, ScriptedPrompter, temporaryDirectory, wrapperFor } from '../lib/__tests__/fixtures.js';
+import { editHookFor, fakeGh, git, mappedRunner, ScriptedPrompter, temporaryDirectory, wrapperFor } from '../lib/__tests__/fixtures.js';
 
 const REMOTE = 'https://github.com/alice/team.git';
 const hookFor = (root: string, name: string) => ({ settingsFile: join(root, `${name}.json`), backupDir: join(root, `${name}-backups`) });
@@ -25,8 +25,8 @@ describe('M3 setup walkthrough', () => {
     const aliceStore = createConfigStore(join(root, 'alice-state'));
     const bare = join(root, 'team.git'); await git(['init', '-q', '--bare', bare]);
     const aliceRunner = mappedRunner(REMOTE, bare, fakeGh('alice', { 'repo create team --private': { code: 0, stdout: '', stderr: '' }, 'repo view team --json nameWithOwner -q .nameWithOwner': { code: 0, stdout: 'alice/team\n', stderr: '' } }));
-    const aliceIo = new ScriptedPrompter(['Create a new team', 'team', '', '', 'Alice', 'alice@example.com', 'team', ''], [false, false, false], true);
-    const alice = await setup({ app: false, config: aliceStore, home: join(root, 'alice-home'), runner: aliceRunner, hook: hookFor(root, 'alice-setup'), wrapper: wrapperFor(join(root, 'alice-home')), communityUrl: '' }, aliceIo);
+    const aliceIo = new ScriptedPrompter(['Create a new team', 'team', '', '', 'Alice', 'alice@example.com', 'team', ''], [false, false, false, false], true);
+    const alice = await setup({ app: false, config: aliceStore, home: join(root, 'alice-home'), runner: aliceRunner, hook: hookFor(root, 'alice-setup'), wrapper: wrapperFor(join(root, 'alice-home')), editHook: editHookFor(join(root, 'alice-state'), hookFor(root, 'alice-setup').settingsFile), communityUrl: '' }, aliceIo);
     expect(alice).toMatchObject({ ok: true, value: { steps: { team: 'done', invite: 'skipped', done: 'printed' } } });
     expect(aliceIo.asked).toContain(PROJECTS_QUESTION);
     // A newly created, empty team has no candidate to offer for evaluation.

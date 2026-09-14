@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { cardActions, detailPath } from './skill-card-actions';
+import { cardActions, detailHref, detailPath } from './skill-card-actions';
 import type { SkillCard, TeamState } from '../../backend/types';
 
 function card(over:Partial<SkillCard>={}):SkillCard {
@@ -14,13 +14,13 @@ it('addresses a team skill by name and a local folder by path', () => {
 
 it('carries the marketplace origin into every row it links to', () => {
  const rows=cardActions(card({placed:false,installed:'absent',teamState:'endorsed'}),{origin:'root=marketplace'});
- expect(rows.find(a=>a.key==='open')?.to).toBe('/skill/deploy-check?root=marketplace');
+ expect(detailHref(card({placed:false,installed:'absent',teamState:'endorsed'}),'root=marketplace')).toBe('/skill/deploy-check?root=marketplace');
  expect(rows.find(a=>a.key==='place')?.to).toBe('/skill/deploy-check?dialog=install&root=marketplace');
 });
 
 it('keeps the marketplace origin off the local-folder route, which has no marketplace', () => {
  const rows=cardActions(card({teamed:false,path:'~/.claude/skills/notes',placed:true}),{origin:'root=marketplace'});
- expect(rows.find(a=>a.key==='open')?.to).toBe('/skill/local?path=' + encodeURIComponent('~/.claude/skills/notes'));
+ expect(detailHref(card({teamed:false,path:'~/.claude/skills/notes',placed:true}),'root=marketplace')).toBe('/skill/local?path=' + encodeURIComponent('~/.claude/skills/notes'));
  expect(rows.find(a=>a.key==='delete')?.to).toBe('/skill/local?path=' + encodeURIComponent('~/.claude/skills/notes') + '&dialog=file-delete');
 });
 
@@ -64,17 +64,30 @@ it('gates Run eval on the local folder with a reason, keeping the row', () => {
  expect(cardActions(card({path:null}),{runEvalInApp:true}).find(a=>a.key==='run-eval')).toMatchObject({to:null,reason:'Install it first — evals run against the copy on your machine.'});
 });
 
-it('keeps the same five rows whatever the state, so the menu does not change shape', () => {
+it('keeps the same rows whatever the state, so the menu does not change shape', () => {
  for(const skill of [card(),card({placed:false,installed:'absent',teamState:'unshared'}),card({placed:false,onDiskOnly:true,teamState:'shared'})]) {
-  expect(cardActions(skill,{runEvalInApp:true}).map(a=>a.key)).toEqual(['open','run-eval','place','publish']);
+  expect(cardActions(skill,{runEvalInApp:true}).map(a=>a.key)).toEqual(['run-eval','place','publish']);
  }
+});
+
+it('offers no Open row: the card title is that link, and detailHref is where it points', () => {
+ expect(cardActions(card(),{runEvalInApp:true}).some(a=>(a.key as string)==='open')).toBe(false);
+ expect(cardActions(card({teamed:false,path:'~/.claude/skills/notes'})).some(a=>(a.key as string)==='open')).toBe(false);
+ expect(detailHref(card())).toBe('/skill/deploy-check');
+});
+
+it('offers Copy to… beside Move to… on a local folder, and on no team skill — those reach a second root by installing', () => {
+ const local=cardActions(card({teamed:false,path:'~/.claude/skills/notes'}));
+ expect(local.map(a=>a.key)).toEqual(['move','copy','rename','delete','publish']);
+ expect(local.find(a=>a.key==='copy')).toMatchObject({label:'Copy to…',to:'/skill/local?path='+encodeURIComponent('~/.claude/skills/notes')+'&dialog=file-copy',reason:null});
+ expect(cardActions(card()).some(a=>a.key==='copy')).toBe(false);
 });
 
 it('rides a checkout origin exactly as it rides the marketplace one',()=>{
  const origin='root=%2FUsers%2Fyou%2Fcode%2Fterum',rows=cardActions(card(),{origin});
- expect(rows.find(a=>a.key==='open')?.to).toBe('/skill/deploy-check?'+origin);
+ expect(detailHref(card(),origin)).toBe('/skill/deploy-check?'+origin);
  expect(rows.find(a=>a.key==='place')?.to).toBe('/skill/deploy-check?dialog=remove&'+origin);
  const local=cardActions(card({teamed:false,path:'~/.claude/skills/notes'}),{origin});
- expect(local.find(a=>a.key==='open')?.to).toBe('/skill/local?path='+encodeURIComponent('~/.claude/skills/notes'));
+ expect(detailHref(card({teamed:false,path:'~/.claude/skills/notes'}),origin)).toBe('/skill/local?path='+encodeURIComponent('~/.claude/skills/notes'));
  expect(local.find(a=>a.key==='delete')?.to).toBe('/skill/local?path='+encodeURIComponent('~/.claude/skills/notes')+'&dialog=file-delete');
 });

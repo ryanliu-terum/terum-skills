@@ -1,6 +1,6 @@
 # desktop-scroll-panes — the Library grid and the Skill detail column scroll
 
-**Status:** locked (Teddy, 2026-09-09: "let me scroll"). Owner of the fork-free decisions below: Claude (orchestrator). No design fork is resolved here.
+**Status:** superseded for the skill detail on 2026-09-13 by `.planning/specs/2026-09-13-desktop-ui-polish.md` §A (Teddy: "the eval report should scroll independently and actually scroll fully") — the column no longer scrolls as one piece; each tab body is its own pane. The Library grid half below still stands. Originally: locked (Teddy, 2026-09-09: "let me scroll"). Owner of the fork-free decisions below: Claude (orchestrator). No design fork is resolved here.
 
 **Sources:** `desktop/AGENTS.md` invariants 4, 5, 7, 8; the existing scroller precedent `.market-home`, `.market-page-main`, `.inbox-rows`, `.inbox-pane`, `.share-table-wrap` (`overflow:auto;scrollbar-width:none`); the fidelity gate (`e2e/fidelity`, 88 locked boards, captured at scrollTop 0).
 

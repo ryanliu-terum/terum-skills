@@ -137,7 +137,7 @@ hello lines under `.planning/codex-runs/*/frames/` precede B5's three skill verb
 `src/lib/frames.ts` now advertises this complete verb list:
 
 ```json
-["skill move","skill rename","skill delete","skill fix","project add","project remove","project list","login","setup","team create","team join","team remove","team leave","team move","team workflow-update","team project create","invite","ls","status","reconcile","publish","validate","eval","eval-report","install","uninstall-skill","uninstall","sync","prune","search","update","app","profile","app-update","serve"]
+["skill move","skill copy","skill rename","skill delete","skill fix","project add","project remove","project list","login","setup","team create","team join","team remove","team leave","team move","team workflow-update","team project create","invite","ls","status","reconcile","publish","validate","eval","eval-report","install","uninstall-skill","uninstall","sync","prune","search","update","app","profile","app-update","serve"]
 ```
 
 `team migrate` is registered but terminal-only: under `--frames` it fails before doing any work and tells the
@@ -251,10 +251,13 @@ Off-list categories produce an HYG7 warning at publish. Eval and validate do not
 list. The publish result is `{ team, id, name, project, version, created, identicalTo, attachedEvals,
 profileAdded, projectAdded }`; `version` is null on identical content and `identicalTo` names that version.
 
-`skill move <path> --to global|<project root>`, `skill rename <path> --to <new-name>`, and
+`skill move <path> --to global|<project root>`, `skill copy <path> --to global|<project root>`,
+`skill rename <path> --to <new-name>`, and
 `skill delete <path>` are one-shot frame writes. Their `text` ask is `Type <name> to <operation> this folder`.
 They require a direct child of a Library root and refuse symlinks. Move preserves local bytes;
-a destination collision is kept in that root's old-skills (an existing backup refuses). Rename
+a destination collision is kept in that root's old-skills (an existing backup refuses). Copy is move
+without the removal: the source folder and its ledger row stay, the new folder carries the source's
+`metadata.id` and no ledger row of its own, and the same collision rule applies at the destination. Rename
 rewrites readable frontmatter to match the new folder name; publishing under a new name starts
 a new lineage. Delete removes an unmodified placement outright, quarantines an edited placement,
 and quarantines a folder not tracked as a placement. Placement deletion also updates install records.
@@ -268,7 +271,8 @@ It then runs the same inspection and hygiene gate as `ls --local` and `validate`
 needs a person under `Still needs you (N):`. When it repaired nothing and findings remain, the run
 fails with that list; when nothing remains it says hygiene passes. The result is the same
 `{ kind: 'fix', path, destination: null, quarantined: null, installed, notices }` shape as the other
-three, and `validate`'s result carries `repairable`, the count of changes `skill fix` would make.
+three, and `validate`'s result carries `repairs`, one sentence per change `skill fix` would make, and
+`repairable`, their count.
 
 `prune` lists quarantine paths and asks `Delete <n> quarantined item(s)?`; empty quarantine asks
 nothing. Its result is `{ deleted, declined }`. It does not clean old-skills.

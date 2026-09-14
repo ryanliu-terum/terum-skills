@@ -145,7 +145,11 @@ it('derives Marketplace metadata and counts from the re-recorded (0.14.0) mock-v
   const terum = c.projects.find(p => p.name === 'terum')!;
   expect(terum).toMatchObject({ admin: null, desc: '', evaluated: null, updated: '1 day ago', path: null, skillsIn: ['tdd'] });
   expect(terum.updated).toBe(relativeTime(c.skills.find(s => s.name === 'tdd')!.updated));
-  expect(c.people.find(p => p.handle === 'mira')).toMatchObject({ publishLine: 'Published deploy-check · 1 day ago', lastPublish: '1 day ago · deploy-check', placeNote: '1 of 2 on this machine · install places the other 1', skills: ['deploy-check'], installable: ['deploy-check', 'tdd'], onDisk: [1, 2] });
+  // §8.5 (amended 2026-09-13): this recording predates `profile[]` and carries an empty one for every
+  // member, so the derived pair is empty too — deliberately asserted rather than patched away. It is the
+  // real consequence of the one-list rule: a teammate who has curated nothing has nothing to install from,
+  // even with a full `installed[]`. Authorship (`skills`) and the publish line are unaffected.
+  expect(c.people.find(p => p.handle === 'mira')).toMatchObject({ publishLine: 'Published deploy-check · 1 day ago', lastPublish: '1 day ago · deploy-check', placeNote: '', skills: ['deploy-check'], installable: [], onDisk: [0, 0] });
   expect(c.people.find(p => p.handle === 'ravi')).toMatchObject({ publishLine: 'Published diagnose · 1 day ago', lastPublish: '1 day ago · diagnose' });
   for (const person of c.people) expect(person).toMatchObject({ role: null, organization: null, teamsLine: 'On no project yet' });
   for (const skill of c.skills) expect(skill.installs).toMatch(/^\d+ installs?$/);

@@ -1,4 +1,4 @@
-import { localActionReason } from '../../components/domain/skill-card-actions';
+import { localActionReason, localRef } from '../../components/domain/skill-card-actions';
 import { useEffect, useState } from 'react';
 import { useCapabilities } from '../../backend';
 import type { SkillDetail } from '../../backend/types';
@@ -21,7 +21,7 @@ export function RunEvalDialog({skill:s,open,onClose}:{skill:SkillDetail;open:boo
  function close(){if(active)evalRun.dismiss();onClose();}
  // The CLI's `eval` verb takes the skill, never the URL segment: on the by-path route that segment
  // is the literal word `local`, which must never be passed to the CLI as the skill name.
- const ref=!s.teamed&&s.path?s.path:s.name;
+ const ref=localRef(s);
  function start(){try{evalRun.start({ref,name:s.name,...(s.team?{team:s.team}:{})});onClose();}catch(reason){setError(reason instanceof Error?reason.message:String(reason));}}
  // The wizard's Overnight choice for one skill: queued for the app's 01:00–05:00 window through the same several-skills verb.
  function queue(){try{if(!evalRun.startMany)throw new Error('This app cannot queue evals.');evalRun.startMany({refs:[ref],mode:'overnight',...(s.team?{team:s.team}:{})});onClose();}catch(reason){setError(reason instanceof Error?reason.message:String(reason));}}

@@ -74,8 +74,12 @@ export function buildProgram(execute: Execute, verbs: CliVerbs = { login, team: 
     .option('--no-evals', 'do not offer to evaluate the shared skills that have no receipt')
     .action(async (target: string | undefined, options: { app?: boolean; projects?: boolean; existing?: boolean; evals?: boolean }) => execute((io) => active.setup({ form: context.form, target, app: options.app, projects: options.projects, ...(options.existing === false ? { existing: false } : {}), evals: options.evals, cwd: process.cwd() }, io), { verb: 'setup', notices: true }));
 
-  const skill = program.command('skill').description('Move, rename, delete, or fix a folder in your Library');
-  for (const kind of ['move', 'rename'] as const) skill.command(`${kind} <path>`).requiredOption('--to <destination>', kind === 'move' ? 'global or a registered project root' : 'new skill name')
+  const skill = program.command('skill').description('Move, copy, rename, delete, or fix a folder in your Library');
+  for (const kind of ['move', 'copy', 'rename'] as const) skill.command(`${kind} <path>`)
+    .description(kind === 'move' ? 'Move a Library folder to another root; the original is gone'
+      : kind === 'copy' ? 'Copy a Library folder into another root; the original stays where it is'
+      : 'Rename a Library folder; the folder name is the invocation name')
+    .requiredOption('--to <destination>', kind === 'rename' ? 'new skill name' : 'global or a registered project root')
     .action(async (path: string, options: { to: string }) => execute(io => active.skill({ form: context.form, kind, path, to: options.to }, io), { verb: `skill ${kind}`, notices: true }));
   skill.command('delete <path>').description('Remove a Library folder after typing its name')
     .action(async (path: string) => execute(io => active.skill({ form: context.form, kind: 'delete', path }, io), { verb: 'skill delete', notices: true }));

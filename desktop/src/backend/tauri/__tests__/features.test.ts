@@ -39,7 +39,7 @@ it('delivers hello to the adapter callback but never to the seam frame stream',a
 });
 it.each(['windows','linux'])('uses native decorations on %s',async platform=>{
  const f=fakeBridge((_args,emit)=>emit({kind:'exit',code:1}));f.bridge.hostPlatform=async()=>platform;
- expect(await createTauriBackend(f.bridge).capabilities()).toMatchObject({windowChrome:'native'});
+ expect(await createTauriBackend(f.bridge).capabilities()).toMatchObject({windowChrome:'native',windowControlsEnd:null});
 });
 it('declares reconcile once and gives it exactly one drawn feature consumer',()=>{
  expect(FEATURE_KEYS.filter(key=>key==='reconcile')).toEqual(['reconcile']);

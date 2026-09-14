@@ -25,6 +25,7 @@ import { relativeTime } from '../../lib/relative-time';
 import { personPlaceNote, plural } from '../../screens/marketplace/market-data';
 import { SHORTCUTS } from '../../lib/shortcuts';
 import { abbreviateHome, stripRemote } from '../paths';
+import { macWindowControlsEnd } from '../window-controls';
 import { scannedRoots } from './scanned-roots';
 import { cliRefresh, createRefreshPolicy, createWorkflowGate } from './refresh';
 // §3.2: the version vocabulary exists once. This leaf imports nothing at all, which is the only
@@ -60,7 +61,7 @@ export const cliSetup = z.object({ role: z.enum(['creator', 'joiner']), team: z.
 // §6.3: a local eval runs against a folder in the Library, which may belong to no team at all —
 // hence the nullable `team` and `id`. `shareHint` is the caller's cue to offer publishing.
 export const cliEval = z.object({ name:z.string(),runDir:z.string(),executionStatus:z.enum(['complete','partial','failed']),team:z.string().nullish().transform(v=>v??null),id:z.string().nullish().transform(v=>v??null),shareHint:z.literal(true).optional(),alreadyEvaluated:z.boolean().optional() }).passthrough();
-const cliValidate = z.object({ name: z.string(), findings: z.number(), warnings: z.number(), repairable: z.number().optional().transform(value => value ?? 0) });
+const cliValidate = z.object({ name: z.string(), findings: z.number(), warnings: z.number(), repairable: z.number().optional().transform(value => value ?? 0), repairs: z.array(z.string()).optional().transform(value => value ?? []) });
 export const cliSearch = z.array(z.object({ team: z.string().optional(), id: z.string(), name: z.string(), author: z.string(), category: z.string(), installs: z.number(), latest: z.string(), description: z.string(), grants: z.string().nullable(), grantsHash: z.string().nullable(), updated: z.string() }));
 
 const cliScope = z.discriminatedUnion('kind', [z.object({ kind: z.literal('global') }), z.object({ kind: z.literal('project'), project: z.string() })]);
@@ -80,9 +81,9 @@ export const cliPerson = z.object({ handle: z.string(), display_name: z.string()
 export const cliProject = z.object({ name: z.string(), skills: z.array(z.string()), remotes: z.array(z.string()), description: z.string().optional() }).catchall(z.unknown());
 // S7g: every `ls --local` row carries typed provenance and a read-only health; the prose `state` is never parsed.
 const cliLocalHealth = z.enum(['up-to-date', 'update-available', 'local-changed', 'both', 'gone-from-repo', 'untracked', 'unknown']);
-export const cliLocalRow = z.object({ body: z.string().nullish(), frontmatter: z.string().nullish(), name: z.string(), path: z.string(), state: z.string(), tracked: z.boolean(), placement: z.strictObject({ id: z.string(), team: z.string(), version: z.string().nullable() }).nullable(), health: cliLocalHealth, edited:z.boolean().optional(), localEval:cliReceipt.extend({mine:z.boolean().optional()}).nullable().optional(), localEvalStale:z.boolean().optional(), teamEval:cliReceipt.extend({team:z.string(),mine:z.boolean()}).nullable().optional(), matchedVersion:z.string().nullable().optional(), matchedName:z.string().nullable().optional(), matchedTeam:z.string().nullable().optional(), knownToTeam:z.boolean().optional(), category: z.string().nullish().transform(v=>v??null), description: z.string().nullish().transform(value => value ?? null), characters: z.number().nullish().transform(value => value ?? null), problem: z.string().optional(), skillId: z.string().nullable().optional(), placed: z.boolean().optional() }).strict();
+export const cliLocalRow = z.object({ body: z.string().nullish(), frontmatter: z.string().nullish(), name: z.string(), path: z.string(), state: z.string(), tracked: z.boolean(), placement: z.strictObject({ id: z.string(), team: z.string(), version: z.string().nullable() }).nullable(), health: cliLocalHealth, edited:z.boolean().optional(), localEval:cliReceipt.extend({mine:z.boolean().optional()}).nullable().optional(), localEvalStale:z.boolean().optional(), teamEval:cliReceipt.extend({team:z.string(),mine:z.boolean()}).nullable().optional(), matchedVersion:z.string().nullable().optional(), matchedName:z.string().nullable().optional(), matchedTeam:z.string().nullable().optional(), knownToTeam:z.boolean().optional(), category: z.string().nullish().transform(v=>v??null), description: z.string().nullish().transform(value => value ?? null), characters: z.number().nullish().transform(value => value ?? null), updated: z.string().nullish().transform(value => value ?? null), problem: z.string().optional(), skillId: z.string().nullable().optional(), placed: z.boolean().optional() }).strict();
 export const cliLocalSection = z.object({ root:z.string(), scope:z.enum(['global','project']), repoRoot:z.string().optional(), remote:z.object({url:z.string(),slug:z.string().nullable()}).nullish(), registered:z.boolean().optional(), rootState:z.enum(['scanned','absent','unreadable']).optional(), label:z.string().optional(), counts:z.object({skillFolders:z.number(),connectable:z.number()}).optional(), rows:z.array(cliLocalRow), notOffered:z.array(z.object({body:z.string().nullish(),frontmatter:z.string().nullish(),skillId:z.string().nullable().optional(),name:z.string(),path:z.string(),reason:z.string(),detail:z.string().optional(),category:z.string().nullish().transform(v=>v??null),description:z.string().nullish().transform(value=>value??null),characters:z.number().nullish().transform(value=>value??null)})).optional(), problems:z.array(z.object({path:z.string(),reason:z.string()})) });
-export const cliSkillFile=z.object({kind:z.enum(['move','rename','delete','fix']),path:z.string(),destination:z.string().nullable(),quarantined:z.string().nullable(),installed:z.boolean(),notices:z.array(z.string())});
+export const cliSkillFile=z.object({kind:z.enum(['move','copy','rename','delete','fix']),path:z.string(),destination:z.string().nullable(),quarantined:z.string().nullable(),installed:z.boolean(),notices:z.array(z.string())});
 const cliReconcileRow = z.object({path:z.string(),name:z.string(),team:z.string(),skillId:z.string().nullable()});
 export const cliReconcile = z.object({
   identical:z.array(cliReconcileRow.extend({version:z.string()})),
@@ -187,9 +188,9 @@ function localCard(row:LocalRow&{fixable?:boolean},section:LocalSection,home:str
   // A local card makes no claim about team installs; the team fields stay neutral except the two
   // byte-level overlays (spec §2 §7.4): the version its bytes are, and the receipt for those bytes.
   // The identity line names the root the folder lives in, never the word 'local'.
-  return {edited:row.edited??row.health==='local-changed',localEval:shown.eval,localEvalStale:row.localEvalStale??false,localMatch:libraryMatch(row),knownToTeam:row.knownToTeam??false,installedVersion:libraryVersion(row),latestVersion:null,evalVersion:null,evalStale:false,latestEvalState:null,profileVersion:null,teamed:false,path:row.path,name:row.name,desc:row.problem!==undefined?row.path+' · '+row.problem:cardSummary(row.body,row.description),project:labelOf(section),category:row.category??'—',installs:'—',installsN:0,installed:'placed',placed,onDiskOnly:!placed,teamState:'unknown',paths:[[abbreviateHome(row.path,home),section.scope]],projectRoots:section.repoRoot?[abbreviateHome(section.repoRoot,home)]:[],flags:row.problem!==undefined?['broken']:local?['local']:[],...(row.fixable?{fixable:true}:{}),flagText:row.problem!==undefined?{broken:row.problem}:local?{local:'Local'}:{},grants:null,normalizedGrants:null,grantsHash:null,...tokenLabel(row.characters),wlt:summary?[summary.w,summary.l,summary.t]:null,summary,provenance:receipt?{model:receipt.provenance.model,k:receipt.provenance.k,ccVersion:receipt.provenance.cc_version,runner:receipt.provenance.runner_handle,when:receipt.provenance.timestamp.slice(0,10)}:null,favorite:false,favorites:null,enabled:true,updated:null,indicators:{broken:{icon:'alert',token:'bad',text:'The skill version could not be resolved.'},update:{icon:'arrow-up-circle',token:'warn',text:''},local:{icon:'pencil',token:'text3',text:''}}};}
+  return {edited:row.edited??row.health==='local-changed',localEval:shown.eval,localEvalStale:row.localEvalStale??false,localMatch:libraryMatch(row),knownToTeam:row.knownToTeam??false,installedVersion:libraryVersion(row),latestVersion:null,evalVersion:null,evalStale:false,latestEvalState:null,profileVersion:null,teamed:false,path:row.path,name:row.name,desc:row.problem!==undefined?row.path+' · '+row.problem:cardSummary(row.body,row.description),project:labelOf(section),category:row.category??'—',installs:'—',installsN:0,installed:'placed',placed,onDiskOnly:!placed,teamState:'unknown',paths:[[abbreviateHome(row.path,home),section.scope]],projectRoots:section.repoRoot?[abbreviateHome(section.repoRoot,home)]:[],flags:row.problem!==undefined?['broken']:local?['local']:[],...(row.fixable?{fixable:true}:{}),flagText:row.problem!==undefined?{broken:row.problem}:local?{local:'Local'}:{},grants:null,normalizedGrants:null,grantsHash:null,...tokenLabel(row.characters),wlt:summary?[summary.w,summary.l,summary.t]:null,summary,provenance:receipt?{model:receipt.provenance.model,k:receipt.provenance.k,ccVersion:receipt.provenance.cc_version,runner:receipt.provenance.runner_handle,when:receipt.provenance.timestamp.slice(0,10)}:null,favorite:false,favorites:null,enabled:true,updated:row.updated ?? null,indicators:{broken:{icon:'alert',token:'bad',text:'The skill version could not be resolved.'},update:{icon:'arrow-up-circle',token:'warn',text:''},local:{icon:'pencil',token:'text3',text:''}}};}
 function notOfferedCard(entry:NotOffered,section:LocalSection,home:string):SkillCard {
-  return localCard({name:entry.name,path:entry.path,state:'',tracked:false,placement:null,health:'unknown',category:entry.category,description:entry.description,characters:entry.characters,problem:entry.detail??entry.reason,fixable:entry.reason==='invalid-yaml'||entry.reason==='name-mismatch'},section,home);
+  return localCard({name:entry.name,path:entry.path,state:'',tracked:false,placement:null,health:'unknown',category:entry.category,description:entry.description,characters:entry.characters,updated:null,problem:entry.detail??entry.reason,fixable:entry.reason==='invalid-yaml'||entry.reason==='name-mismatch'},section,home);
 }
 function localDetail(card:SkillCard,section:LocalSection,path:string,home:string):SkillDetail {
   const pathLabel=abbreviateHome(path,home);
@@ -731,8 +732,9 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
       return Object.fromEntries(FEATURE_KEYS.map(key => [key, hello?.features[key] ?? false])) as Features;
     },
     async capabilities(): Promise<Capabilities> {
-      const [platform, features] = await Promise.all([bridge.hostPlatform().catch(() => 'unknown'), backend.features()]);
-      return { appVersion: import.meta.env.VITE_APP_VERSION, windowChrome: platform === 'macos' ? 'mac-overlay' : 'native', disablePerMachine: features.disablePerMachine, inboxEventLog: false, offtargetKind: false, machineRegistry: false, perCaseEvalTables: features.perCase, openInEditor: true, clipboard: true };
+      const [platform, version, features] = await Promise.all([bridge.hostPlatform().catch(() => 'unknown'), bridge.hostOsVersion().catch(() => null), backend.features()]);
+      const windowChrome = platform === 'macos' ? 'mac-overlay' : 'native';
+      return { appVersion: import.meta.env.VITE_APP_VERSION, windowChrome, windowControlsEnd: windowChrome === 'mac-overlay' ? macWindowControlsEnd(version) : null, disablePerMachine: features.disablePerMachine, inboxEventLog: false, offtargetKind: false, machineRegistry: false, perCaseEvalTables: features.perCase, openInEditor: true, clipboard: true };
     },
     async surfaces(): Promise<Surfaces> {
       return { divergence: false, status: true, settings: true, onboarding: false, library: true, skill: true, receipts: true, inbox: false, catalog: true, roster: true, update: true, libraryProjects:true, appUpdate:true };
@@ -788,6 +790,7 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
     },
     skillFile:{
       move:({path,to})=>run(['skill','move','--to',to,'--',path],cliSkillFile,v=>v,['config']),
+      copy:({path,to})=>run(['skill','copy','--to',to,'--',path],cliSkillFile,v=>v,['config']),
       rename:({path,to})=>run(['skill','rename','--to',to,'--',path],cliSkillFile,v=>v,['config']),
       delete:({path})=>run(['skill','delete','--',path],cliSkillFile,v=>v,['config','clone']),
       fix:({path})=>run(['skill','fix','--',path],cliSkillFile,v=>v,['config']),
@@ -875,12 +878,16 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
         const authoredIds = new Set(detail.authored);
         const authored = inventory.skills.filter(skill => authoredIds.has(skill.id));
         const names = authored.map(skill => skill.name);
-        const installedIds = new Set(detail.installed.map(item => item.id));
-        const installable = inventory.skills.filter(skill => installedIds.has(skill.id));
+        // §8.5 (amended 2026-09-13): the person page is one list — `profile[]`, what they stand behind
+        // — so `installable` is that list too. It drives the count, the Install button's label and
+        // `install member`, which reads the same field (`src/commands/install.ts`): one number, one
+        // promise. `installed[]` is still read by the roster, just no longer drawn as a second bucket.
+        const profileIds = new Set(detail.profile.map(entry => entry.id));
+        const installable = inventory.skills.filter(skill => profileIds.has(skill.id));
         const latest = newestUpdated(authored);
         const lastPublish = latest ? `${relativeTime(latest.updated)} · ${latest.name}` : '—';
         const disk: Person['onDisk'] = [installable.filter(skill => onDisk(local.value, team.team, skill.id, { localIdentity: hello?.features.localIdentity ?? false }).length > 0).length, installable.length];
-        people.push({ ...member, joined: member.joined ?? '—', role: detail.role, lastPublish, last_publish: lastPublish, organization: null, skills: names, installable: installable.map(skill => skill.name), adoption: authored.reduce((sum, skill) => sum + skill.installs, 0), publishLine: latest ? `Published ${latest.name} · ${relativeTime(latest.updated)}` : authored.length === 0 ? 'Nothing shared yet' : '—', teamsLine: member.projects.join(' · ') || 'On no project yet', buckets: [['On their profile', detail.profile.map(entry => entry.name)], ['Installed', installable.map(skill => skill.name)]], profileVersions: Object.fromEntries(detail.profile.map(entry => [entry.name, entry.version])), placeNote: personPlaceNote(disk), onDisk: disk });
+        people.push({ ...member, joined: member.joined ?? '—', role: detail.role, lastPublish, last_publish: lastPublish, organization: null, skills: names, installable: installable.map(skill => skill.name), adoption: authored.reduce((sum, skill) => sum + skill.installs, 0), publishLine: latest ? `Published ${latest.name} · ${relativeTime(latest.updated)}` : authored.length === 0 ? 'Nothing shared yet' : '—', teamsLine: member.projects.join(' · ') || 'On no project yet', buckets: [['On their profile', installable.map(skill => skill.name)]], profileVersions: Object.fromEntries(detail.profile.map(entry => [entry.name, entry.version])), placeNote: personPlaceNote(disk), onDisk: disk });
       }
       return { ok: true, value: catalogModel(team, inventory, local.value, placements, people, { localIdentity: hello?.features.localIdentity ?? false }, await home(), query?.q) };
     },

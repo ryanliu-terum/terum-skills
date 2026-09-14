@@ -93,7 +93,7 @@ export function createMockBackend(opts:{latencyMs?:number}={}):Backend & {readon
   ()=>({installedVersion:null,localMatch:'none',placed:false,installed:'placed',onDiskOnly:true,edited:false,knownToTeam:false}),
  ];
  function localProjection<T extends SkillCard>(card:T):T {return {...card,teamed:false,installs:'—',installsN:0,teamState:'unknown',latestVersion:null,installedVersion:null,localMatch:card.flags.includes('local')?'none':null,knownToTeam:!card.flags.includes('local'),evalVersion:null,evalStale:false,latestEvalState:null,profileVersion:null,edited:card.flags.includes('local'),flags:card.flags.filter(flag=>flag!=='update'),localEval:card.summary?{...card.summary,runnerHandle:null,version:null}:null};}
- function fileRun(kind:'move'|'rename'|'delete',path:string,to?:string){return long('library',async ctx=>{
+ function fileRun(kind:'move'|'copy'|'rename'|'delete',path:string,to?:string){return long('library',async ctx=>{
   const name=path.split('/').at(-1)!;
   if(await ctx.ask('text',`Type ${name} to ${kind} this folder`)!==name)return cancelled('The name did not match; nothing changed.');
   const destination=kind==='delete'?null:kind==='rename'?path.slice(0,path.lastIndexOf('/')+1)+to:(to==='global'?'~':to)+'/.claude/skills/'+name;
@@ -110,9 +110,11 @@ export function createMockBackend(opts:{latencyMs?:number}={}):Backend & {readon
    notices.push('Your previous copy is kept at '+kept+'.');
   }
   const prior=[...fileChanges.entries()].find(([,change])=>change.path===path),original=prior?.[1].original??name;
-  fileChanges.set(prior?.[0]??path,{path:destination,name:kind==='rename'?to!:name,original});
+  // A copy adds a second card and leaves the source's entry untouched; every other kind relocates the one card.
+  if(kind==='copy')fileChanges.set(destination!,{path:destination,name,original});
+  else fileChanges.set(prior?.[0]??path,{path:destination,name:kind==='rename'?to!:name,original});
   for(const listener of listeners)listener('config');
-  notices.push(kind==='delete'?'Moved to quarantine.':`${kind==='rename'?'Renamed':'Moved'} ${path} to ${destination}.`);
+  notices.push(kind==='delete'?'Moved to quarantine.':`${kind==='rename'?'Renamed':kind==='copy'?'Copied':'Moved'} ${path} to ${destination}.`);
   return ok({kind,path,destination,quarantined:kind==='delete'?'~/.terum/skills/quarantine/'+name:null,installed:false,notices});
  });}
 
@@ -145,7 +147,7 @@ export function createMockBackend(opts:{latencyMs?:number}={}):Backend & {readon
   async openUrl(url){try{window.open(url,'_blank','noopener');return ok(undefined);}catch(error){return fail(error instanceof Error?error.message:String(error));}},
   async revealPath(){return ok(undefined);},
   async pickFolder(){return ok('/Users/you/code/new-project');},
-  async capabilities(){return {appVersion:design.APP_VERSION,windowChrome:'cosmetic',disablePerMachine:true,inboxEventLog:true,offtargetKind:true,machineRegistry:true,perCaseEvalTables:true,openInEditor:true,clipboard:true};},
+  async capabilities(){return {appVersion:design.APP_VERSION,windowChrome:'cosmetic',windowControlsEnd:null,disablePerMachine:true,inboxEventLog:true,offtargetKind:true,machineRegistry:true,perCaseEvalTables:true,openInEditor:true,clipboard:true};},
   async surfaces(){return {divergence:true,status:true,settings:true,onboarding:true,library:true,skill:true,receipts:true,inbox:true,catalog:true,roster:true,update:true,libraryProjects:false,appUpdate:false};},
   async status(){return structuredClone(ok({machine:{...design.MACHINE,hostname:design.MACHINE.name},me:identity,teams:readScenario()==='no-team'?[]:mockTeams(),tools:{git:true,gh:true},roots:mockRoots(),counts:statusCounts(location.hash,readScenario())}));},
   settings:async()=>{const result=await read<Settings>('settings',()=>ok({INVITE_TIP:design.INVITE_TIP,JOIN_BLOCK_NOTE:design.JOIN_BLOCK_NOTE,INVITEE:design.INVITEE,K:design.K,MACHINE:{...design.MACHINE,hostname:design.MACHINE.name},ME:identity,TEAMS:mockTeams(),TEAM_POLICY:{...design.TEAM_POLICY,categories:design.CATEGORIES.map(([name])=>name),projects:design.PROJECTS.map(project=>project.name),categoriesNote:'From SKILL.md frontmatter; the list is admin-extendable.'},tools:{git:true,gh:true},syncNote:null,lastAutomatic:null,PLACEMENTS:design.PLACEMENTS,PLACEMENTS_N:design.PLACEMENTS_N,PINNED_N:design.PINNED_N,APPROVALS:design.APPROVALS,QUARANTINE:design.QUARANTINE,HOOK:design.HOOK,APP_VERSION:design.APP_VERSION,AGENT_CLI:design.AGENT_CLI,AGENT_CLI_AUTH:'signed-in',COMMUNITY:design.COMMUNITY,STORAGE:design.STORAGE,SETTINGS_NAV:design.SETTINGS_NAV,SHORTCUTS:design.SHORTCUTS,INBOX_KIND_TEXT:design.INBOX_KIND_TEXT,THEME_OPTIONS:design.THEME_OPTIONS,CLI_VERSION:design.CLI_VERSION,CLI_LATEST:design.CLI_LATEST,FOLLOWING:design.FOLLOWING,SHARED_SPECIMEN:design.SHARED_SPECIMEN}));return result.ok?result:{...result,reason:result.error.includes('Invalid')&&result.error.includes('config.json')?'invalid-config':'unreadable'};},
@@ -171,7 +173,7 @@ export function createMockBackend(opts:{latencyMs?:number}={}):Backend & {readon
    // A card that landed here (a move onto the evicted resident's path) wins; only a path nothing occupies any more is gone.
    if(change===undefined&&fileChanges.has(path))return {ok:false,error:path+' is no longer in the Library.',reason:'not-in-library'};const detail=skillByRef(change?.original??name);return detail.ok?ok({...localProjection(detail.value),name,team:null,repo:null,installs_n:0,used_by:[],users:[],versions:null,version:'—',version_full:null,history:[],activity:[],...(change&&name!==change.original?{edited:true,localEval:null,summary:null,receipt:null,reportNumbers:null,skillMd:{...detail.value.skillMd,frontmatter:detail.value.skillMd.frontmatter.replace(/^name: .*$/m,'name: '+name)}}:{}),skillRef:'local:'+path,path,pathLabel:path,repoPath:path,owningRoot:mockOwningRoot(path)}):{ok:false,error:path+' is not in any Library root.',reason:'not-in-library'};}),
   skillFile:{
-   move:({path,to})=>fileRun('move',path,to),rename:({path,to})=>fileRun('rename',path,to),delete:({path})=>fileRun('delete',path),
+   move:({path,to})=>fileRun('move',path,to),copy:({path,to})=>fileRun('copy',path,to),rename:({path,to})=>fileRun('rename',path,to),delete:({path})=>fileRun('delete',path),
    // No fixture folder is broken, so the mock has nothing to rewrite: it answers as the CLI does for a file that already parses.
    fix:({path})=>long('library',async ctx=>{const line=path.split('/').at(-1)+': SKILL.md frontmatter is already valid YAML; nothing changed.';ctx.print(line);return ok({kind:'fix' as const,path,destination:null,quarantined:null,installed:false,notices:[line]});}),
   },
@@ -211,7 +213,7 @@ export function createMockBackend(opts:{latencyMs?:number}={}):Backend & {readon
     const person=catalog.people.find(p=>p.handle===args.member);
     if(!person)return fail(`Unknown member ${args.member}.`);
     names=person.installable.filter(name=>!removed.has(name));
-    question=args.member===design.ME.handle?`Remove everything you installed (${names.length} skills)?`:`Remove ${args.member}'s ${names.length} skills from this machine?`;
+    question=args.member===design.ME.handle?`Remove the ${names.length} skills on your profile from this machine?`:`Remove ${args.member}'s ${names.length} skills from this machine?`;
    }else{
     const skill=skillByRef(args.ref);
     if(!skill.ok)return fail(skill.error);
@@ -222,7 +224,7 @@ export function createMockBackend(opts:{latencyMs?:number}={}):Backend & {readon
    const detail=[`Folders removed (${paths.length}):`,...paths.map(([path,scope])=>`  ${path}  ·  ${scope==='global'?'Global':`project ${scope}`}`),
     'Local changes are moved to ~/.terum/skills/quarantine, never deleted.',
     `Install records dropped from your people file (${names.length}): ${names.join(', ')}`,
-    ...(args.kind==='member'?[`Targets are ${args.member}'s current installed list, not what you installed from them.`]:args.kind==='project'?['Copies installed to Global stay.']:[])];
+    ...(args.kind==='member'?[`Targets are ${args.member}'s current profile list, not what you installed from them.`]:args.kind==='project'?['Copies installed to Global stay.']:[])];
    if(!await ctx.ask('confirm',question,{detail}))return cancelled('Remove was declined.');
    for(const name of names)removed.add(name);
    for(const listener of listeners){listener('placed');listener('config');}
@@ -293,7 +295,8 @@ export function createMockBackend(opts:{latencyMs?:number}={}):Backend & {readon
     return ok<EvalManyResult>({mode:'ran',team,skills:names,ok:done,failed:0,queued,...(stoppedAfter===undefined?{}:{stoppedAfter})});
    });
   },
-  validate:args=>read('library',()=>{const name=args.ref??design.DETAIL.name;const detail=skillByRef(name);return detail.ok?ok({name,findings:0,warnings:0,repairable:0}):fail(detail.error);}),
+  // A folder path names the skill by its last segment, as publish does above: the Fix dialog validates by path.
+  validate:args=>read('library',()=>{const name=args.ref?.split(/[\\/]/).filter(Boolean).at(-1)??design.DETAIL.name;const detail=skillByRef(name);return detail.ok?ok({name,findings:0,warnings:0,repairable:0,repairs:[]}):fail(detail.error);}),
   update:()=>read('settings',()=>ok({running:design.CLI_VERSION,latest:design.CLI_LATEST,observation:'newer',launch:'npx',description:`${design.CLI_VERSION} installed · ${design.CLI_LATEST} available`,advice:updateAdvice,lines:[`terum-skills ${design.CLI_VERSION}`,`Latest advertised release: ${design.CLI_LATEST}`,...updateAdvice]})),
   appUpdate:{
    check:()=>read('settings',()=>ok({appVersion:design.APP_VERSION,supported:false,cliVersion:design.CLI_VERSION,latest:design.CLI_LATEST,latestAt:null,probe:'skipped' as const,probeError:null,staged:null,installed:[],lastApply:null,newer:false,ppid:0,platform:'unsupported'})),

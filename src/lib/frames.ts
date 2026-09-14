@@ -35,7 +35,7 @@ export { SERVE_READ_VERBS } from './serve-verbs.js';
 /** Public verbs, as a shell may invoke them (hidden maintenance verbs and `share` are not listed).
  * B4 marketplace uses existing ls/status/install/publish entries; reinstall is install, not a verb. */
 export const FRAME_VERBS = [
-  'skill move', 'skill rename', 'skill delete', 'skill fix', 'project add', 'project remove', 'project list', 'login', 'setup', 'team create', 'team join', 'team remove', 'team leave', 'team move', 'team workflow-update', 'team project create', 'invite', 'ls', 'status', 'reconcile', 'publish', 'validate', 'eval', 'eval-report', 'install', 'uninstall-skill', 'uninstall', 'sync', 'prune', 'search', 'update', 'app', 'profile', 'app-update', 'serve'] as const;
+  'skill move', 'skill copy', 'skill rename', 'skill delete', 'skill fix', 'project add', 'project remove', 'project list', 'login', 'setup', 'team create', 'team join', 'team remove', 'team leave', 'team move', 'team workflow-update', 'team project create', 'invite', 'ls', 'status', 'reconcile', 'publish', 'validate', 'eval', 'eval-report', 'install', 'uninstall-skill', 'uninstall', 'sync', 'prune', 'search', 'update', 'app', 'profile', 'app-update', 'serve'] as const;
 
 /**
  * What the CLI can honour today for the affordances the design draws (investigation doc §7). Every

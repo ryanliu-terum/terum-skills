@@ -1,4 +1,4 @@
-import { Fragment, useState } from 'react';
+import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import type { PropsWithChildren, ReactNode } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router';
 import { useBackend, useFeatures, githubUrl } from '../../backend';
@@ -12,7 +12,6 @@ import type { IconName } from '../../components/ui/icon-paths';
 import { Button } from '../../components/ui/Button';
 import { Chip } from '../../components/ui/Chip';
 import { personStatus, plural, pluralWord } from './market-data';
-import { Filters } from './market-filters';
 const CATEGORY_ICONS: Record<string, IconName> = {infra:'box',docs:'book-open',review:'eye',ops:'terminal',testing:'flask',data:'database',git:'git-commit',onboarding:'users',research:'search',security:'shield'};
 function iconName(name: string): IconName { return CATEGORY_ICONS[name] ?? (Object.hasOwn(ICON_PATHS,name)?name as IconName:'tag'); }
 export function CardRow({ names, catalog, cols = 3, profileVersions }: { names: string[]; catalog: Catalog; cols?: number; profileVersions?: Record<string,string> | undefined }) { const available = [...catalog.skills, ...catalog.extras]; return <div className="market-grid" data-columns={cols} style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}>{names.map(name => { const skill = available.find(s => s.name === name); if (!skill) throw new Error(`Catalog is missing skill ${name}.`); return <MarketplaceSkillCard key={name} skill={profileVersions ? {...skill,profileVersion:profileVersions[name]??null} : skill}/>; })}</div>; }
@@ -36,13 +35,38 @@ export function CategoryRow({ category: [key, , n], catalog }: { category: Catal
 export function Section({ title, subtitle, path, action, children }: PropsWithChildren<{ title: string; subtitle: string; path: string; action?: ReactNode }>) { const navigate = useNavigate(); return <section className="market-section" aria-label={title}><div className="market-section-head"><div><h2>{title}</h2><span>{subtitle}</span></div><div className="market-section-actions">{action}<Button icon="chevron-right" iconOnly aria-label={'View all ' + title} onClick={() => navigate('/marketplace/' + path)}/></div></div>{children}</section>; }
 
 
-export function MarketSearch({ placeholder = 'Search skills, people and projects', hero = false, catalog }: { placeholder?: string; hero?: boolean; catalog?: Catalog }) {
+const SEARCH_DEBOUNCE_MS = 250;
+export function MarketSearch({ placeholder = 'Search skills, people and projects', hero = false }: { placeholder?: string; hero?: boolean }) {
   const [params, setParams] = useSearchParams(), q = params.get('q') ?? '', [draft, setDraft] = useState(q), [lastQ, setLastQ] = useState(q);
   if (lastQ !== q) { setLastQ(q); setDraft(q); }
-  // The filter button was removed from the search bar (Ryan, 2026-09-10); the drawer itself, its facets and every committed-facet URL param stay live, so ?filters=open still opens it.
-  const open = params.get('filters') === 'open';
+  // Search only: the facet drawer and every facet URL param were removed (#212, 2026-09-14), finishing the button removal of
+  // 2026-09-10. A marketplace list is narrowed by the query alone; this field's only URL write is `q`.
+  const pending = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cancel = useCallback(() => { if (pending.current !== null) { clearTimeout(pending.current); pending.current = null; } }, []);
+  /**
+   * Typing commits 250 ms after the last keystroke, replacing the entry so a sentence typed one letter at a time leaves one step to
+   * go back over; Enter and the clear cross cancel the timer and commit at once, pushing. The timer is armed from an effect rather
+   * than from the keystroke handler so that it always closes over the newest render's params: `setSearchParams` is memoised per
+   * render and its updater form hands back that render's params too, so a timer armed mid-word and fired after another URL write
+   * (a sort change, a dialog opening) wrote `q` on top of the params from before it and dropped that write (measured in a browser
+   * against the mock on 2026-09-13, not reasoned about). A keystroke, a committed `q`, or any other URL write re-runs this effect; its cleanup clears
+   * the timer it replaces, which also covers unmount. `draft === q` — mount, an externally cleared query, a just-committed one —
+   * arms nothing, so the render-phase sync above can replace the draft without a keystroke in flight putting the old text back.
+   */
+  useEffect(() => {
+    if (draft === q) return;
+    pending.current = setTimeout(() => {
+      pending.current = null;
+      const next = new URLSearchParams(params);
+      if (draft) next.set('q', draft); else next.delete('q');
+      setParams(next, { replace: true });
+    }, SEARCH_DEBOUNCE_MS);
+    return cancel;
+  }, [draft, q, params, setParams, cancel]);
+  // A committed query — Enter, the clear cross — is a navigation, so it pushes; only the debounce above replaces.
   function change(key: string, value?: string) { const next = new URLSearchParams(params); if (value) next.set(key, value); else next.delete(key); setParams(next); }
-  return <div className={'market-search' + (hero ? ' hero' : '')}><Icon name="search" size={16} color={token('text3')}/><input aria-label={placeholder} placeholder={placeholder} value={draft} onChange={e => setDraft(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') change('q', draft); }}/>{q && <IconButton icon="x" size={20} iconSize={14} label="Clear search field" onClick={() => change('q')}/>}{open && catalog && <Filters catalog={catalog} onClose={() => change('filters')}/>}</div>;
+  function commit(value: string) { cancel(); change('q', value); }
+  return <div className={'market-search' + (hero ? ' hero' : '')}><Icon name="search" size={16} color={token('text3')}/><input aria-label={placeholder} placeholder={placeholder} value={draft} onChange={e => setDraft(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') commit(draft); }}/>{q && <IconButton icon="x" size={20} iconSize={14} label="Clear search field" onClick={() => commit('')}/>}</div>;
 }
 export function Crumbs({ parts, railOpen, onToggle }: { parts: string[]; railOpen?: boolean; onToggle?: () => void }) { const navigate = useNavigate(); return <div className="market-crumbs" data-rail-open={railOpen}><div><IconButton icon="arrow-left" size={28} label="Back to marketplace" onClick={() => navigate('/marketplace')}/><div>{parts.map((part, i) => <Fragment key={i}>{i > 0 && <span className="market-crumb-separator">/</span>}<span className={i === parts.length - 1 ? 'current' : ''}>{part}</span></Fragment>)}</div></div>{onToggle && <IconButton icon="panel-right" size={28} label={railOpen ? 'Close details rail' : 'Open details rail'} onClick={onToggle}/>}</div>; }
 
@@ -53,6 +77,6 @@ export function MarketRail({ project, person, repository }: { project?: Project;
   if (!project && !person) throw new Error('A marketplace rail needs a project or person.');
   const q = project, p = person;
   const status = q ? q.installed ? ['Installed', q.path ? `${plural(q.skills, 'skill')} placed in ${q.path}` : `${plural(q.skills, 'skill')} placed on this machine`] : ['Not installed', 'Placed by install project, inside a checkout of this repo'] : p ? personStatus(p) : [];
-  const rows: [string, string, boolean?][] = q ? [['Skills', String(q.skills)], ['Members', String(q.members)], ...(q.evaluated !== null ? [['Evaluated', `${q.evaluated} of ${q.skills}`] as [string, string]] : []), ...(q.updated !== null ? [['Updated', q.updated] as [string, string]] : []), ['Remote', q.remote, true]] : p ? [['Skills', String(p.onDisk[1])], ['Installs', `${p.adoption} · from people files`], ['Followers', String(p.followers)], ['Joined', p.joined], ['Last publish', p.lastPublish]] : [];
+  const rows: [string, string, boolean?][] = q ? [['Skills', String(q.skills)], ['Members', String(q.members)], ...(q.evaluated !== null ? [['Evaluated', `${q.evaluated} of ${q.skills}`] as [string, string]] : []), ...(q.updated !== null ? [['Updated', q.updated] as [string, string]] : []), ['Remote', q.remote, true]] : p ? [['Installs', `${p.adoption} · from people files`], ['Followers', String(p.followers)], ['Joined', p.joined], ['Last publish', p.lastPublish]] : [];
   return <aside className="market-rail"><div className="market-status"><span>Status</span><span>{status[0]}</span><span>{status[1]}</span></div><div className="market-rail-details"><SectionLabel>Details</SectionLabel><div>{rows.filter(([label])=>(label!=='Followers'||features?.follow)&&(label!=='Members'||features?.projectMembers)).map(([label, value, mono]) => <div className="market-detail-row" key={label}><span>{label}</span><span className={mono ? 'board-mono' : ''}>{value}</span></div>)}</div></div><div className="market-repo"><SectionLabel>{q ? 'Repo' : 'People file'}</SectionLabel><div><a {...(url?{href:url,onClick:(event:React.MouseEvent<HTMLAnchorElement>)=>{event.preventDefault();void backend.openUrl(url).then(result=>{if(!result.ok)setError(result.error);},reason=>setError(String(reason)));}}:{})}>{repository?.replace(/^(?:https:\/\/)?github\.com\//,'')??'—'}</a>{error?<span role="alert">{error}</span>:null}<span>{q ? `team.json · projects.${q.key}` : `people/${p?.handle}.json`}</span></div></div>{q && q.admin !== null && <div className="market-admin"><SectionLabel>Admin</SectionLabel><div><Avatar initials={q.admin.initials} size={28}/><div><span>{q.admin.name}</span><Small>{features?.memberRole?`${q.admin.role} · `:''}{q.admin.handle}</Small></div></div></div>}<div className="market-rail-spacer"/><ShareBlock command={`npx -y terum-skills@latest install ${q ? 'project ' + q.key : 'member ' + p?.handle}`}/></aside>;
 }

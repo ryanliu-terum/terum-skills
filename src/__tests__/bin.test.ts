@@ -87,7 +87,11 @@ describe('the built bin (dist/index.js)', () => {
   it('the build bundles the canonical /terum-skills skill where the built wrapper module resolves it, byte for byte, marker intact', async () => {
     const bundle = await run(process.execPath, [resolve(root, 'scripts', 'bundle-skill.mjs'), '--out', resolve(out, 'dist')], { cwd: root });
     const bundled = resolve(out, 'dist', 'claude', 'skills', 'terum-skills', 'SKILL.md');
-    expect(bundle.stderr.trim()).toBe(`Bundled ${resolve(root, '.claude', 'skills', 'terum-skills', 'SKILL.md')} -> ${bundled}`);
+    const bundledHook = resolve(out, 'dist', 'claude', 'hooks', 'terum-skills-edit.mjs');
+    expect(bundle.stderr.trim().split('\n')).toEqual([
+      `Bundled ${resolve(root, '.claude', 'skills', 'terum-skills', 'SKILL.md')} -> ${bundled}`,
+      `Bundled ${resolve(root, 'assets', 'claude', 'hooks', 'terum-skills-edit.mjs')} -> ${bundledHook}`,
+    ]);
     expect(await readFile(bundled, 'utf8')).toBe(await readFile(resolve(root, '.claude', 'skills', 'terum-skills', 'SKILL.md'), 'utf8'));
     const wrapper = await import(pathToFileURL(resolve(out, 'dist', 'lib', 'wrapper.js')).href) as typeof import('../lib/wrapper.js');
     expect(wrapper.BUNDLED_WRAPPER).toBe(bundled);
@@ -96,6 +100,25 @@ describe('the built bin (dist/index.js)', () => {
     expect(await wrapper.wrapperState(wrapper.defaultWrapperOptions(home))).toBe('absent');
     expect(await wrapper.installWrapper(wrapper.defaultWrapperOptions(home))).toBe('installed');
     expect(await readFile(resolve(home, '.claude', 'skills', 'terum-skills', 'SKILL.md'), 'utf8')).toBe(await readFile(bundled, 'utf8'));
+
+    // The edit hook ships on the same contract, from assets/ rather than .claude/ (it is run, not loaded).
+    expect(await readFile(bundledHook, 'utf8')).toBe(await readFile(resolve(root, 'assets', 'claude', 'hooks', 'terum-skills-edit.mjs'), 'utf8'));
+    const editHook = await import(pathToFileURL(resolve(out, 'dist', 'lib', 'editHook.js')).href) as typeof import('../lib/editHook.js');
+    expect(editHook.BUNDLED_EDIT_HOOK).toBe(bundledHook);
+    expect(editHook.isManagedEditHook(await readFile(bundledHook, 'utf8'))).toBe(true);
+    const storeRoot = resolve(out, 'bundle-store');
+    const hookOptions = editHook.defaultEditHookOptions(storeRoot, home);
+    expect(await editHook.editHookState(hookOptions)).toBe('absent');
+    expect(await editHook.installEditHook(hookOptions)).toBe('installed');
+    expect(await editHook.editHookState(hookOptions)).toBe('current');
+    expect(await readFile(editHook.editHookDestination(storeRoot), 'utf8')).toBe(await readFile(bundledHook, 'utf8'));
+    // Both halves: the script, and the PostToolUse entry in the settings file that runs it.
+    expect(await editHook.editHookInstalled(hookOptions)).toBe(true);
+    const settings = JSON.parse(await readFile(resolve(home, '.claude', 'settings.json'), 'utf8')) as { hooks: { PostToolUse: { matcher: string; hooks: { command: string }[] }[] } };
+    expect(settings.hooks.PostToolUse).toEqual([{ matcher: 'Write|Edit', hooks: [{ type: 'command', command: editHook.editHookCommand(storeRoot), timeout: 10 }] }]);
+    expect(await editHook.removeEditHook(hookOptions)).toBe('removed');
+    expect(await editHook.editHookInstalled(hookOptions)).toBe(false);
+    expect(JSON.parse(await readFile(resolve(home, '.claude', 'settings.json'), 'utf8'))).toEqual({});
   });
 
   async function installedLayout(prefix: string) {

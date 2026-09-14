@@ -103,13 +103,13 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "file": "src/commands/setup.ts",
     "line": 83,
     "policy": "prose",
-    "pattern": "'This wizard helps you create a team, join one, invite teammates, and offer the session hook and the /terum-skills Claude Code skill; re-run it any time to continue, and leave the invitation question blank to skip it.',"
+    "pattern": "'This wizard helps you create a team, join one, invite teammates, and offer the session hook, the /terum-skills Claude Code skill and a reminder to publish a skill after Claude edits one; re-run it any time to continue, and leave the invitation question blank to skip it.',"
   },
   {
     "file": "src/commands/setup.ts",
     "line": 138,
     "policy": "prose",
-    "pattern": "`Setup stopped here, so the project, eval, session hook and /terum-skills steps were not offered \u2014 run \\`${invocation(form, 'setup')}\\` again to finish.`,"
+    "pattern": "`Setup stopped here, so the project, eval, session hook, /terum-skills and edit-hook steps were not offered \u2014 run \\`${invocation(form, 'setup')}\\` again to finish.`,"
   },
   {
     "file": "src/commands/setup.ts",
@@ -1189,7 +1189,7 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "file": "README.md",
     "line": 381,
     "policy": "prose",
-    "pattern": "| | `skill move <path> --to global\\|<project root>` / `skill rename <path> --to <new-name>` / `skill delete <path>` / `skill fix <path>` | Move, rename, delete, or fix a folder in your Library. Move, rename, and delete confirm by name; fix applies the repairs with one right answer (quote a frontmatter value YAML refuses, set `name` to the folder, set `license` to the team policy, strip invisible characters, clear an executable bit on a non-script) and lists what still needs you. Delete removes an unmodified placement outright (the team repo still holds its bytes; reinstall restores them) and quarantines an edited placement or any folder that is not a placement; `prune` permanently deletes quarantine contents |"
+    "pattern": "| | `skill move <path> --to global\\|<project root>` / `skill copy <path> --to global\\|<project root>` / `skill rename <path> --to <new-name>` / `skill delete <path>` / `skill fix <path>` | Move, copy, rename, delete, or fix a folder in your Library. Copy leaves the source where it is, so one local skill can sit in two roots at once; the new folder keeps the source's `metadata.id` and is a plain Library folder with no install record of its own. Move, copy, rename, and delete confirm by name; fix applies the repairs with one right answer (quote a frontmatter value YAML refuses, set `name` to the folder, set `license` to the team policy, strip invisible characters, clear an executable bit on a non-script) and lists what still needs you. Delete removes an unmodified placement outright (the team repo still holds its bytes; reinstall restores them) and quarantines an edited placement or any folder that is not a placement; `prune` permanently deletes quarantine contents |"
   },
   {
     "file": "README.md",
@@ -1478,7 +1478,27 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "file": "docs/frame-protocol.md",
     "line": 226,
     "policy": "prose",
-    "pattern": "`skill move <path> --to global|<project root>`, `skill rename <path> --to <new-name>`, and"
+    "pattern": "`skill move <path> --to global|<project root>`, `skill copy <path> --to global|<project root>`,"
+  },
+  {
+    "file": "docs/frame-protocol.md",
+    "line": 227,
+    "policy": "prose",
+    "pattern": "`skill rename <path> --to <new-name>`, and"
+  },
+  {
+    "file": ".claude/skills/terum-skills/SKILL.md",
+    "line": 108,
+    "policy": "routed",
+    "pattern": "| `skill copy <abs-path> --to global\\|<project root>` | none | `npx -y terum-skills@latest skill copy <abs-path> --to <destination>` \u2014 the source folder stays where it is |"
+  },
+  {
+    // `copy` became a command name with `skill copy`, so this wrapped prose line now starts with a
+    // verb the tripwire scans for. It is a sentence about install's kept copy, not an invocation.
+    "file": ".claude/skills/terum-skills/SKILL.md",
+    "line": 82,
+    "policy": "not-a-hint",
+    "pattern": "copy stays under that project. If the kept-copy path already exists, the command refuses; move"
   },
   {
     "file": "docs/frame-protocol.md",
@@ -1514,7 +1534,7 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "file": "docs/frame-protocol.md",
     "line": 244,
     "policy": "prose",
-    "pattern": "three, and `validate`'s result carries `repairable`, the count of changes `skill fix` would make."
+    "pattern": "three, and `validate`'s result carries `repairs`, one sentence per change `skill fix` would make, and"
   },
   {
     "file": "docs/frame-protocol.md",
@@ -1823,5 +1843,107 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "line": 0,
     "policy": "prose",
     "pattern": "`install --adopt` or `publish`. `--no-existing`, quiet and non-interactive setup mark it `skipped`."
+  },
+  {
+    file: 'src/commands/refresh.ts',
+    line: 171,
+    policy: 'not-a-hint',
+    pattern: 'notices.push(\'Updated your terum-skills edit hook for this CLI.\');'
+  },
+  {
+    file: 'src/commands/uninstallMachine.ts',
+    line: 75,
+    policy: 'not-a-hint',
+    pattern: 'if (editHookPresence.kind === \'foreign\') detail.push(`  ${editHookPath} is not the bundled terum-skills edit hook (${editHookPresence.why}); left alone`);'
+  },
+  {
+    file: 'src/commands/uninstallMachine.ts',
+    line: 111,
+    policy: 'not-a-hint',
+    pattern: 'try { if (await removeEditHook(editHook) === \'removed\') io.print(`Removed the terum-skills edit hook from ${editHookPath} and ${editHook.settingsFile}.`); }'
+  },
+  {
+    file: 'src/lib/editHook.ts',
+    line: 13,
+    policy: 'prose',
+    pattern: '* dist/claude/hooks/ from assets/claude/hooks/terum-skills-edit.mjs) and is placed under the state'
+  },
+  {
+    file: 'src/lib/editHook.ts',
+    line: 14,
+    policy: 'prose',
+    pattern: '* root by `setup`, on the same contract as the session hook and the `/terum-skills` manual: one'
+  },
+  {
+    file: 'src/lib/editHook.ts',
+    line: 22,
+    policy: 'prose',
+    pattern: '* the author\'s machine, the `terum-skills` skill had 0 model-initiated invocations across 7,158'
+  },
+  {
+    file: 'src/lib/editHook.ts',
+    line: 26,
+    policy: 'not-a-hint',
+    pattern: 'export const EDIT_HOOK_FILE = \'terum-skills-edit.mjs\';'
+  },
+  {
+    file: 'src/lib/editHook.ts',
+    line: 28,
+    policy: 'not-a-hint',
+    pattern: 'export const EDIT_HOOK_MARKER = \'// terum-skills managed hook\';'
+  },
+  {
+    file: 'src/lib/editHook.ts',
+    line: 87,
+    policy: 'not-a-hint',
+    pattern: 'if (bundled === null) throw new Error(`The terum-skills edit hook is not bundled in this copy of terum-skills (expected at ${options.source}).`);'
+  },
+  {
+    file: 'src/lib/editHook.ts',
+    line: 90,
+    policy: 'not-a-hint',
+    pattern: 'if (presence.kind === \'foreign\') throw new Error(`${target} exists and is not the bundled terum-skills edit hook (${presence.why}); move it aside and re-run.`);'
+  },
+  {
+    file: 'src/lib/editHook.ts',
+    line: 146,
+    policy: 'not-a-hint',
+    pattern: 'if (state === \'unavailable\') { io.print(`The terum-skills edit hook is not bundled in this copy of terum-skills (expected at ${options.source}); skipped.`); return \'unavailable\'; }'
+  },
+  {
+    file: 'src/lib/editHook.ts',
+    line: 147,
+    policy: 'not-a-hint',
+    pattern: 'if (state === \'foreign\') { io.print(`${target} exists and is not the bundled terum-skills edit hook; left alone. Move it aside and re-run setup to install it.`); return \'foreign\'; }'
+  },
+  {
+    file: 'src/lib/editHook.ts',
+    line: 150,
+    policy: 'not-a-hint',
+    pattern: 'if (state === \'current\' && await eventHookInstalled(options.settingsFile, \'PostToolUse\')) { io.print(`The terum-skills edit hook at ${target} is current.`); return \'present\'; }'
+  },
+  {
+    file: 'src/lib/editHook.ts',
+    line: 151,
+    policy: 'not-a-hint',
+    pattern: 'if (state === \'outdated\' || state === \'current\') { await installEditHook(options); io.print(`Updated the terum-skills edit hook at ${target}.`); return \'replaced\'; }'
+  },
+  {
+    file: 'src/lib/editHook.ts',
+    line: 157,
+    policy: 'not-a-hint',
+    pattern: 'io.print(`Installed the terum-skills edit hook at ${target} and a Write/Edit hook in ${options.settingsFile}.`);'
+  },
+  {
+    file: '.claude/skills/terum-skills/SKILL.md',
+    line: 0,
+    policy: 'prose',
+    pattern: 'note beginning *"You edited <name>, a skill in this machine\'s terum-skills Library"* appears after an'
+  },
+  {
+    file: '.claude/skills/terum-skills/SKILL.md',
+    line: 0,
+    policy: 'prose',
+    pattern: 'publish hand-off it names. A skill edited and never published is a skill only that machine has.'
   },
 ];
