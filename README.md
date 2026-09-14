@@ -393,7 +393,7 @@ Release notices appear last on stderr, at most once per release per day, and are
 | | `eval-report <skill>` | Show a skill's committed eval receipts and this machine's local runs (read-only, no fetch); the desktop app's Evals tab reads it |
 | Machine | `update` / `uninstall` | Show the update command for this copy / confirm machine teardown, preserve recovery data, and print the package-manager removal step |
 | | `app` | Install and open the desktop app for this CLI version |
-| | `app-update [--check\|--stage\|--apply] [--release <version>] [--reason on-close\|overnight\|manual]` | Check for, download, or install a newer desktop app; Settings ▸ Updates offers Install now, When I quit, or Overnight (01:00–05:00 after 30 idle minutes) |
+| | `app-update [--check\|--stage\|--apply] [--release <version>] [--reason on-close\|overnight\|manual]` | Check for, download, or install a newer desktop app; Settings ▸ Updates offers Install now, When I quit, or Overnight (01:00–05:00 after 30 idle minutes), and a one-shot Update and relaunch that asks GitHub now, downloads, and relaunches once you confirm |
 
 This CLI has no standalone refresh command: use `sync` to fetch. `team workflow-update --print` only prints workflow migration instructions; the skill-layout migration is `team migrate`, a terminal-only, once-per-team operation that refuses to run under `--frames`.
 
