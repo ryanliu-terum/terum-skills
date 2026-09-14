@@ -49,6 +49,10 @@ export const RUN_ID_PATTERN = /^\d{8}T\d{6}Z$/;
 
 /** §6.1: the current receipt shape. Schema 1 is read-only history. */
 export const RECEIPT_SCHEMA_VERSION = 2;
+/** The `runner_handle` a run carries when this machine holds no team binding at all (eval on a folder no team
+ *  knows). It is this machine's own placeholder, never a teammate, so `ls --local` treats a receipt stamped with
+ *  it as run here. */
+export const NO_TEAM_RUNNER_HANDLE = 'local';
 
 export const receiptSchema = z.object({
   // A union, so no historical receipt becomes unparseable — the whole point of §6.1.

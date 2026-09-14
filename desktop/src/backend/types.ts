@@ -10,7 +10,8 @@ export type AskKind='confirm'|'text'|'select'|'path';
 export interface PromptQuestion {kind:AskKind;question:string;choices?:readonly string[];default?:string;detail?:readonly string[];descriptions?:readonly string[]}
 export type Frame={t:'print';line:string}|{t:'ask';id:string;kind:AskKind;question:string;default?:string;choices?:readonly string[];detail?:readonly string[];descriptions?:readonly string[]}|{t:'progress';done:number;total:number;label?:string}|{t:'result';ok:boolean;error?:string;declined?:boolean;refused?:boolean};
 export interface Run<T>{readonly frames:AsyncIterable<Frame>;answer(id:string,value:string|boolean):void;cancel():Promise<void>;readonly done:Promise<Result<T>>}
-export interface Capabilities {appVersion:string;windowChrome:'mac-overlay'|'native'|'cosmetic';disablePerMachine:boolean;inboxEventLog:boolean;offtargetKind:boolean;machineRegistry:boolean;perCaseEvalTables:boolean;openInEditor:boolean;clipboard:boolean}
+/** `windowControlsEnd`: right edge, in CSS px from the window's left edge, of the OS controls drawn over the web content under `mac-overlay` (68 before macOS 26, 76 from it); null when the OS draws none there. */
+export interface Capabilities {appVersion:string;windowChrome:'mac-overlay'|'native'|'cosmetic';windowControlsEnd:number|null;disablePerMachine:boolean;inboxEventLog:boolean;offtargetKind:boolean;machineRegistry:boolean;perCaseEvalTables:boolean;openInEditor:boolean;clipboard:boolean}
 // §7.1: the local key is `libraryProjects`, not `projects` — `projects` is already the marketplace's
 // team-projects screen, and desktop/AGENTS.md invariant 2 forbids one flag meaning two things.
 export const FEATURE_KEYS = ['favorites','follow','roles','lastSeen','installScope','inviteScoping','disablePerMachine','projectMembers','liftOnCards','runEvalInApp','perCase','progress','memberRole','localIdentity','libraryProjects','projects','refresh','appUpdate','serve'] as const;
@@ -160,8 +161,8 @@ export interface EvalManyArgs {refs:string[];team?:string;mode:'now'|'batches'|'
  *  batch, in which case `stoppedAfter` says how many had been attempted. */
 export interface EvalManyResult {mode:'ran'|'queued';team:string|null;skills:string[];ok:number;failed:number;queued:EvalQueueItem[];stoppedAfter?:number}
 export interface ValidateArgs {team?:string;ref?:string;cwd?:string}
-/** `repairable` counts the changes `skill fix` would make; a CLI that predates the verb omits it and the adapter reads 0, so the app draws no Fix. */
-export interface ValidateResult {name:string;findings:number;warnings:number;repairable:number}
+/** `repairs` lists, one sentence each, the changes `skill fix` would make and `repairable` counts them; a CLI that predates the verb omits both and the adapter reads 0 and [], so the app draws no Fix. A CLI with the count but no list draws Fix and the dialog names the count alone. */
+export interface ValidateResult {name:string;findings:number;warnings:number;repairable:number;repairs:string[]}
 export interface UpdateAdvice {running:string|null;latest:string|null;observation:'newer'|'same'|'older'|'unknown';launch:'global'|'local'|'npx'|'source'|'unknown';description:string;advice:string[];lines:string[]}
 export type AppUpdatePhase='waiting'|'installing'|'launched'|'failed';
 export type AppUpdateReason='on-close'|'overnight'|'manual';

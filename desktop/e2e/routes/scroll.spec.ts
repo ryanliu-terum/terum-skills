@@ -326,6 +326,14 @@ for(const {tab,klass,name,key} of [
   await expect(pane).toHaveClass(new RegExp(klass.slice(1)));
   await expect(pane).toHaveAttribute('tabindex','0');
   expect(await pane.evaluate(element=>element.scrollHeight>element.clientHeight)).toBe(true);
+  // F4(a), the programmatic path first: focus() lands on the pane and the key scrolls it, independent of tab order.
+  await pane.focus();
+  expect(await pane.evaluate(element=>element===document.activeElement)).toBe(true);
+  await page.keyboard.press(key);
+  await expect.poll(()=>pane.evaluate(element=>element.scrollTop)).toBeGreaterThan(0);
+  await columnIsPinned(page);
+  await page.keyboard.press('Home');
+  await expect.poll(()=>pane.evaluate(element=>element.scrollTop)).toBe(0);
   const selected=page.locator('.skill-tabs [role="tab"][aria-selected="true"]');
   // From the SKILL.md tab the sequence is the three other tabs, then the tab's own head control ('Open in
   // editor'), then the pane — six presses; from Evals it is two tabs, 'Run eval', the pane. The pane always comes

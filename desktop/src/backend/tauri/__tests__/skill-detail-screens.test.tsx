@@ -117,7 +117,7 @@ it.each([0,1,2])('keeps a successful validation with %s warnings in Quality and 
   const {backend,client}=open('#/skill/deploy-check?tab=quality');
   await screen.findByText('Hygiene checks · passed on connect · free, no model calls');
   const invalidate=vi.spyOn(client,'invalidateQueries');
-  vi.spyOn(backend,'validate').mockResolvedValue({ok:true,value:{name:'deploy-check',findings:0,warnings,repairable:0}});
+  vi.spyOn(backend,'validate').mockResolvedValue({ok:true,value:{name:'deploy-check',findings:0,warnings,repairable:0,repairs:[]}});
   fireEvent.click(screen.getByRole('button',{name:'Validate'}));
   expect(await screen.findByText(`hygiene passed${warnings?` · ${warnings} warning${warnings===1?'':'s'}`:''}`)).toBeVisible();
   expect(invalidate).toHaveBeenCalledWith({queryKey:['skill','deploy-check']});
@@ -126,7 +126,7 @@ it.each([0,1,2])('keeps a successful validation with %s warnings in Quality and 
 it.each([true,false])('keeps validation failure (with value=%s) in Quality',async hasValue=>{
   const {backend}=open('#/skill/deploy-check?tab=quality');
   await screen.findByText('Hygiene checks · passed on connect · free, no model calls');
-  vi.spyOn(backend,'validate').mockResolvedValue({ok:false,error:'Cannot validate.',...(hasValue?{value:{name:'deploy-check',findings:2,warnings:1,repairable:0}}:{})});
+  vi.spyOn(backend,'validate').mockResolvedValue({ok:false,error:'Cannot validate.',...(hasValue?{value:{name:'deploy-check',findings:2,warnings:1,repairable:0,repairs:[]}}:{})});
   fireEvent.click(screen.getByRole('button',{name:'Validate'}));
   expect(await screen.findByText(hasValue?'2 findings · 1 warning':'Cannot validate.')).toBeVisible();
   expect(screen.getByRole('heading',{name:'deploy-check'})).toBeVisible();
@@ -217,11 +217,35 @@ it('opens a folder the CLI could not parse, by path, and still names its checkou
  expect(screen.getByRole('link',{name:/^teniroo/})).toHaveAttribute('aria-current','page');
  expect(screen.getByText('invalid-yaml')).toBeVisible();
 });
-it('draws Fix beside an invalid-yaml flag and sends the exact folder to skill fix',async()=>{
+const quoted='Quoted `description` in SKILL.md so the frontmatter parses; the text is unchanged.';
+it('draws Fix beside an invalid-yaml flag; the dialog asks validate for the plan, lists it, and only then sends the exact folder to skill fix',async()=>{
  const {backend}=open('#/skill/local?path='+encodeURIComponent(uncPath),localFolder(uncRoot,true));
- const mock=createMockBackend();const fix=vi.spyOn(backend.skillFile,'fix').mockImplementation(mock.skillFile.fix);
+ const mock=createMockBackend();const fix=vi.spyOn(backend.skillFile,'fix').mockImplementation(mock.skillFile.fix),publish=vi.spyOn(backend,'publish');
+ const validate=vi.spyOn(backend,'validate').mockResolvedValue({ok:false,error:'Hygiene failed.',value:{name:'adopt-agent-tooling',findings:1,warnings:0,repairable:1,repairs:[quoted]}});
  fireEvent.click(await screen.findByRole('button',{name:'Fix'}));
+ const dialog=await screen.findByRole('dialog');
+ // The broken-flag button arrives without a validation, so the dialog asks the CLI about the folder itself.
+ await waitFor(()=>expect(validate).toHaveBeenCalledWith({ref:uncPath}));
+ expect(await within(dialog).findByText(quoted)).toBeVisible();
+ expect(fix).not.toHaveBeenCalled();
+ // The team has never held this folder: publishing is offered, but not pre-selected, and the confirm says Fix alone.
+ expect(within(dialog).getByRole('checkbox',{name:'Publish to the team after fixing'})).toHaveAttribute('aria-checked','false');
+ fireEvent.click(within(dialog).getByRole('button',{name:'Fix'}));
  await waitFor(()=>expect(fix).toHaveBeenCalledWith({path:uncPath}));
+ expect(await within(dialog).findByText(/already valid YAML; nothing changed/)).toBeVisible();
+ expect(publish).not.toHaveBeenCalled();
+ fireEvent.click(within(dialog).getByRole('button',{name:'Done'}));
+ await waitFor(()=>expect(screen.queryByRole('dialog')).toBeNull());
+});
+it('cancels the Fix dialog without touching the folder',async()=>{
+ const {backend}=open('#/skill/local?path='+encodeURIComponent(uncPath),localFolder(uncRoot,true));
+ const fix=vi.spyOn(backend.skillFile,'fix');
+ vi.spyOn(backend,'validate').mockResolvedValue({ok:false,error:'Hygiene failed.',value:{name:'adopt-agent-tooling',findings:1,warnings:0,repairable:1,repairs:[quoted]}});
+ fireEvent.click(await screen.findByRole('button',{name:'Fix'}));
+ const dialog=await screen.findByRole('dialog');
+ fireEvent.click(within(dialog).getByRole('button',{name:'Cancel'}));
+ await waitFor(()=>expect(screen.queryByRole('dialog')).toBeNull());
+ expect(fix).not.toHaveBeenCalled();
 });
 it('draws no Fix for a broken folder skill fix cannot repair',async()=>{
  open('#/skill/local?path='+encodeURIComponent(uncPath),localFolder(uncRoot,true,'description-missing'));
@@ -234,20 +258,52 @@ it('draws Fix beside a name-mismatch flag too',async()=>{
  await screen.findByRole('heading',{name:'adopt-agent-tooling'});
  expect(await screen.findByRole('button',{name:'Fix'})).toBeVisible();
 });
-it('offers Fix in Quality when a failed validation counts repairable findings, runs skill fix on the folder, then validates again',async()=>{
- const {backend}=open('#/skill/local?path='+encodeURIComponent(uncPath)+'&tab=quality',localFolder());
+/** The local folder as a copy the team already holds (ls --local's knownToTeam), so a publish after the fix is a republish. */
+const knownLocalFolder:AmendResult=(...args)=>{localFolder()(...args);const [name,value]=args;if(name==='ls-local')Object.assign(((value.local as Record<string,unknown>[])[1]!.rows as Record<string,unknown>[])[0]!,{knownToTeam:true});};
+const repairs=['Set name to `adopt-agent-tooling` to match the folder (was `adopt-tooling`).','Removed 1 invisible character from SKILL.md.'];
+it('offers Fix in Quality when a failed validation counts repairable findings; the dialog reuses that validation, pre-selects republish for a team-held folder, fixes, publishes, then validates again',async()=>{
+ const {backend}=open('#/skill/local?path='+encodeURIComponent(uncPath)+'&tab=quality',knownLocalFolder);
  await screen.findByRole('heading',{name:'adopt-agent-tooling'});
- const validate=vi.spyOn(backend,'validate').mockResolvedValue({ok:false,error:'Hygiene failed.',value:{name:'adopt-agent-tooling',findings:3,warnings:0,repairable:2}});
+ const validate=vi.spyOn(backend,'validate').mockResolvedValue({ok:false,error:'Hygiene failed.',value:{name:'adopt-agent-tooling',findings:3,warnings:0,repairable:2,repairs}});
  const mock=createMockBackend();const fix=vi.spyOn(backend.skillFile,'fix').mockImplementation(mock.skillFile.fix);
+ const publish=vi.spyOn(backend,'publish').mockImplementation(()=>createRun(async()=>({ok:true,value:{name:'adopt-agent-tooling',project:'acme',version:'v2',created:true,identicalTo:null,attachedEvals:0,evalAssets:0,profileAdded:false,projectAdded:false}})));
  fireEvent.click(screen.getByRole('button',{name:'Validate'}));
  fireEvent.click(await screen.findByRole('button',{name:'Fix 2 findings'}));
+ const dialog=await screen.findByRole('dialog');
+ // The Quality tab's validation is the plan: both repairs are listed and validate is not asked again before the fix.
+ for(const line of repairs)expect(within(dialog).getByText(line)).toBeVisible();
+ expect(within(dialog).getByText('3 findings reported · anything fix does not cover stays listed for you afterwards.')).toBeVisible();
+ expect(validate).toHaveBeenCalledTimes(1);
+ expect(within(dialog).getByRole('checkbox',{name:'Republish to the team after fixing'})).toHaveAttribute('aria-checked','true');
+ // Republish asks what the publish dialog asks (desktop-qol): the target, starting on Global when the default is Ask each time.
+ await waitFor(()=>expect(within(dialog).getByRole('combobox',{name:'Publish to'})).toHaveTextContent('Global'));
+ expect(fix).not.toHaveBeenCalled();
+ fireEvent.click(within(dialog).getByRole('button',{name:'Fix and republish'}));
  await waitFor(()=>expect(fix).toHaveBeenCalledWith({path:uncPath}));
+ // The publish is by folder path, as the page's own Publish is for a folder the team route cannot name.
+ await waitFor(()=>expect(publish).toHaveBeenCalledWith({ref:uncPath,project:'Global'}));
+ expect(await screen.findByText('adopt-agent-tooling was published to acme as Version 2.')).toBeVisible();
+ await waitFor(()=>expect(screen.queryByRole('dialog')).toBeNull());
  await waitFor(()=>expect(validate).toHaveBeenCalledTimes(2));
+});
+it('unticking republish fixes without publishing',async()=>{
+ const {backend}=open('#/skill/local?path='+encodeURIComponent(uncPath)+'&tab=quality',knownLocalFolder);
+ await screen.findByRole('heading',{name:'adopt-agent-tooling'});
+ vi.spyOn(backend,'validate').mockResolvedValue({ok:false,error:'Hygiene failed.',value:{name:'adopt-agent-tooling',findings:3,warnings:0,repairable:2,repairs}});
+ const mock=createMockBackend();const fix=vi.spyOn(backend.skillFile,'fix').mockImplementation(mock.skillFile.fix),publish=vi.spyOn(backend,'publish');
+ fireEvent.click(screen.getByRole('button',{name:'Validate'}));
+ fireEvent.click(await screen.findByRole('button',{name:'Fix 2 findings'}));
+ const dialog=await screen.findByRole('dialog');
+ fireEvent.click(within(dialog).getByRole('checkbox',{name:'Republish to the team after fixing'}));
+ fireEvent.click(within(dialog).getByRole('button',{name:'Fix'}));
+ await waitFor(()=>expect(fix).toHaveBeenCalledWith({path:uncPath}));
+ expect(await within(dialog).findByRole('button',{name:'Done'})).toBeVisible();
+ expect(publish).not.toHaveBeenCalled();
 });
 it('draws no Fix in Quality when nothing is repairable or the CLI predates the count',async()=>{
  const {backend}=open('#/skill/local?path='+encodeURIComponent(uncPath)+'&tab=quality',localFolder());
  await screen.findByRole('heading',{name:'adopt-agent-tooling'});
- vi.spyOn(backend,'validate').mockResolvedValue({ok:false,error:'Hygiene failed.',value:{name:'adopt-agent-tooling',findings:1,warnings:0,repairable:0}});
+ vi.spyOn(backend,'validate').mockResolvedValue({ok:false,error:'Hygiene failed.',value:{name:'adopt-agent-tooling',findings:1,warnings:0,repairable:0,repairs:[]}});
  fireEvent.click(screen.getByRole('button',{name:'Validate'}));
  expect(await screen.findByText('1 finding · 0 warnings')).toBeVisible();
  expect(screen.queryByRole('button',{name:/^Fix/})).toBeNull();
@@ -255,7 +311,7 @@ it('draws no Fix in Quality when nothing is repairable or the CLI predates the c
 it('sends the folder, not the route segment, to validate',async()=>{
  const {backend,client}=open('#/skill/local?path='+encodeURIComponent(uncPath)+'&tab=quality',localFolder());
  await screen.findByRole('heading',{name:'adopt-agent-tooling'});
- const validate=vi.spyOn(backend,'validate').mockResolvedValue({ok:true,value:{name:'adopt-agent-tooling',findings:0,warnings:0,repairable:0}}),invalidate=vi.spyOn(client,'invalidateQueries');
+ const validate=vi.spyOn(backend,'validate').mockResolvedValue({ok:true,value:{name:'adopt-agent-tooling',findings:0,warnings:0,repairable:0,repairs:[]}}),invalidate=vi.spyOn(client,'invalidateQueries');
  fireEvent.click(screen.getByRole('button',{name:'Validate'}));
  expect(await screen.findByText('hygiene passed')).toBeVisible();
  expect(validate).toHaveBeenCalledExactlyOnceWith({ref:uncPath});
@@ -322,7 +378,7 @@ it('routes a by-path removal through D6 with the exact folder and typed confirma
 it('validates the team name on a qualified name route, not its placed folder or qualified ref',async()=>{
  const {backend}=open('#/skill/acme%2Fdeploy-check?'+seedOrigin+'&tab=quality',projectCopy());
  await screen.findByRole('heading',{name:'deploy-check'});
- const validate=vi.spyOn(backend,'validate').mockResolvedValue({ok:true,value:{name:'deploy-check',findings:0,warnings:0,repairable:0}});
+ const validate=vi.spyOn(backend,'validate').mockResolvedValue({ok:true,value:{name:'deploy-check',findings:0,warnings:0,repairable:0,repairs:[]}});
  fireEvent.click(screen.getByRole('button',{name:'Validate'}));
  await waitFor(()=>expect(validate).toHaveBeenCalledWith({ref:'deploy-check',team:'acme'}));
  expect(validate.mock.calls.every(([args])=>args.ref==='deploy-check')).toBe(true);

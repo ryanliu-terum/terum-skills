@@ -1,26 +1,25 @@
 import { useBackend, useFeatures, usePreference } from '../../backend';
 import { useState } from 'react';
 import type { ReactNode } from 'react';
-import type { Root, StatusResult, Surfaces, TeamStatus } from '../../backend/types';
+import type { Root, StatusResult, Surfaces } from '../../backend/types';
 import type { IconName } from '../ui/icon-paths';
 import { Icon } from '../ui/Icon';
+import { useNavigate } from 'react-router';
+import { useContextMenu, useCopy, useHostReveal } from './context-menu';
+import type { ContextMenuBuilder, ContextMenuItem } from './context-menu';
+const MANAGE_ROWS=(navigate:(to:string)=>void):ContextMenuItem[]=>[{key:'sep',kind:'separator'},{key:'manage',label:'Manage projects…',icon:'settings',onSelect:()=>navigate('/settings/machine')}];
 import { Footer } from './Footer';
 import { useWorkflow } from './useWorkflow';
-import { useNavigate } from 'react-router';
-import { useContextMenu, useCopy } from './context-menu';
-import type { ContextMenuBuilder, ContextMenuItem } from './context-menu';
-import { revealLabel } from '../../lib/platform-labels';
 import './Sidebar.css';
 function SectionHeader({label,trailing}:{label:string;trailing?:ReactNode}){return <div className="section-header"><div><span>{label}</span><Icon name="chevron-down" size={12} color="var(--tk-text4)" stroke="2"/></div>{trailing}</div>;}
-const MANAGE_ROWS=(navigate:(to:string)=>void):ContextMenuItem[]=>[{key:'sep',kind:'separator'},{key:'manage',label:'Manage projects…',icon:'settings',onSelect:()=>navigate('/settings/machine')}];
 function NavRow({label,icon,href,selected=false,nested=false,expandable=false,collapsed=false,onToggle,count,trailing,menu=null}:{label:string;icon:IconName;href:string;selected?:boolean;nested?:boolean;expandable?:boolean;collapsed?:boolean;onToggle?:()=>void;count?:string|undefined;trailing?:ReactNode;menu?:ContextMenuBuilder|null}){
  const menuRef=useContextMenu(menu);
  return <a href={href} ref={menuRef} className="shell-link nav-row" aria-current={selected?'page':undefined} style={{paddingLeft:nested?32:8,background:selected?'var(--tk-bg3)':'transparent',color:selected?'var(--tk-text1)':'var(--tk-text2)'}}><div className="nav-label"><Icon name={icon} color={selected?'var(--tk-text1)':'var(--tk-text3)'}/><span>{label}</span>{expandable?<button type="button" className="icon-button" aria-label={(collapsed?'Expand ':'Collapse ')+label} aria-expanded={!collapsed} style={{width:12,height:12,flexShrink:0}} onClick={event=>{event.preventDefault();event.stopPropagation();onToggle?.();}}><Icon name={collapsed?'chevron-right':'chevron-down'} size={12} color="var(--tk-text4)" stroke="2"/></button>:null}</div>{count!==undefined?<span className="nav-count" style={{color:selected?'var(--tk-text2)':'var(--tk-text3)'}}>{count}</span>:null}{trailing}</a>;
 }
-export function Sidebar({selected,counts,machine,me,surfaces,team,roots,collapsedSections=[],onToggleSection,onHide}:{collapsedSections?:readonly string[];onToggleSection?:(section:string)=>void;onHide?:()=>void;team?:TeamStatus|undefined;selected:string;counts:Record<string,string>|null;machine:StatusResult['machine']|undefined;me?:StatusResult['me']|undefined;surfaces?:Surfaces|undefined;roots?:readonly Root[]|undefined}){
+export function Sidebar({selected,counts,me,surfaces,roots,collapsedSections=[],onToggleSection,onHide}:{collapsedSections?:readonly string[];onToggleSection?:(section:string)=>void;onHide?:()=>void;selected:string;counts:Record<string,string>|null;me?:StatusResult['me']|undefined;surfaces?:Surfaces|undefined;roots?:readonly Root[]|undefined}){
  const projectRoots=roots?.filter(r=>r.kind==='checkout')??[],globalRoot=roots?.find(r=>r.kind==='global');
  // Right-click on a Library folder row: reveal it, copy its path, or jump to the Projects list in Settings (2026-09-14).
- const copy=useCopy(),navigate=useNavigate(),reveal=revealLabel(machine?.os);
+ const copy=useCopy(),navigate=useNavigate(),reveal=useHostReveal();
  const folderMenu=(path:string,manage:boolean):ContextMenuItem[]=>[{key:'reveal',label:reveal,icon:'folder',onSelect:()=>void action.perform(()=>backend.revealPath(path))},{key:'copy',label:'Copy path',icon:'copy',onSelect:()=>void copy(path,'path')},...(manage?MANAGE_ROWS(navigate):[])];const showCounts=usePreference('appearance:counts',true);const displayedCounts=showCounts?counts:null;
  // One workflow instance for the whole sidebar (the app's per-surface convention): the next action
  // anywhere in the sidebar replaces a shown error instead of pinning it to its row forever, and a
@@ -39,7 +38,7 @@ export function Sidebar({selected,counts,machine,me,surfaces,team,roots,collapse
  <NavRow label="Global" icon="globe" href="#/library/global" selected={selected==='Global'} count={displayedCounts?.Global} menu={globalRoot?()=>folderMenu(globalRoot.root,false):null}/>{surfaces?.library!==false?<><NavRow label="Projects" icon="folder" href="#/marketplace/projects" expandable collapsed={collapsedSections.includes('projects')} onToggle={()=>onToggleSection?.('projects')}/>
  {!collapsedSections.includes('projects')&&<>{projectRoots.length?projectRoots.map(root=><ProjectRow key={root.id} root={root} selected={selected===root.id} showCount={displayedCounts!==null} menu={()=>folderMenu(root.root,true)}/>):<div className="nav-row nav-empty" style={{paddingLeft:32}}><div className="nav-label"><span style={{color:'var(--tk-text4)'}}>0 projects</span></div></div>}<AddProjectRow busy={action.busy} error={errorAt==='add-project'?action.error:null} onChoose={()=>{void addProject();}}/></>}</>:null}
  {surfaces?.inbox===true?<><NavRow label="Inbox" icon="inbox" href="#/inbox" expandable collapsed={collapsedSections.includes('inbox')} onToggle={()=>onToggleSection?.('inbox')} selected={selected==='Inbox'}/>{!collapsedSections.includes('inbox')&&<><NavRow label="Pushes" icon="arrow-down-to-line" href="#/inbox?tab=pushes" nested count={displayedCounts?.Pushes}/><NavRow label="Updates" icon="refresh" href="#/inbox?tab=updates" nested count={displayedCounts?.Updates}/><NavRow label="Alerts" icon="alert" href="#/inbox?tab=alerts" nested count={displayedCounts?.Alerts}/></>}</>:null}
- </div>{surfaces?.catalog!==false||surfaces?.roster!==false?<div className="nav-group"><SectionHeader label="Team"/>{surfaces?.catalog!==false?<NavRow label="Marketplace" icon="store" href="#/marketplace" selected={selected==='Marketplace'}/>:null}{surfaces?.roster!==false?<NavRow label="Members" icon="users" href="#/share" selected={selected==='Members'}/>:null}</div>:null}</nav><Footer team={team} machine={machine} me={me} settings={selected==='Settings'}/></aside>;
+ </div>{surfaces?.catalog!==false||surfaces?.roster!==false?<div className="nav-group"><SectionHeader label="Team"/>{surfaces?.catalog!==false?<NavRow label="Marketplace" icon="store" href="#/marketplace" selected={selected==='Marketplace'}/>:null}{surfaces?.roster!==false?<NavRow label="Members" icon="users" href="#/share" selected={selected==='Members'}/>:null}</div>:null}</nav><Footer me={me} settings={selected==='Settings'}/></aside>;
 }
 
 /**

@@ -19,12 +19,13 @@ describe('validate (§9)', () => {
     const fixture = await bareTeam(); await pushFromSeed(fixture.seed, 'skills/sample/v1/SKILL.md', skill());
     const store = createConfigStore(join(fixture.root, 'state')); const clone = await cloneWithIdentity(fixture.bare, store.teamClone('team'));
     await store.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
-    const clean = new ScriptedPrompter(); expect(await run({ target: 'sample', config: store }, clean)).toMatchObject({ ok: true, value: { findings: 0, repairable: 0 } });
+    const clean = new ScriptedPrompter(); expect(await run({ target: 'sample', config: store }, clean)).toMatchObject({ ok: true, value: { findings: 0, repairable: 0, repairs: [] } });
     await writeFile(join(clone, 'skills', 'sample', 'v1', 'SKILL.md'), skill('bad\u202Etext ghp_abcdefghijklmnopqrstuvwxyz third@company.com'));
     await mkdir(join(clone, 'skills', 'sample', 'v1', 'bin')); await writeFile(join(clone, 'skills', 'sample', 'v1', 'bin', 'bad.exe'), 'x');
     const rejected = new ScriptedPrompter();
-    // `repairable` counts only the bidi character: the credential, the stranger's email and bad.exe need a person.
-    expect(await run({ target: 'sample', config: store }, rejected)).toMatchObject({ ok: false, error: expect.stringContaining('HYG2'), value: { findings: 3, repairable: 1 } });
+    // `repairable` counts only the bidi character, and `repairs` says so in the sentence the app shows before
+    // fixing: the credential, the stranger's email and bad.exe need a person.
+    expect(await run({ target: 'sample', config: store }, rejected)).toMatchObject({ ok: false, error: expect.stringContaining('HYG2'), value: { findings: 3, repairable: 1, repairs: ['Removed 1 invisible character from SKILL.md.'] } });
     expect(rejected.lines.join('\n')).toEqual(expect.stringMatching(/HYG2[\s\S]*HYG3[\s\S]*HYG4/));
   });
 

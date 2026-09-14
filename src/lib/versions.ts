@@ -1,6 +1,6 @@
 /**
  * The version vocabulary (refactor spec §3.2). Nothing else in the codebase parses or formats a
- * version segment.
+ * version segment: prose says `Version 3` (`versionLabel`), a card says `v3` (`cardVersionLabel`).
  *
  * **This module imports nothing — not even a type.** The desktop bundle imports it by relative path
  * exactly as `desktop/src/backend/tauri/session.ts` imports `src/lib/serve-verbs.js`, so
@@ -35,9 +35,18 @@ export function versionFolderName(n: number): string {
   return `v${n}`;
 }
 
-/** The only form a version takes in any user-facing string, CLI or desktop (D1). */
+/** The form a version takes in PROSE — terminal output, dialogs, detail screens, README, docs (D1). */
 export function versionLabel(n: number): string {
   return `Version ${n}`;
+}
+
+/**
+ * The form a version takes on a CARD — a `SkillCard`'s version slot and eval line (cross-mirror overlays
+ * review walk D4b, 2026-09-13): `v3`, so the longest slot string rarely wraps. It is spelled like the
+ * folder name on purpose and is the only other user-facing form; the two are never mixed on one line.
+ */
+export function cardVersionLabel(n: number): string {
+  return versionFolderName(n);
 }
 
 /**

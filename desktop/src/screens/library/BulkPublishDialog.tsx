@@ -1,4 +1,6 @@
 import { useContext, useEffect, useRef, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
+import { affects } from '../../app/invalidation';
 import type { PublishResult, Result, Run, SkillCard } from '../../backend/types';
 import { driveRun, PrintContext, PromptContext, useBackend } from '../../backend';
 import { Button } from '../../components/ui/Button';
@@ -19,7 +21,7 @@ import { GLOBAL_LIST, TARGET_ASK, publishFlags, usePublishDefaults } from '../sk
  * sentence and the queue continues, a cancelled row stops the queue, and the finished rows keep their outcome.
  */
 export function BulkPublishDialog({ cards, onClose, onFinished }: { cards: readonly SkillCard[]; onClose: () => void; onFinished: (summary: BulkPublishSummary) => void }) {
-  const backend = useBackend(), print = useContext(PrintContext), unexpected = useContext(PromptContext);
+  const backend = useBackend(), print = useContext(PrintContext), unexpected = useContext(PromptContext), client = useQueryClient();
   const [rows, setRows] = useState<BulkRow[]>(() => cards.map(card => {
     const reason = localActionReason(card, 'publish');
     return { key: card.path ?? card.name, card, state: reason === null ? { kind: 'ready' } : { kind: 'skipped', reason } };
@@ -30,8 +32,19 @@ export function BulkPublishDialog({ cards, onClose, onFinished }: { cards: reado
   const target = targetChoice ?? (defaults.target === TARGET_ASK ? GLOBAL_LIST : defaults.target), flags = publishFlags(target, null);
   const [summary, setSummary] = useState<BulkPublishSummary | null>(null);
   // `busy` is a ref, not state, so two clicks in one frame cannot start two queues (the clone is write-locked).
-  const busy = useRef(false), stop = useRef(false), activeRun = useRef<Run<PublishResult> | null>(null), mounted = useRef(true);
-  useEffect(() => () => { mounted.current = false; stop.current = true; const run = activeRun.current; activeRun.current = null; void run?.cancel(); }, []);
+  const busy = useRef(false), stop = useRef(false), activeRun = useRef<Run<PublishResult> | null>(null), mounted = useRef(true), landed = useRef(0);
+  // The setup re-arms `mounted`: StrictMode replays mount effects as setup → cleanup → setup, and a cleanup-only effect
+  // would leave the flag false for the dialog's whole life (every setRow a no-op, the queue never reaching 'finished').
+  // The cleanup cancels whatever is in flight and, when a version already landed, refetches every clone-backed read —
+  // leaving mid-queue (Back, a second Cancel) must not strand the Library on a stale inventory.
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false; stop.current = true;
+      const run = activeRun.current; activeRun.current = null; void run?.cancel();
+      if (landed.current > 0) void client.invalidateQueries({ predicate: query => affects('clone', query.queryKey) });
+    };
+  }, [client]);
 
   const ready = rows.filter(row => row.state.kind === 'ready');
   // Everything that was ever sendable — stable while the queue runs, so the label and the hint do not count down.
@@ -58,12 +71,20 @@ export function BulkPublishDialog({ cards, onClose, onFinished }: { cards: reado
       activeRun.current = null;
       if (!mounted.current) return;
       if (!result.ok) {
-        // A run we asked to cancel ends `ok:false`; the mock's Run.cancel carries no `cancelled` flag, so the
-        // request itself (`stop`) is the evidence — a failure after Cancel is the cancellation, not a CLI error.
-        if (result.cancelled || stop.current) { setRow(row.key, { kind: 'cancelled' }); stop.current = true; continue; }
+        if (result.value !== undefined) {
+          // The verb finished before the cancel landed: the adapter says so and carries the result, so the version IS
+          // on disk. The row reports the publish and the CLI's own sentence, and the queue stops as the person asked.
+          published += 1; landed.current = published;
+          setRow(row.key, { kind: 'done', text: `${publishOutcomeText(row.card.name, result.value)} ${result.error}` });
+          stop.current = true; continue;
+        }
+        // A cancellation is one driveRun reports (`cancelled`: a declined question) or the one this dialog asked for —
+        // both adapters settle a requested cancel as exactly 'Cancelled.'. Any other sentence after Cancel is still the
+        // CLI's own failure and is shown verbatim (COMMON §6); the queue stops either way once Cancel was pressed.
+        if (result.cancelled || (stop.current && result.error === 'Cancelled.')) { setRow(row.key, { kind: 'cancelled' }); stop.current = true; continue; }
         failed += 1; setRow(row.key, { kind: 'failed', error: result.error }); continue;
       }
-      published += 1; setRow(row.key, { kind: 'done', text: publishOutcomeText(row.card.name, result.value) });
+      published += 1; landed.current = published; setRow(row.key, { kind: 'done', text: publishOutcomeText(row.card.name, result.value) });
     }
     busy.current = false;
     setSummary({ published, attempted: ready.length, failed });
@@ -72,7 +93,10 @@ export function BulkPublishDialog({ cards, onClose, onFinished }: { cards: reado
 
   function cancel() {
     if (phase !== 'running') { onClose(); return; }
-    // Stops the queue: the active run ends `cancelled`, the rows after it read Not started, finished rows keep their outcome.
+    // A second Cancel while the stopped run has not settled (a CLI child that hangs) leaves the dialog; the unmount
+    // cleanup cancels the run once more and refetches, so nothing keeps working unseen.
+    if (stop.current) { onClose(); return; }
+    // Stops the queue: the active run ends 'Cancelled.', the rows after it read Not started, finished rows keep their outcome.
     stop.current = true;
     void activeRun.current?.cancel();
   }

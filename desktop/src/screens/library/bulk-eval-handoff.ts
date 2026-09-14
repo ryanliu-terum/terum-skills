@@ -20,7 +20,7 @@ export function bulkEvalHandoff(cards: readonly EvalCandidate[]): BulkEvalHandof
   return { refs, leftOut };
 }
 
-/** The URL the host answers. The Library's own state (`select=1`, query, facets, sort) rides along, so closing the question lands back on the same view; a stale `ref` or `pending` from a pasted link is dropped rather than merged. */
+/** The URL the host answers. The Library's own state (`select=1`, query, sort) rides along, so closing the question lands back on the same view; a stale `ref` or `pending` from a pasted link is dropped rather than merged. */
 export function bulkEvalSearch(search: URLSearchParams, refs: readonly string[]): URLSearchParams {
   const next = new URLSearchParams(search);
   next.delete('ref'); next.delete('pending'); next.set('dialog', 'bulk-eval');

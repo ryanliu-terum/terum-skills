@@ -1,6 +1,6 @@
 {
   "generatedFrom": {
-    "buildPy": "75f0f438bc51bde903a24af2506d1d7f",
+    "buildPy": "19d1261b4fc6de4accaebb57056ca4d4",
     "today": "2026-09-06"
   },
   "TOKENS": {
@@ -4040,7 +4040,7 @@
       "user"
     ],
     [
-      "Teams",
+      "Team",
       "users"
     ],
     [
@@ -4064,7 +4064,7 @@
       "flask"
     ],
     [
-      "Sharing",
+      "Publishing",
       "upload"
     ],
     [
