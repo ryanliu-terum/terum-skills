@@ -201,3 +201,16 @@ delete the dead `cancelled` arm of the Retry branch.
 - **Grounding findings:** reproduced directly during the walk — after Stop then Start setup,
   `attempts = 2` and `outcome = finished` while `hash` stayed `#/library/global` throughout, and
   the setup screen never rendered.
+
+### Implementation note (2026-09-13, same day)
+
+**The second half of this decision — "delete the dead `cancelled` arm" — was not carried out, and
+should not be.** It was premised on that arm being unreachable. The navigation guard makes it
+reachable: a restarted screen that is then Stopped now stays put, and the arm renders a Retry that
+works (`session.retry()` accepts a cancelled outcome). Deleting it would have removed a live,
+working affordance rather than dead code. The arm is kept and is now covered by
+`setup-driver.test.tsx` — *"Stop on a restarted screen stays put and offers Retry"*.
+
+The first half shipped as written: `SetupBoot.tsx` guards the navigate-on-cancelled effect on
+`restart`, and the coverage gap named above is closed by *"restarting a cancelled session shows the
+run instead of bouncing to the Library"*.

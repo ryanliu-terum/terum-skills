@@ -8,19 +8,45 @@ import { CommandResult, Runner, systemRunner } from '../lib/runner.js';
 import { githubLoginSchema, parseOrExplain } from '../lib/schema.js';
 
 export interface InviteArgs extends WithForm { logins: readonly string[]; team?: string; config?: ConfigStore; runner?: Runner; }
-export interface InviteResult { team: string; invited: readonly string[]; already: readonly string[]; failed?: readonly { login: string; error: string }[]; }
+export type InviteFailureReason = 'invalid-syntax' | 'no-such-user' | 'cap' | 'forbidden' | 'unknown';
+export interface InviteFailure { login: string; error: string; reason: InviteFailureReason }
+export interface InviteResult { team: string; invited: readonly string[]; already: readonly string[]; failed?: readonly InviteFailure[]; }
+/**
+ * The two failures a person fixes by retyping. `setup` re-asks on these and exits on the rest (D1,
+ * 2026-09-13) — which is why the reason is a field rather than something read back out of the message.
+ */
+export const FIXABLE_INVITE_REASONS: ReadonlySet<InviteFailureReason> = new Set<InviteFailureReason>(['invalid-syntax', 'no-such-user']);
+/** The schema message verbatim, captured rather than thrown so a bad login is reportable alongside the good ones. */
+function loginProblem(login: string): string | null {
+  try { parseOrExplain(githubLoginSchema, login, `GitHub login ${JSON.stringify(login)}`); return null; }
+  catch (error) { return error instanceof Error ? error.message : String(error); }
+}
 
 /** §6 GitHub-only collaborator invitations. It deliberately has no team-repo write path. */
 export async function run(args: InviteArgs, io: Prompter): Promise<Result<InviteResult>> {
   try {
     if (args.logins.length === 0) throw new Error('Provide at least one GitHub login.');
+    // The batch is still validated before a single invitation is sent, so a typo costs nothing. What
+    // changed (D1) is the shape: a syntax problem is returned as a structured failure instead of thrown,
+    // so the caller can tell a retypeable slip from a cap without matching on message text.
     const seen = new Set<string>();
-    const logins = args.logins.map(rawLogin => parseOrExplain(githubLoginSchema, rawLogin.trim(), `GitHub login ${JSON.stringify(rawLogin.trim())}`)).filter(login => {
+    const logins: string[] = [];
+    const invalid: InviteFailure[] = [];
+    for (const rawLogin of args.logins) {
+      const login = rawLogin.trim();
+      const problem = loginProblem(login);
+      if (problem !== null) { invalid.push({ login, error: problem, reason: 'invalid-syntax' }); continue; }
       const key = login.toLowerCase();
-      if (seen.has(key)) return false;
+      if (seen.has(key)) continue;
       seen.add(key);
-      return true;
-    });
+      logins.push(login);
+    }
+    // Printed, not just returned: the caller may re-ask, and a re-ask with no stated reason is a worse
+    // prompt than the exit it replaced.
+    if (invalid.length) {
+      for (const entry of invalid) io.print(entry.error);
+      return failure(invalid.map(entry => entry.error).join('\n'), { team: args.team ?? '', invited: [], already: [], failed: invalid });
+    }
     const store = args.config ?? createConfigStore();
     const config = await store.read();
     const [team, binding] = selectTeam(config.teams, args.team, args.form);
@@ -30,7 +56,7 @@ export async function run(args: InviteArgs, io: Prompter): Promise<Result<Invite
     const endpoint = githubRepository(binding.remote);
     const invited: string[] = [];
     const already: string[] = [];
-    const failed: { login: string; error: string }[] = [];
+    const failed: InviteFailure[] = [];
     for (const login of logins) {
       const response = await runner.run('gh', ['api', '-X', 'PUT', '--include', `repos/${endpoint}/collaborators/${login}`]).catch(async (error: unknown) => { throw new Error((await explainGhFailure(runner)) ?? (error instanceof Error ? error.message : String(error))); });
       const status = httpStatus(response.code, response.stdout, response.stderr);
@@ -45,7 +71,10 @@ export async function run(args: InviteArgs, io: Prompter): Promise<Result<Invite
       const error = status === 404
         ? `Could not invite @${login}: there is no GitHub user named @${login}. Check the spelling; GitHub logins are case-insensitive but must exist.`
         : `Could not invite @${login} (GitHub status ${status ?? 'unknown'}). ${invitationCapHit(status, response) ? 'GitHub caps invitations at 50 per repository per day. ' : ''}${(response.stderr || response.stdout).trim()}`.trim();
-      failed.push({ login, error });
+      // 404 is "no such person" — a retypeable slip. A cap or a permission refusal is the account's
+      // standing, which retyping cannot change, so those keep §6.1's exit.
+      const reason: InviteFailureReason = status === 404 ? 'no-such-user' : invitationCapHit(status, response) ? 'cap' : status === 403 ? 'forbidden' : 'unknown';
+      failed.push({ login, error, reason });
       io.print(error);
     }
     io.print(slackBlock(endpoint));

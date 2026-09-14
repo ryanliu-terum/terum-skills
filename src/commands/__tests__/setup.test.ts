@@ -172,18 +172,40 @@ describe('setup (§6.1)', () => {
     expect(io.lines.join('\n')).toContain('Could not invite @bob');
     expect(io.lines.join('\n')).toContain('npx -y terum-skills@latest setup alice/team');
     expect(io.lines).not.toContain('Members:');
+    // D1's A half: a permission refusal is not retypeable, so it still exits — but never silently.
+    expect(io.asked.filter((question) => /enter them again/.test(question))).toEqual([]);
+    expect(io.lines.join('\n')).toContain('Team team is set up');
+    expect(io.lines.join('\n')).toContain('run `npx -y terum-skills@latest setup` again to finish');
   });
 
-  it('stops on invalid syntax before sending any invitation (the batch is validated up front)', async () => {
+  // D1 (2026-09-13) rewrote this test's tail, not its subject. The guarantee it was written to protect —
+  // nothing is sent while any login in the batch fails to parse — is asserted here unchanged. What changed
+  // is what follows: a retypeable slip now re-asks instead of exiting, so the wizard reaches the hook.
+  it('re-asks on invalid syntax, still sending nothing until the whole batch parses', async () => {
     const fixture = await configuredCreator({ 'api -X PUT --include repos/alice/team/collaborators/bob': { code: 0, stdout: 'HTTP/2 201\n', stderr: '' } });
-    const io = new ScriptedPrompter(['bob @carol']);
+    const io = new ScriptedPrompter(['bob @carol', 'bob']);
     const result = await run(fixture.args, io);
-    expect(result).toMatchObject({ ok: false, error: expect.stringContaining('Invalid GitHub login'), value: { steps: { team: 'skipped' } } });
+    expect(result).toMatchObject({ ok: true, value: { steps: { invite: 'done' } } });
+    // Unchanged from the pre-D1 test: the invalid batch sent nothing, and @bob was not invited on that pass.
+    expect(io.lines.join('\n')).toContain('Invalid GitHub login');
+    expect(result.ok ? '' : result.error).not.toContain('@carol');
+    expect(io.lines.join('\n')).toContain('@carol');
+    // New: the slip was re-asked rather than fatal, so exactly one invitation was sent, on the second pass.
+    expect(io.asked).toContain('Those GitHub usernames could not be invited; enter them again (comma or space separated; blank to skip)');
+    expect(fixture.runner.calls.filter((call) => call.command === 'gh' && call.args.join(' ').includes('collaborators/'))).toHaveLength(1);
+    expect(io.lines).toContain('Invited @bob.');
+    expect(fixture.hookOffers()).toBe(1);
+  });
+
+  it('gives up after three retypes and names what is durable', async () => {
+    const fixture = await configuredCreator({});
+    const io = new ScriptedPrompter(['@carol', '@carol', '@carol']);
+    const result = await run(fixture.args, io);
+    expect(result).toMatchObject({ ok: false, error: expect.stringContaining('Invalid GitHub login') });
+    expect(io.asked.filter((question) => /enter them again/.test(question))).toHaveLength(2);
     expect(fixture.runner.calls.filter((call) => call.command === 'gh' && call.args.join(' ').includes('collaborators/'))).toEqual([]);
-    expect(io.lines).not.toContain('Invited @bob.');
-    expect(result.ok ? '' : result.error).toContain('@carol');
-    expect(io.lines.join('\n')).not.toContain('Send this to your teammate:');
-    expect(result.value?.steps.invite).toBeUndefined();
+    expect(io.lines.join('\n')).toContain('no invitation was sent');
+    expect(io.lines.join('\n')).toContain('run `npx -y terum-skills@latest setup` again to finish');
     expect(fixture.hookOffers()).toBe(0);
   });
 

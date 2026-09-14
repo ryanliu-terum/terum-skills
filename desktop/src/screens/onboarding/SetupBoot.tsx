@@ -1,6 +1,7 @@
 import { useContext, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { useNavigate } from 'react-router';
 import { PromptContext, setupSession, useBackend, SETUP_STEP_TO_BOARD } from '../../backend';
+import { SETUP_STEP_KEYS } from '../../backend/types';
 import type { LaunchContext, Onboarding, SetupStep } from '../../backend/types';
 import { ScreenFrame } from '../../components/domain/ScreenFrame';
 import { OnboardingActions, OnboardingColumn, OnboardingFrame, OnboardingPara, OnboardingTile, OnboardingTitle, ProgressCard } from './OnboardingParts';
@@ -10,13 +11,22 @@ const rows: readonly [SetupStep, string][] = [
  ['projects','Adding a project to your library'],
  ['evals','Evaluating shared skills'], ['hook','Offering the session hook and Claude Code skill'],
 ];
+// A drawn row is behind the wizard once the CLI has moved past its step. SETUP_STEP_KEYS is the wizard's
+// own order, so an unreached step (`invite` between team and projects) ranks a row without needing a row.
+const rank=(step:SetupStep|null):number=>step===null?-1:SETUP_STEP_KEYS.indexOf(step);
+// `refresh` says "still working", so only the running state may wear it. `handoff` and `refused` are settled
+// states with a next action rather than a completion or an error, which is what separates them from `failed`.
+const TILE={running:'refresh',finished:'check-circle',handoff:'info',cancelled:'x',refused:'info',failed:'alert'} as const;
 export function SetupBoot({launch,restart=false}:{launch:LaunchContext;restart?:boolean}) {
  const backend=useBackend(), ask=useContext(PromptContext), navigate=useNavigate();
  const [session]=useState(()=>setupSession(backend,launch));
  const state=useSyncExternalStore(session.subscribe,session.snapshot);
  useEffect(()=>{if(restart&&session.snapshot().outcome!=='running')void session.retry();else void session.start(ask);},[session,ask,restart]);
  const navigated=useRef(false);
- useEffect(()=>{if(state.outcome==='cancelled'&&!navigated.current){navigated.current=true;navigate('/library/global');}},[state.outcome,navigate]);
+ // Stop is a terminal exit, so a cancelled run hands back to the Library. A RESTARTED screen is the one
+ // exception: `retry()` flips the session to running synchronously, but this effect still fires with the
+ // outcome captured before that, and navigating on it ran the whole wizard invisibly behind the Library.
+ useEffect(()=>{if(!restart&&state.outcome==='cancelled'&&!navigated.current){navigated.current=true;navigate('/library/global');}},[restart,state.outcome,navigate]);
  const result=state.result, failed=result?.ok===false&&!result.cancelled&&!result.refused, refused=result?.ok===false&&result.refused===true;
  const steps=result?.value?.steps;
  const progress=state.progress, progressRow=progress?rows.find(([key])=>key===progress.label):undefined;
@@ -24,12 +34,15 @@ export function SetupBoot({launch,restart=false}:{launch:LaunchContext;restart?:
   const outcome=steps?.[key];
   const complete=key==='hook'?outcome!==undefined&&steps?.wrapper!==undefined:outcome!==undefined;
   const skipped=key==='hook'?outcome==='skipped'&&steps?.wrapper==='skipped':outcome==='skipped';
-  return [complete?'done':!result&&(state.activeStep===key||(key==='hook'&&state.activeStep==='wrapper'))?'current':'pending',label,key==='evals'&&progress?.label==='evals'?`${progress.done} of ${progress.total}`:skipped?'Skipped':outcome==='queued'?'Queued':complete?'Done':''];
+  // Only the finished run carries `steps`, so mid-run a passed step is read from the active step's rank;
+  // a step that ends up skipped reads `done` here and flips to 'Skipped' when the result lands.
+  const passed=!result&&rank(state.activeStep)>rank(key);
+  return [complete?'done':!result&&(state.activeStep===key||(key==='hook'&&state.activeStep==='wrapper'))?'current':passed?'done':'pending',label,key==='evals'&&progress?.label==='evals'?`${progress.done} of ${progress.total}`:skipped?'Skipped':outcome==='queued'?'Queued':complete?'Done':''];
  });
  if(progress&&!progressRow)cardRows.push(['running',progress.label??'Setup progress','']);
  const current=state.activeStep?SETUP_STEP_TO_BOARD[state.activeStep]:null;
  return <ScreenFrame><OnboardingFrame steps={[]} current={null} skipped={[]}><OnboardingColumn>
-  <OnboardingTile icon={failed?'alert':result?.ok?'check-circle':'refresh'}/>
+  <OnboardingTile icon={TILE[state.outcome]}/>
   <OnboardingTitle>{{running:'Setting up your workspace',finished:'Setup finished',handoff:'Ask your team owner to invite you',cancelled:'Setup cancelled',refused:'Setup not started',failed:"Couldn't finish setup"}[state.outcome]}</OnboardingTitle>
   {launch.target&&<OnboardingPara>{launch.target}</OnboardingPara>}
   <ProgressCard label="Setup progress" rows={cardRows} placed={progress?.done??null} total={progress?.total??null} failed={failed}/>
