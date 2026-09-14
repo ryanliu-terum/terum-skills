@@ -235,7 +235,7 @@ describe('eval (§6 / IE2)', () => {
     };
     const agent: AgentApi = {
       runAgent: async (_task, cwd) => transcript(existsSync(join(cwd, '.claude', 'skills', 'sample')) ? ['sample'] : []),
-      askJson: async (prompt) => (prompt.includes('Generate exactly three') ? leaky : prompt.includes('Generate trigger evaluation') ? generatedTriggers : { selected: ['sample'] }),
+      askJson: async (prompt) => (prompt.includes('Generate headlessly answerable execution') ? leaky : prompt.includes('Generate trigger evaluation') ? generatedTriggers : { selected: ['sample'] }),
     };
     const result = await run(args(store, home, { agent, k: 1 }), new ScriptedPrompter());
     expect(result).toMatchObject({ ok: false, error: expect.stringContaining('HYG3') });
