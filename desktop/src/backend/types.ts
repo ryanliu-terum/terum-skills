@@ -142,6 +142,17 @@ export interface PublishArgs {team?:string;ref:string;message?:string;/** ALSO l
  * anything change": a publish can add the skill to a project without minting a version.
  */
 export interface PublishResult {name:string;/** The project also listed, or null — the marketplace alone. */project:string|null;version:string|null;created:boolean;identicalTo:string|null;attachedEvals:number;evalAssets:number;profileAdded:boolean;projectAdded:boolean}
+export interface UnpublishArgs {team?:string;/** The skill's marketplace name — the `skills/<name>/` folder, never a Library path. */ref:string}
+/**
+ * The inverse of `PublishResult`: what the retraction actually removed. Every count is reported so the
+ * app can say it plainly — a skill listed in no project and endorsed by nobody still unpublishes, and
+ * the zeroes are the honest answer rather than a reason to hide the line.
+ *
+ * `versions` is newest-first (`['v4','v3',…]`). Anyone in the team may unpublish any skill
+ * (2026-09-14); the CLI's only brake is the typed-name confirmation, which the app answers with
+ * `--yes` after its own dialog has made the person name the skill.
+ */
+export interface UnpublishResult {name:string;id:string;versions:string[];evalAssets:number;receipts:number;projects:string[];profiles:number}
 export interface SyncArgs {team?:string}
 // The fetch-only sync result (§10). `detail` is the CLI's own reason for a state other than 'refreshed';
 // it is spelled the same here as in the CLI so the popup can render it.
