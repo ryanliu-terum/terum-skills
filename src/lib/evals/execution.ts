@@ -12,7 +12,7 @@
  * transcript and `execution_status` reflects any unscored holes.
  */
 import { spawn } from 'node:child_process';
-import { chmod, cp, mkdir, mkdtemp, rename, writeFile } from 'node:fs/promises';
+import { chmod, cp, mkdir, mkdtemp, rename, rm, writeFile } from 'node:fs/promises';
 import { statSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import YAML from 'yaml';
@@ -93,6 +93,22 @@ export async function missingRequirements(requires: readonly string[]): Promise<
   return missing;
 }
 
+/**
+ * The ONE path predicate for a case's inline `files` keys, shared by `seedSandbox` (run time) and
+ * `validateCases` in generate.ts (generation time) so the two can never drift apart again: a
+ * generated case that would fail here used to reach disk and take the whole eval down with it.
+ * Returns the reason a key is refused, or null when it may be written into the sandbox.
+ */
+export function casePathViolation(rel: string): string | null {
+  const segments = rel.split(/[\\/]/);
+  if (isAbsolute(rel) || segments.includes('..')) return `unsafe file path in case: ${rel}`;
+  // A generated case must not seed project settings/hooks into the arm being scored:
+  // `--setting-sources project` would load sandbox-root `.claude/` and run model-authored
+  // hooks on the host. Only the skill-staging step in seedSandbox may write there.
+  if (segments.find((segment) => segment !== '' && segment !== '.') === '.claude') return `unsafe file path in case (seeds .claude): ${rel}`;
+  return null;
+}
+
 export interface SeedOptions {
   /** Directory the case file lives in — fixture paths resolve relative to it (§5.1). */
   caseDir: string;
@@ -103,7 +119,7 @@ export interface SeedOptions {
 }
 
 /**
- * §4.3, strictly in order: fixture copy → inline files (reject absolute/`..`; `.sh` → 0755) →
+ * §4.3, strictly in order: fixture copy → inline files (reject absolute/`..`; `.sh` and `bin/*` → 0755) →
  * `setup` hook (`/bin/sh -ce`, 60s cap, nonzero aborts the case) → skill staging excluding
  * `evals/` and `fixtures/` (the skill must not see its own answer key).
  */
@@ -115,16 +131,14 @@ export async function seedSandbox(evalCase: EvalCase, options: SeedOptions): Pro
     await cp(source, sandbox, { recursive: true });
   }
   for (const [rel, content] of Object.entries(evalCase.files)) {
-    const segments = rel.split(/[\\/]/);
-    if (isAbsolute(rel) || segments.includes('..')) throw new Error(`case '${evalCase.name}': unsafe file path in case: ${rel}`);
-    // A generated case must not seed project settings/hooks into the arm being scored:
-    // `--setting-sources project` would load sandbox-root `.claude/` and run model-authored
-    // hooks on the host. Only the skill-staging step below may write there.
-    if (segments.find((segment) => segment !== '' && segment !== '.') === '.claude') throw new Error(`case '${evalCase.name}': unsafe file path in case (seeds .claude): ${rel}`);
+    const violation = casePathViolation(rel);
+    if (violation !== null) throw new Error(`case '${evalCase.name}': ${violation}`);
     const target = join(sandbox, rel);
     await mkdir(dirname(target), { recursive: true });
     await writeFile(target, content, 'utf8');
-    if (rel.endsWith('.sh')) await chmod(target, 0o755);
+    // `bin/` is where a case stubs an external tool (eval-gen D1: `bin/codex` answering `login
+    // status`); a stub that is not executable fails the dry-run and the real run alike.
+    if (rel.endsWith('.sh') || rel.split(/[\\/]/).filter((segment) => segment !== '' && segment !== '.')[0] === 'bin') await chmod(target, 0o755);
   }
   if (evalCase.setup !== undefined) await runSetup(evalCase, sandbox);
   if (options.skillDir !== null) {
@@ -140,6 +154,27 @@ export async function seedSandbox(evalCase: EvalCase, options: SeedOptions): Pro
     });
   }
   return sandbox;
+}
+
+/**
+ * Eval-gen D3: prove a generated case can START before it is written anywhere. Seeds a throwaway
+ * sandbox exactly as an arm would (files, path guard, `setup` under `/bin/sh -ce`) with no skill
+ * staged, then removes it. Returns null when the case seeded cleanly, else the message the real
+ * run would have aborted with — prose in `setup` is valid shell (`Assume codex is logged in` runs a
+ * program named `Assume`), so executing it is the only check that catches it.
+ */
+export async function dryRunCase(evalCase: EvalCase, scratch: string): Promise<string | null> {
+  // Own root per dry-run: a seed that throws never returns its sandbox path, so removing the root
+  // is the only way a half-seeded sandbox does not outlive the check.
+  const root = await mkdtemp(join(scratch, 'dry-'));
+  try {
+    await seedSandbox(evalCase, { caseDir: root, skillName: evalCase.name, skillDir: null, scratch: root });
+    return null;
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 }
 
 /** The one non-agent subprocess in the engine: the case's own setup hook, inside its sandbox. */
@@ -195,6 +230,14 @@ export interface ArmSample {
   model_id: string | null;
 }
 
+/**
+ * Eval-gen D4: a case that never started. `setup` — its hook exited nonzero (or was killed at 60 s);
+ * `staging` — its files or fixture could not be placed (unsafe path, missing fixture dir). Neither
+ * says anything about the skill, so the case is an unscored hole — but a hole the receipt names,
+ * so "partial" reads as a reason, not a fraction.
+ */
+export interface DroppedCase { kind: 'setup' | 'staging'; detail: string }
+
 export interface RunCaseDeps {
   agent: AgentApi;
   rng: () => number;
@@ -220,7 +263,7 @@ export interface RunCaseOptions {
  * samples; a case whose host requirements are missing runs nothing and returns `skipped` with
  * the missing entries (rev 8) — its absent rows grey the verdict as unscored holes.
  */
-export async function runCase(deps: RunCaseDeps, evalCase: EvalCase, options: RunCaseOptions): Promise<{ rows: ComparisonRow[]; arms: ArmSample[]; skipped?: string[] }> {
+export async function runCase(deps: RunCaseDeps, evalCase: EvalCase, options: RunCaseOptions): Promise<{ rows: ComparisonRow[]; arms: ArmSample[]; skipped?: string[]; dropped?: DroppedCase }> {
   const log = deps.log ?? (() => undefined);
   const missing = await missingRequirements(evalCase.requires);
   if (missing.length) {
@@ -296,15 +339,26 @@ export async function runCase(deps: RunCaseDeps, evalCase: EvalCase, options: Ru
     }
   }
   } catch (error) {
-    // A seed/setup failure makes this case an unscored hole, not a failure of the
-    // entire case matrix. Other authored cases still provide useful evidence.
-    if (error instanceof Error && error.message.includes(`case '${evalCase.name}': setup failed`)) {
-      log(`  ${evalCase.name}: ABORTED (setup) — ${error.message}`);
-      return { rows: [], arms: [] };
+    // A seed failure makes this case an unscored hole, not a failure of the entire case matrix:
+    // the other cases still provide useful evidence. Before D4 only `setup` took this path and a
+    // staging throw escaped it, so one unsafe path in one case cost the skill its whole receipt.
+    const dropped = seedFailure(evalCase.name, error);
+    if (dropped !== null) {
+      log(`  ${evalCase.name}: ABORTED (${dropped.kind}) — ${dropped.detail}`);
+      return { rows: [], arms: [], dropped };
     }
     throw error;
   }
   return { rows, arms: samples };
+}
+
+/** Classify a `seedSandbox` throw for this case; anything else (contamination, an agent error) stays fatal. */
+function seedFailure(caseName: string, error: unknown): DroppedCase | null {
+  if (!(error instanceof Error) || !error.message.startsWith(`case '${caseName}': `)) return null;
+  const detail = error.message.slice(`case '${caseName}': `.length);
+  if (detail.startsWith('setup failed')) return { kind: 'setup', detail };
+  if (detail.startsWith('unsafe file path') || detail.startsWith('fixture dir not found')) return { kind: 'staging', detail };
+  return null;
 }
 
 /**
