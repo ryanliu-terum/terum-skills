@@ -6,7 +6,7 @@ import { Button } from '../ui/Button';
 import { Dialog, DialogDescription, DialogPopup, DialogTitle } from '../ui/Dialog';
 import { CollapsibleCommand } from './Primitives';
 import { WorkflowDialog, WorkflowField } from './WorkflowControls';
-import { BULK_EVAL_MODES, evalManyCommand, evalManyCommandSummary, evalManyLabel, evalManyStatus, type BulkEvalMode } from './bulk-eval';
+import { BULK_EVAL_MODES, evalManyCommand, evalManyCommandSummary, evalManyLabel, evalManyStatus, evalManySubject, type BulkEvalMode } from './bulk-eval';
 
 /**
  * Several skills at once — the wizard's Now / In batches / Overnight question, asked past setup. Hosted from the URL
@@ -23,8 +23,9 @@ export function BulkEvalDialog({refs,pending,team,onClose}:{refs:string[];pendin
  function start(){try{if(!evalRun.startMany)throw new Error('This app cannot start evals.');evalRun.startMany(args);onClose();}catch(reason){setError(reason instanceof Error?reason.message:String(reason));}}
  const title=pending?'Evaluate pending skills?':`Evaluate ${refs.length} skill${refs.length===1?'':'s'}?`;
  // The same honest cost sentence as the single-skill dialog: each eval spends the person's own Claude account.
- const body=nothing?'Nothing to evaluate: choose skills in the Library first.':`${pending?`Every shared skill with no receipt for its current version — what setup offered${refs.length?`, plus ${refs.join(', ')}`:''}`:refs.join(', ')}. Each eval uses your Claude account and can take a while.`;
- return <Dialog open onOpenChange={value=>{if(!value)onClose();}}><DialogPopup><DialogTitle>{title}</DialogTitle><DialogDescription>{body}</DialogDescription>
+ const body=nothing?'Nothing to evaluate: choose skills in the Library first.':`${pending?`Every shared skill with no receipt for its current version — what setup offered${refs.length?`, plus ${evalManySubject(refs)}`:''}`:evalManySubject(refs)}. Each eval uses your Claude account and can take a while.`;
+ // The question never outgrows the window: past the viewport it scrolls inside, like WorkflowDialog. No board draws this dialog.
+ return <Dialog open onOpenChange={value=>{if(!value)onClose();}}><DialogPopup style={{maxHeight:'calc(100vh - 32px)',overflowY:'auto'}}><DialogTitle>{title}</DialogTitle><DialogDescription>{body}</DialogDescription>
   {nothing?null:<>
    <div role="radiogroup" aria-label="When to run">{BULK_EVAL_MODES.map(option=><label key={option.mode} className="prompt-option"><input type="radio" name="bulk-eval-mode" aria-label={option.label} checked={mode===option.mode} onChange={()=>setMode(option.mode)}/><span>{option.label}<span className="prompt-option-description">{option.description}</span></span></label>)}</div>
    {mode==='batches'?<label style={{display:'flex',alignItems:'center',gap:8}}>Batch size<WorkflowField aria-label="Batch size" type="number" min={1} step={1} value={batch} onChange={event=>setBatch(event.target.value)} style={{width:72}}/>{validBatch?null:<span role="alert">A batch is a whole number of at least 1.</span>}</label>:null}
