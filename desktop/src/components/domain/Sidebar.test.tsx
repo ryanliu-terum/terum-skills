@@ -23,7 +23,8 @@ it('omits the entire Inbox group when its surface is unavailable', async () => {
 it.each([true, false])('renders served navigation and hides Inbox until its surface resolves: %s', async loaded => {
   const status = await createMockBackend().status();
   render(<QueryClientProvider client={new QueryClient()}><HashRouter><Sidebar selected="Global" counts={null} surfaces={loaded ? await createMockBackend().surfaces() : undefined} roots={status.ok ? status.value.roots ?? undefined : undefined}/></HashRouter></QueryClientProvider>);
-  for (const name of ['Global', 'Projects', 'Terum', 'SSM', 'MRF', 'Marketplace', 'Members']) expect(screen.getByRole('link', { name })).toBeVisible();
+  for (const name of ['Global', 'Terum', 'SSM', 'MRF', 'Marketplace', 'Members']) expect(screen.getByRole('link', { name })).toBeVisible();
+  expect(screen.getByRole('button', { name: 'Collapse Projects' })).toBeVisible(); // Projects toggles its rows; it is not a link
   for (const name of ['Inbox','Pushes','Updates','Alerts']) { if (loaded) expect(screen.getByRole('link',{name})).toBeVisible(); else expect(screen.queryByRole('link',{name})).toBeNull(); }
   expect(document.querySelectorAll('.nav-count')).toHaveLength(0);
 });
@@ -32,8 +33,8 @@ it('renders Global, Members and Marketplace navigation for the real adapter, ret
   const backend = createTauriBackend(fakeBridge(() => undefined).bridge);
   render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><BackendContext value={backend}><HashRouter><Shell/></HashRouter></BackendContext></QueryClientProvider>);
   // The real adapter serves no project list here (status has no frames), so Projects renders empty; wait for the surfaces read.
-  await waitFor(() => expect(screen.getByRole('navigation').querySelectorAll('a')).toHaveLength(4));
-  expect(screen.getByRole('link', { name: 'Projects' })).toBeVisible();
+  await waitFor(() => expect(screen.getByRole('navigation').querySelectorAll('a')).toHaveLength(3));
+  expect(screen.getByRole('button', { name: 'Collapse Projects' })).toBeVisible();
   expect(screen.getByText('0 projects')).toBeVisible();
   expect(screen.queryByRole('button', { name: 'Add project' })).toBeNull(); // this fake CLI answers no features, so registration is not offered
   expect(screen.getByRole('link', { name: 'Global' })).toBeVisible();
@@ -111,7 +112,7 @@ it.each([false,true])('shows an absent root dash only with counts enabled (hidde
 });
 it('keeps Projects and its Add button with zero projects, and says 0 projects',async()=>{
  location.hash='#/library/global?__mock=no-projects';await openSidebar();
- expect(screen.getByRole('link',{name:'Projects'})).toBeVisible();
+ expect(screen.getByRole('button',{name:'Collapse Projects'})).toBeVisible();
  expect(screen.getByText('0 projects')).toBeVisible();
  expect(await screen.findByRole('button',{name:'Add project'})).toBeVisible();
  expect(screen.queryByRole('link',{name:'Terum 8'})).toBeNull();
@@ -208,7 +209,7 @@ it('keeps the Inbox rows inside the Library group, so folding Inbox never change
 it('keeps the Team group second on the real adapter, where a bare CLI answers no features',async()=>{
  const backend=createTauriBackend(fakeBridge(()=>undefined).bridge);
  const {container}=render(<QueryClientProvider client={new QueryClient({defaultOptions:{queries:{retry:false}}})}><BackendContext value={backend}><HashRouter><Shell/></HashRouter></BackendContext></QueryClientProvider>);
- await waitFor(()=>expect(screen.getByRole('navigation').querySelectorAll('a')).toHaveLength(4));
+ await waitFor(()=>expect(screen.getByRole('navigation').querySelectorAll('a')).toHaveLength(3));
  const groups=groupsOf(container);
  expect(groups).toHaveLength(2);
  expect(groups[1]).toHaveTextContent('Team');
