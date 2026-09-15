@@ -32,6 +32,7 @@
               "version": "v1"
             },
             "health": "unknown",
+            "enabled": true,
             "edited": false,
             "localEval": {
               "schema_version": 2,
@@ -201,6 +202,7 @@
             "tracked": false,
             "placement": null,
             "health": "unknown",
+            "enabled": true,
             "edited": false,
             "localEval": null,
             "localEvalStale": false,
@@ -229,6 +231,7 @@
               "version": "v1"
             },
             "health": "local-changed",
+            "enabled": true,
             "edited": true,
             "localEval": null,
             "localEvalStale": true,
@@ -295,6 +298,7 @@
             "tracked": false,
             "placement": null,
             "health": "unknown",
+            "enabled": true,
             "edited": false,
             "localEval": null,
             "localEvalStale": false,

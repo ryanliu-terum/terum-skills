@@ -381,13 +381,6 @@ export const BOARDS:readonly Board[]=[
     "height": 900
   },
   {
-    "name": "MarketplaceProjects",
-    "route": "#/marketplace/projects",
-    "klass": "screen",
-    "width": 1440,
-    "height": 900
-  },
-  {
     "name": "MarketplacePeople",
     "route": "#/marketplace/people",
     "klass": "screen",

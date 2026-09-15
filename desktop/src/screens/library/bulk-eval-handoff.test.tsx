@@ -10,7 +10,7 @@ import { createMockBackend } from '../../backend/mock';
 import type { Backend } from '../../backend/Backend';
 import type { SkillCard } from '../../backend/types';
 import { localActionReason, localRef } from '../../components/domain/skill-card-actions';
-import { bulkEvalHandoff, bulkEvalSearch, leftOutText, type EvalCandidate } from './bulk-eval-handoff';
+import { bulkEvalHandoff, bulkEvalSearch, groupLeftOut, leftOutText, reasonHeading, type EvalCandidate } from './bulk-eval-handoff';
 
 // Batch E follow-up (2026-09-14): "Evaluate N…" in the Library's selection bar hands the drawn selection to the
 // app-wide bulk-eval question (`?dialog=bulk-eval&ref=…`, PR #206) and runs nothing itself. The question, the run
@@ -62,7 +62,14 @@ it('a selected card that cannot be evaluated here is left out, and the bar says 
   fireEvent.click(checkbox(other.name));
   await screen.findByText('2 of 15 selected');
   expect(evaluateButton()).toHaveTextContent('Evaluate 1 skill…');
-  expect(screen.getByRole('note')).toHaveTextContent(`Left out of the eval · ${absent.name}: Install it first — evals run against the copy on your machine.`);
+  // UI policy §6: collapsed, the note is one sentence with the count and the one reason; "Show why" opens the grouped names.
+  const note = screen.getByRole('note');
+  expect(note).toHaveTextContent('1 of 2 selected skills is left out of the eval — Install it first — evals run against the copy on your machine.');
+  expect(within(note).queryByText(absent.name)).toBeNull();
+  fireEvent.click(within(note).getByRole('button', { name: 'Show why' }));
+  expect(within(note).getByText(absent.name).closest('.chip')).toHaveAttribute('title', 'Install it first — evals run against the copy on your machine.');
+  fireEvent.click(within(note).getByRole('button', { name: 'Hide' }));
+  expect(within(note).queryByText(absent.name)).toBeNull();
   fireEvent.click(evaluateButton());
   expect(search().getAll('ref')).toEqual([localRef(other)]);
   // The question names only what it was handed.
@@ -155,4 +162,18 @@ it('bulkEvalHandoff splits the cards by the ⋯ menu reason and leftOutText grou
   ] });
   expect(leftOutText([])).toBeNull();
   expect(leftOutText(bulkEvalHandoff(cards).leftOut)).toBe('Left out of the eval · b, e: Install it first — evals run against the copy on your machine. · c: Frontmatter is unreadable.');
+});
+
+it('reasonHeading strips the instance-specific tail so same-shaped failures share one group, largest first', () => {
+  const eisdir = (name: string) => `EISDIR: illegal operation on a directory, lstat '\\\\wsl.localhost\\Ubuntu\\home\\t\\.claude\\skills\\${name}'`;
+  const yaml = (desc: string) => `SKILL.md frontmatter is not valid YAML: Nested mappings are not allowed in compact mappings at line 2, column 14: description: ${desc} ^`;
+  expect(reasonHeading(eisdir('brandkit'))).toBe("EISDIR: illegal operation on a directory, lstat '…'");
+  expect(reasonHeading(yaml('Delegate implementation…'))).toBe('SKILL.md frontmatter is not valid YAML: nested mappings are not allowed in compact mappings');
+  expect(reasonHeading('Install it first — evals run against the copy on your machine.')).toBe('Install it first — evals run against the copy on your machine.');
+  const groups = groupLeftOut([{ name: 'a', reason: yaml('x') }, { name: 'b', reason: eisdir('b') }, { name: 'c', reason: eisdir('c') }]);
+  expect(groups.map(group => [group.heading, group.rows.map(row => row.name)])).toEqual([
+    ["EISDIR: illegal operation on a directory, lstat '…'", ['b', 'c']],
+    ['SKILL.md frontmatter is not valid YAML: nested mappings are not allowed in compact mappings', ['a']],
+  ]);
+  expect(groups[0]!.rows[0]!.reason).toBe(eisdir('b'));
 });

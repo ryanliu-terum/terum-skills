@@ -301,6 +301,14 @@ describe('createTauriBackend — argv and result mapping per verb', () => {
   // Review r1 HIGH: a scope-less install lets the CLI's own picker choose the destination (`--into` is omitted), so the
   // reported scope must come from where the CLI says it placed each skill — the registered root containing the returned
   // `path` — never from the caller's absent input. Here the picker put deploy-check in SSM and tdd in Global.
+  it('setSkillEnabled spawns skill enable|disable on the folder path and returns the CLI result as-is', async () => {
+    const value = { kind: 'disable', path: '/home/u/.claude/skills/alpha', name: 'alpha', enabled: false, settingsFile: '/home/u/.claude/settings.json', changed: true, notices: [] };
+    const f = fakeBridge((args, emit) => ok(args[1] === 'enable' ? 'skill enable' : 'skill disable', args[1] === 'enable' ? { ...value, kind: 'enable', enabled: true } : value)(args, emit));
+    const backend = createTauriBackend(f.bridge);
+    expect(await backend.setSkillEnabled({ path: '/home/u/.claude/skills/alpha', enabled: false }).done).toEqual({ ok: true, value });
+    expect(await backend.setSkillEnabled({ path: '/home/u/.claude/skills/alpha', enabled: true }).done).toEqual({ ok: true, value: { ...value, kind: 'enable', enabled: true } });
+    expect(f.spawns.map((s) => s.args)).toEqual([['skill', 'disable', '--', '/home/u/.claude/skills/alpha'], ['skill', 'enable', '--', '/home/u/.claude/skills/alpha']]);
+  });
   it('reports the scope the CLI actually placed into when the caller named none', async () => {
     const f = fakeBridge((args, emit) => {
       if (args[0] === 'ls') ok('ls', { roster: [], skills: [], problems: [], local: [
@@ -327,11 +335,11 @@ describe('createTauriBackend — argv and result mapping per verb', () => {
       ['sync'], ['prune'],
     ]);
   });
-  it('search maps CLI hits to seam hits; read models the CLI lacks fail naming GAPS.md; a read that asks is refused', async () => {
+  it('search maps CLI hits to seam hits; read models the CLI lacks fail honestly; a read that asks is refused', async () => {
     const hits = [{ description: 'Deploy safely', grants: null, grantsHash: null, updated: '—', team: 't', id: 'i', name: 'deploy-check', author: 'ryan', category: 'ops', installs: 3, latest: 'abc' }];
     const backend = createTauriBackend(fakeBridge(ok('search', hits)).bridge);
     expect(await backend.search({ q: 'deploy' })).toEqual({ ok: true, value: [{ kind: 'skill', ref: 't/deploy-check', name: 'deploy-check', description: 'Deploy safely', team: 't', category: 'ops', author: 'ryan', installs: 3, latest: 'abc' }] });
-    expect(await backend.onboarding()).toEqual({ ok: false, error: expect.stringContaining('GAPS.md') });
+    expect(await backend.onboarding()).toEqual({ ok: false, error: expect.stringContaining('the CLI has no verb that returns it') });
     const asking = createTauriBackend(fakeBridge((_a, emit) => { emit({ kind: 'stdout', line: line({ t: 'ask', id: 'q1', kind: 'confirm', question: 'Really?' }) }); }).bridge);
     expect(await asking.search({ q: 'x' })).toEqual({ ok: false, error: expect.stringContaining('asked "Really?" during a read-only call') });
   });

@@ -79,6 +79,7 @@
             "tracked": false,
             "placement": null,
             "health": "unknown",
+            "enabled": true,
             "edited": false,
             "localEval": null,
             "localEvalStale": false,

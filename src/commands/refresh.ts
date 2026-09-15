@@ -6,7 +6,7 @@
  *
  * It exists because every read verb is contractually fetch-free, so a teammate's committed receipt reaches this
  * machine only when someone runs a write verb. The desktop app calls this in the background on launch and on
- * window focus (Bugs.pdf W-08). A per-team failure is never a process failure: `ok` is false only when the
+ * window focus (W-08). A per-team failure is never a process failure: `ok` is false only when the
  * config itself cannot be read or `--team` names a team that is not configured.
  */
 import { ConfigStore, createConfigStore, selectTeam } from '../lib/config.js';

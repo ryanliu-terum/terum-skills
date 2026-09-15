@@ -50,7 +50,7 @@ export function ShareScreen() {
         const TEAMS=value.TEAMS,team=TEAMS.length===1?TEAMS[0]:undefined;
         if(!team){action.fail(teamSelectionMessage(TEAMS));return;}
         if(team.joinCommand===null){action.fail(`terum-skills reports no join command for ${team.remote??'this team'}.`);return;}
-        // Teddy flag (GAPS.md:18): the payload is the one drawn line (joinCommand); switch to team.joinBlock.join('\n') only if Teddy rules byte-for-byte with the CLI. Never rebuild the 8 lines here.
+        // Open question: the payload is the one drawn line (joinCommand); switch to team.joinBlock.join('\n') only if the design rules byte-for-byte with the CLI. Never rebuild the 8 lines here.
         void backend.copyToClipboard(team.joinCommand).then(result=>{if(!result.ok)action.fail(result.error);},action.fail);
       });}}><TerminalHint command="npx -y terum-skills@latest invite <github-login>..." prefix="From the terminal"/></CenteredState>}
     </>}{action.error&&<div role="alert" className="share-action-error">{action.error}</div>}{notice&&<div role="status" className="share-action-notice">{notice}</div>}

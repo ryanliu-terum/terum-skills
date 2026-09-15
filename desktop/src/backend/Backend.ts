@@ -1,4 +1,4 @@
-import type { FileDropEvent, SkillFileResult } from './types';
+import type { FileDropEvent, SkillFileResult, SkillToggleResult } from './types';
 import type { AppUpdateStaged, AppUpdateStatus, LaunchContext, IdentityArgs, IdentityWrite, Settings, Onboarding, Features, Capabilities, Surfaces, ReadOptions, Catalog, ChangeSource, EvalArgs, EvalManyArgs, EvalManyResult, EvalResult, EvalReportModel, InboxItem, InstallArgs, InstalledResult, InviteArgs, InviteResult, MachineUninstallResult, PrefStore, PublishArgs, PublishResult, Receipt, ReconcileResult, Result, Roster, Run, LibraryScope, ProjectAdded, ProjectRemoved, ProjectCreated, SearchArgs, SearchHit, SetupArgs, SetupResult, Library, SkillDetail, StatusResult, Subscription, SyncArgs, SyncResult, TeamArgs, TeamResult, UninstallArgs, UninstalledResult, UpdateAdvice, ValidateArgs, ValidateResult } from './types';
 export interface Backend {
   setWindowBackground(color: string): Promise<Result<void>>;
@@ -21,6 +21,9 @@ export interface Backend {
   settings(q?: undefined, options?: ReadOptions): Promise<Result<Settings>>;
   onboarding(q?: undefined, options?: ReadOptions): Promise<Result<Onboarding>>;
   skillFile: {move(args:{path:string;to:string}):Run<SkillFileResult>;copy(args:{path:string;to:string}):Run<SkillFileResult>;rename(args:{path:string;to:string}):Run<SkillFileResult>;delete(args:{path:string}):Run<SkillFileResult>;fix(args:{path:string}):Run<SkillFileResult>};
+  /** The per-machine switch behind `capabilities().disablePerMachine`: `skill enable|disable <path>` writes Claude Code's own
+   *  `skillOverrides` for the folder's root — the same key the `/skills` menu writes — and the next Library read shows the result. */
+  setSkillEnabled(args: { path: string; enabled: boolean }): Run<SkillToggleResult>;
   library(q: { scope: LibraryScope; team?: string }, options?: ReadOptions): Promise<Result<Library>>;
   localSkill(q: { path: string }, options?: ReadOptions): Promise<Result<SkillDetail>>;
   /** §7.1 L-PROJ: the folders this machine reads local skills from. Nothing else adds one. */

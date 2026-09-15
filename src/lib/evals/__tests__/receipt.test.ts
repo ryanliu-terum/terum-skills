@@ -91,6 +91,35 @@ describe('receipt schema and build (§5.3)', () => {
   });
 });
 
+describe('per-case rows and case-run tally (§5.3 rev 20)', () => {
+  const perCase = () => [{
+    case: 'happy-path', rep: 0,
+    arms: { candidate: { passed: true, checks: [['file_exists:out.md', true], ['transcript_mentions:tok_live_abc123', true]] }, baseline: { passed: null, checks: [] } },
+    outcomes: { 'candidate-vs-baseline': 'win' },
+  }];
+
+  it('accepts the rows and tally, and a receipt written before rev 20 still validates without them', () => {
+    const built = buildReceipt({ ...valid(), per_case: perCase(), case_runs: { candidate: { passed: 1, total: 1 }, baseline: { passed: 0, total: 0 } } });
+    expect(built.ok).toBe(true);
+    if (built.ok) expect(built.value.case_runs).toEqual({ candidate: { passed: 1, total: 1 }, baseline: { passed: 0, total: 0 } });
+    expect(receiptSchema.safeParse({ ...valid(), schema_version: 1, version: 'a'.repeat(40), content_digest: undefined }).success).toBe(true);
+  });
+
+  it('rejects a verdict that is not a boolean-or-null, a check that is not [name, passed], or a negative tally', () => {
+    const arms = (arm: Record<string, unknown>) => [{ ...perCase()[0], arms: { candidate: arm } }];
+    expect(receiptSchema.safeParse({ ...valid(), per_case: arms({ passed: 0.5, checks: [] }) }).success).toBe(false);
+    expect(receiptSchema.safeParse({ ...valid(), per_case: arms({ passed: true, checks: [['file_exists:out.md', 'yes']] }) }).success).toBe(false);
+    expect(receiptSchema.safeParse({ ...valid(), per_case: [{ ...perCase()[0], outcomes: { 'candidate-vs-baseline': 'draw' } }] }).success).toBe(false);
+    expect(receiptSchema.safeParse({ ...valid(), case_runs: { candidate: { passed: -1, total: 1 } } }).success).toBe(false);
+  });
+
+  it('redacts a team token inside a check name — the only free text the rows carry', () => {
+    const built = buildReceipt({ ...valid(), per_case: perCase() }, ['tok_live_abc123']);
+    expect(built.ok).toBe(true);
+    if (built.ok) expect(built.value.per_case![0]!.arms['candidate']!.checks).toEqual([['file_exists:out.md', true], ['transcript_mentions:[redacted]', true]]);
+  });
+});
+
 describe('receipt path (rev 5, append-only)', () => {
   it('is keyed id/version/run', () => {
     expect(receiptPath('4e80fd2a-04bc-4d9f-88f7-a849d92879f1', 'v3', '20260904T221500Z'))

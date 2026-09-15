@@ -29,7 +29,7 @@ specs; the maintainers write the specs, run every gate themselves, and do all gi
    The mock answers `true` to all of them and the UI renders every board as drawn. A control whose switch is
    `false` is hidden (or degraded exactly as the S7q spec table says), never disabled or stubbed; a screen
    reads a switch through `useFeatures()` / `useCapabilities()`, never by probing the platform, and never
-   invents a flag. Gaps are recorded by the maintainers in `GAPS.md`; an implementing agent never edits `GAPS.md`,
+   invents a flag. Gaps are recorded by the maintainers in the tracking issues; an implementing agent never invents a flag to close one,
    `FIDELITY.md`, `AGENTS.md`, `README.md` or `package.json` — describe what you found in the report's
    `openQuestions` / `deviations` instead.
    A new `ls --local` key is declared optional in the app before or with the CLI that emits it, never after.
@@ -76,6 +76,15 @@ specs; the maintainers write the specs, run every gate themselves, and do all gi
    (a browser will not launch), say so in the report and do not fake a result. Ambiguity → implement the
    most conservative reading and record the fork in `openQuestions`; never resolve a design fork yourself.
 
+## The UI policy (docs/ui-policy.md)
+
+Every screen, dialog, note and card also obeys `desktop/docs/ui-policy.md` (2026-09-14): anything printed is
+copyable (commands through `CliBox` / `TerminalHint` / `CollapsibleCommand` / `AdviceBlock`, errors and logs through
+`useCopyMenu`), a path is never prose (`PathText`, root labels), a long command collapses to a summary that still
+copies the full line, a card row never wraps into another, work in flight shows in the top-bar chip and as a dot on
+the covered cards, a shared hint is said once, and a long list folds. The guard test
+`src/components/domain/__tests__/ui-policy.test.ts` fails a command printed outside those primitives.
+
 ## Stack pins (do not add, remove or bump without a spec saying so)
 
 vite 8.2.2 · react / react-dom 19.2.8 · typescript 5.9.3 (strict, `noUncheckedIndexedAccess`,
@@ -107,7 +116,7 @@ src/styles/                 tokens.css (GENERATED) + app.css (@import tailwindcs
 e2e/routes/                 one Playwright smoke test per route + state (*.spec.ts)
 e2e/fidelity/               boards.ts (name -> route, class, viewport, hover), tolerance.ts, fidelity.spec.ts, fidelity.md-parser
 e2e/out/                    gitignored: actual / diff PNGs and report.json
-FIDELITY.md · GAPS.md       maintainer-owned status files (never edited by an implementing agent)
+FIDELITY.md                 maintainer-owned board status table (never edited by an implementing agent)
 ```
 
 Conventions: `.spec.ts` under `e2e/` is Playwright; `*.test.ts(x)` anywhere is vitest. PascalCase components,

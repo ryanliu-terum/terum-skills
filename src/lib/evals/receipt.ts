@@ -45,6 +45,24 @@ const efficiencySchema = z.object({
   cost_usd: z.number().nullable(),
 }).passthrough();
 
+/** §5.3 rev 20: one arm on one (case × rep) — the §5.1 all-or-nothing verdict and [name, passed] per check. */
+const caseRunArmSchema = z.object({
+  passed: z.boolean().nullable(),
+  checks: z.array(z.tuple([z.string(), z.boolean()])),
+}).passthrough();
+
+const caseRunSchema = z.object({
+  case: z.string().min(1),
+  rep: z.number().int().min(0),
+  arms: z.record(z.string(), caseRunArmSchema),
+  outcomes: z.record(z.string(), z.enum(['win', 'loss', 'tie'])),
+}).passthrough();
+
+const caseRunTallySchema = z.object({
+  passed: z.number().int().min(0),
+  total: z.number().int().min(0),
+}).passthrough();
+
 export const RUN_ID_PATTERN = /^\d{8}T\d{6}Z$/;
 
 /** §6.1: the current receipt shape. Schema 1 is read-only history. */
@@ -86,6 +104,11 @@ export const receiptSchema = z.object({
   // Rev 8: cases skipped for missing host tools (case → missing requirements). Optional for
   // forward-compat with receipts written before rev 8.
   environment_skips: z.record(z.string(), z.array(z.string())).optional(),
+  // Rev 20: per-(case × rep) check verdicts and the passed-case-runs tally per arm — what the
+  // desktop's Quality figure and case table read. Optional: receipts written before rev 20 have
+  // neither, and a surface says so instead of deriving them.
+  per_case: z.array(caseRunSchema).optional(),
+  case_runs: z.record(z.string(), caseRunTallySchema).optional(),
   triggers: z.object({
     recall: z.number().nullable(),
     precision: z.number().nullable(),
@@ -116,17 +139,34 @@ export const receiptSchema = z.object({
 });
 export type Receipt = z.infer<typeof receiptSchema>;
 
+/** Rev 20: the check names inside `per_case` are the only free text there; everything else is a verdict. */
+function redactCaseRuns(perCase: unknown, secrets: readonly string[]): { per_case?: unknown } {
+  if (!Array.isArray(perCase)) return {};
+  return {
+    per_case: perCase.map((run) => {
+      if (run === null || typeof run !== 'object' || !('arms' in run) || run.arms === null || typeof run.arms !== 'object') return run;
+      const arms = Object.fromEntries(Object.entries(run.arms as Record<string, unknown>).map(([arm, value]) => {
+        if (value === null || typeof value !== 'object' || !Array.isArray((value as { checks?: unknown }).checks)) return [arm, value];
+        const checks = ((value as { checks: unknown[] }).checks).map((check) => (Array.isArray(check) && typeof check[0] === 'string' ? [redact(check[0], secrets), check[1]] : check));
+        return [arm, { ...(value as object), checks }];
+      }));
+      return { ...run, arms };
+    }),
+  };
+}
+
 /** Rev 5: append-only — one immutable file per committed run, grouped by version. */
 export function receiptPath(skillId: string, version: string, runId: string): string {
   return `evals/${skillId}/${version}/${runId}.json`;
 }
 
 /**
- * Assemble and validate a receipt. Free text (§5.3: today only `attribution`) passes through
- * `redact()` before the receipt exists; numbers and enums cannot carry secrets.
+ * Assemble and validate a receipt. Free text (§5.3: `attribution`, and since rev 20 the check names
+ * in `per_case` — a check name carries its argument from the case file) passes through `redact()`
+ * before the receipt exists; numbers and enums cannot carry secrets.
  */
 export function buildReceipt(raw: Record<string, unknown>, secrets: readonly string[] = []): Result<Receipt> {
-  const candidate = { ...raw, schema_version: RECEIPT_SCHEMA_VERSION, attribution: redact(String(raw['attribution'] ?? ''), secrets) };
+  const candidate = { ...raw, schema_version: RECEIPT_SCHEMA_VERSION, attribution: redact(String(raw['attribution'] ?? ''), secrets), ...redactCaseRuns(raw['per_case'], secrets) };
   const parsed = receiptSchema.safeParse(candidate);
   if (!parsed.success) return failure(`invalid receipt: ${describeIssues(parsed.error)}`);
   return success(parsed.data);

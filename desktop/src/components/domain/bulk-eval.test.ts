@@ -1,5 +1,5 @@
-import { expect, it } from 'vitest';
-import { evalManyCommand, evalManyLabel, evalManyStatus, isEvalManyResult } from './bulk-eval';
+import { describe, expect, it } from 'vitest';
+import { evalManyCommand, evalManyLabel, evalManyStatus, evalManySubject, isEvalManyResult } from './bulk-eval';
 
 it('names the run by its one skill, a count, or the pending set', () => {
   expect(evalManyLabel({ refs: ['alpha'] })).toBe('alpha');
@@ -24,4 +24,18 @@ it('summarises the finished run in the CLI\'s counts, or its error', () => {
   expect(evalManyStatus({ ok: false, error: '1 of 2 evals failed.' }, { mode: 'now' })).toBe('1 of 2 evals failed.');
   expect(evalManyStatus({ ok: true, value: { name: 'alpha' } }, { mode: 'now' })).toBe('Finished');
   expect(isEvalManyResult({ items: [] })).toBe(false);
+});
+
+describe('evalManySubject', () => {
+  it('names a short list as is', () => {
+    expect(evalManySubject(['deploy-check', 'migration-guard'])).toBe('deploy-check, migration-guard');
+    expect(evalManySubject(['a', 'b', 'c', 'd'])).toBe('a, b, c, d');
+  });
+  it('reads a folder path as its folder name (UI policy §2) and caps a long list with a count (§6)', () => {
+    const unc = (name: string) => `\\\\wsl.localhost\\Ubuntu\\home\\t\\.claude\\skills\\${name}`;
+    expect(evalManySubject([unc('handoff'), '/home/t/.claude/skills/state'])).toBe('handoff, state');
+    const many = Array.from({ length: 28 }, (_, i) => unc(`skill-${i}`));
+    expect(evalManySubject(many)).toBe('skill-0, skill-1, skill-2 and 25 more');
+    expect(evalManySubject(['a', 'b', 'c', 'd', 'e'])).toBe('a, b, c and 2 more');
+  });
 });

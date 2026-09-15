@@ -4,7 +4,7 @@ import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import type { PropsWithChildren } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Tooltip } from '@base-ui/react/tooltip';
-import { BackendContext, PrintContext, PromptContext, pickBackend, useBackend } from '../backend';
+import { BackendContext, PrintContext, PromptContext, pickBackend, useBackend, type PromptOptions } from '../backend';
 import type { PromptQuestion } from '../backend/types';
 import { Dialog, DialogPopup, DialogTitle, DialogDescription } from '../components/ui/Dialog';
 import { WorkflowPopup } from '../components/domain/WorkflowPopup';
@@ -25,11 +25,19 @@ export function Providers({children}:PropsWithChildren){
 }
 
 interface PendingPrompt {id:number;question:PromptQuestion;resolve:(value:string|boolean)=>void;reject:(error:Error)=>void}
-function PromptProvider({children}:PropsWithChildren){
+export function PromptProvider({children}:PropsWithChildren){
  const [notice,setNotice]=useState<string|null>(null);
  const print=useCallback((line:string)=>{if(line.includes('GitHub CLI is installed but logged out.'))setNotice(line);},[]);
  const [pending,setPending]=useState<PendingPrompt[]>([]);const live=useRef<PendingPrompt[]>([]);const serial=useRef(0);
- const ask=useCallback((question:PromptQuestion)=>new Promise<string|boolean>((resolve,reject)=>{const prompt={id:++serial.current,question,resolve,reject};live.current=[...live.current,prompt];setPending(live.current);}),[]);
+ const ask=useCallback((question:PromptQuestion,options?:PromptOptions)=>new Promise<string|boolean>((resolve,reject)=>{
+  const signal=options?.signal;
+  if(signal?.aborted){reject(new PromptCancelledError('The run ended before this question was asked.'));return;}
+  const prompt:PendingPrompt={id:++serial.current,question,resolve:value=>{signal?.removeEventListener('abort',withdraw);resolve(value);},reject:error=>{signal?.removeEventListener('abort',withdraw);reject(error);}};
+  // The run that asked has settled: the question is moot. Take it off the screen and tell the driver, which returns the run's own result.
+  function withdraw(){if(!live.current.includes(prompt))return;live.current=live.current.filter(p=>p!==prompt);setPending(live.current);prompt.reject(new PromptCancelledError('The run ended before this question was answered.'));}
+  signal?.addEventListener('abort',withdraw,{once:true});
+  live.current=[...live.current,prompt];setPending(live.current);
+ }),[]);
  useEffect(()=>()=>{for(const prompt of live.current)prompt.reject(new Error('Cancelled.'));live.current=[];},[]);
  function finish(value:string|boolean){const prompt=live.current[0];if(!prompt)return;live.current=live.current.slice(1);setPending(live.current);prompt.resolve(value);}
  function cancel(){const prompt=live.current[0];if(!prompt)return;live.current=live.current.slice(1);setPending(live.current);if(prompt.question.kind==='confirm')prompt.resolve(false);else prompt.reject(new PromptCancelledError('Cancelled.'));}

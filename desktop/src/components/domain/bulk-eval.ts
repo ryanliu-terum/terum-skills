@@ -1,4 +1,5 @@
 import type { EvalManyArgs, EvalManyResult, Result } from '../../backend/types';
+import { pathBase } from '../../lib/path-text';
 
 /** The dialog's three choices — the wizard's Now / In batches / Overnight, offered past setup. 'later' exists in the CLI for a manual drain and is not offered here: the app drains the whole queue overnight anyway. */
 export type BulkEvalMode = Extract<EvalManyArgs['mode'], 'now' | 'batches' | 'overnight'>;
@@ -7,6 +8,18 @@ export const BULK_EVAL_MODES: readonly { mode: BulkEvalMode; label: string; desc
   { mode: 'batches', label: 'In batches', description: 'A few at a time; the app asks before each further batch, and declining queues the rest for later.' },
   { mode: 'overnight', label: 'Overnight', description: 'Queued for the app to run between 01:00 and 05:00 while it is open and idle.' },
 ];
+
+/**
+ * The question's subject (UI policy §2 and §6): a ref that is a folder path reads as its folder name — the Library hands
+ * over paths for local cards — and past `max` names the rest is a count, so 28 UNC paths never become the sentence
+ * that pushes the dialog off the screen (Teddy's 2026-09-14 screenshot).
+ */
+export function evalManySubject(refs: readonly string[], max = 4): string {
+  const names = refs.map(ref => (/[\\/]/.test(ref) ? pathBase(ref) : ref));
+  if (names.length <= max) return names.join(', ');
+  const shown = names.slice(0, max - 1);
+  return `${shown.join(', ')} and ${names.length - shown.length} more`;
+}
 
 /** What the run is called in the top-bar chip and the dialog title: the one name, a count, or the pending set. */
 export function evalManyLabel(args: Pick<EvalManyArgs, 'refs' | 'pending'>): string {
@@ -25,6 +38,18 @@ export function evalManyCommand(args: EvalManyArgs): string {
     ...(args.pending ? ['--pending'] : []),
   ];
   return ['npx -y terum-skills@latest eval', ...args.refs.map(quote), ...flags].join(' ');
+}
+
+/**
+ * The short form of `evalManyCommand` for reading (UI policy §3): past two refs the folder list collapses to a count,
+ * the flags stay. `null` when the full command is already short, so callers draw the full line then.
+ */
+export function evalManyCommandSummary(args: EvalManyArgs): string | null {
+  if (args.refs.length <= 2) return null;
+  const full = evalManyCommand(args);
+  const flagsStart = full.indexOf(' --');
+  const flags = flagsStart === -1 ? '' : full.slice(flagsStart);
+  return `npx -y terum-skills@latest eval <${args.refs.length} skills>${flags}`;
 }
 
 export function isEvalManyResult(value: unknown): value is EvalManyResult {

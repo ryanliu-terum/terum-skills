@@ -17,6 +17,8 @@ let client:QueryClient;
 function Cache(){const value=useQueryClient();useEffect(()=>{client=value;},[value]);return null;}
 function open(route='#/settings/updates'){location.hash=route;return render(<Providers><Cache/><BackendContext value={backend}><MachineRemovalProvider><App/></MachineRemovalProvider></BackendContext></Providers>);}
 function group(){return screen.getByText('The app',{exact:true}).closest('section')!;}
+/** The status row alone; the card also carries the one-shot Update and relaunch row, whose button is not this row's. */
+function row(){return document.getElementById('app-update-row')!;}
 async function configure(mode:'full'|'notice'='full',patch:Partial<AppUpdateStatus>={}){
  vi.spyOn(backend,'surfaces').mockResolvedValue({...await backend.surfaces(),appUpdate:true});vi.spyOn(backend,'features').mockResolvedValue({...await backend.features(),appUpdate:mode==='full'});
  vi.spyOn(backend,'capabilities').mockResolvedValue({...await backend.capabilities(),appVersion:'0.1.10'});
@@ -44,10 +46,10 @@ const cases:{name:string;patch:Partial<AppUpdateStatus>;desc:string;button?:stri
 ];
 it.each(cases)('renders full mode $name',async({patch,desc,button,ok})=>{
  await configure('full',patch);open();await waitFor(()=>expect(group()).toHaveTextContent(desc));
- if(button)expect(within(group()).getByRole('button',{name:button})).toBeVisible();else expect(within(group()).queryByRole('button')).toBeNull();if(ok)expect(within(group()).getByText('Up to date')).toBeVisible();
+ if(button)expect(within(row()).getByRole('button',{name:button})).toBeVisible();else expect(within(row()).queryByRole('button')).toBeNull();if(ok)expect(within(group()).getByText('Up to date')).toBeVisible();
 });
 it('renders full mode checking',async()=>{
- const check=await configure();check.mockReturnValue(new Promise(()=>{}));open();expect(await screen.findByText('0.1.10 · checking…')).toBeVisible();expect(within(group()).queryByRole('button')).toBeNull();
+ const check=await configure();check.mockReturnValue(new Promise(()=>{}));open();expect(await screen.findByText('0.1.10 · checking…')).toBeVisible();expect(within(row()).queryByRole('button')).toBeNull();
 });
 it('renders full mode check failed and rechecks explicitly with force',async()=>{
  const check=await configure();check.mockResolvedValue({ok:false,error:'offline'});open();await waitFor(()=>expect(group()).toHaveTextContent('0.1.10 · the update check did not run.'));expect(within(group()).getByRole('alert')).toHaveTextContent('offline');
@@ -103,7 +105,7 @@ it('streams download output and Cancel reaches the active Run',async()=>{
 it.each([true,false])('renders a stage outcome with notPublished=%s',async notPublished=>{
  await configure();vi.spyOn(backend.appUpdate,'stage').mockImplementation(()=>createRun(async()=>notPublished?{ok:true,value:{version:'0.1.12',staged:false,notPublished:true,alreadyStaged:false}}:{ok:false,error:'checksum failed'}));open();fireEvent.click(await screen.findByRole('button',{name:'Download'}));
  await waitFor(()=>expect(group()).toHaveTextContent(notPublished?'0.1.10 · 0.1.12 is announced but its files are not published yet.':'0.1.10 · 0.1.12 could not be downloaded.'));
- if(notPublished)expect(within(group()).queryByRole('button')).toBeNull();else{expect(within(group()).getByRole('alert')).toHaveTextContent('checksum failed');expect(within(group()).getByRole('button',{name:'Try again'})).toBeVisible();}
+ if(notPublished)expect(within(row()).queryByRole('button')).toBeNull();else{expect(within(group()).getByRole('alert')).toHaveTextContent('checksum failed');expect(within(group()).getByRole('button',{name:'Try again'})).toBeVisible();}
 });
 
 it.each(['on-close','overnight','manual'] as const)('shows the successful marker reason %s',async reason=>{

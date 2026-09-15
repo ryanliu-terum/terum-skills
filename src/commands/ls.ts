@@ -4,6 +4,7 @@ import type { WithForm } from '../lib/invocation.js';
 import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
+import { loadOverrides, overrideFilesFor } from '../lib/skill-overrides.js';
 import { canonicalLedger, isSkillFolder, localSkillCounts, localRootLabel, localSkillRoots, localSkills, type LocalEntry, type LocalRoot } from '../lib/local-skills.js';
 import { snapshotSkillDirectory } from '../lib/placer/vendor/skillhub/skill-fingerprint.js';
 import { printable, type SourceProblem } from '../lib/skill-source.js';
@@ -64,7 +65,7 @@ export interface LsSkill {
 export type LocalHealth = 'local-changed' | 'unknown';
 /** The checkout's `origin`, for the Library's "which repository is this folder" line. `slug` is owner/repo on GitHub and null on every other host. */
 export interface LocalRemote { url: string; slug: string | null; }
-export interface LocalSection extends LocalRoot { rootState: 'scanned' | 'absent' | 'unreadable'; label: string; remote: LocalRemote | null; counts: { skillFolders: number; connectable: number }; rows: { skillId: string | null; placed: boolean; name: string; path: string; state: string; tracked: boolean; placement: NonNullable<LocalEntry['placement']> | null; health: LocalHealth; edited: boolean; localEval: (Receipt & { path: string; mine: boolean }) | null; localEvalStale: boolean; teamEval: TeamEval | null; matchedVersion: string | null; matchedName: string | null; matchedTeam: string | null; knownToTeam: boolean; description: string | null; frontmatter: string | null; body?: string | null; category: string | null; characters: number | null; updated: string | null; problem?: string }[]; notOffered: { skillId: string | null; name: string; path: string; reason: SourceProblem | 'failed'; detail: string; description: string | null; frontmatter: string | null; body?: string | null; category: string | null; characters: number | null }[]; problems: { path: string; reason: string }[]; }
+export interface LocalSection extends LocalRoot { rootState: 'scanned' | 'absent' | 'unreadable'; label: string; remote: LocalRemote | null; counts: { skillFolders: number; connectable: number }; rows: { skillId: string | null; placed: boolean; name: string; path: string; state: string; tracked: boolean; placement: NonNullable<LocalEntry['placement']> | null; health: LocalHealth; /** False only when Claude Code's `skillOverrides` for this root says `off` (src/lib/skill-overrides.ts). */ enabled: boolean; edited: boolean; localEval: (Receipt & { path: string; mine: boolean }) | null; localEvalStale: boolean; teamEval: TeamEval | null; matchedVersion: string | null; matchedName: string | null; matchedTeam: string | null; knownToTeam: boolean; description: string | null; frontmatter: string | null; body?: string | null; category: string | null; characters: number | null; updated: string | null; problem?: string }[]; notOffered: { skillId: string | null; name: string; path: string; reason: SourceProblem | 'failed'; detail: string; description: string | null; frontmatter: string | null; body?: string | null; category: string | null; characters: number | null }[]; problems: { path: string; reason: string }[]; }
 /**
  * §8.4 — one member, whole, from the team read that already parsed `people/<handle>.json`.
  *
@@ -499,7 +500,9 @@ export async function collectLocal(store: ConfigStore, home: string, io: Prompte
   // Probe origins in one wave before rendering the ordered sections.
   const remotes = await Promise.all(inventories.map((root) => originRemote(root.repoRoot, runner)));
   for (const [index, { inventory, ...root }] of inventories.entries()) {
-    const local: LocalSection = { ...root, root: inventory.root, rootState: inventory.rootState, label: localRootLabel(root), remote: remotes[index]!, counts: localSkillCounts(inventory), rows: [], notOffered: [], problems: [...inventory.problems] };
+    // One read of the settings files that govern this root; a malformed file is the root's problem, never a skill reported off on a guess.
+    const overrides = await loadOverrides(overrideFilesFor({ scope: root.scope, repoRoot: root.repoRoot }, home).read);
+    const local: LocalSection = { ...root, root: inventory.root, rootState: inventory.rootState, label: localRootLabel(root), remote: remotes[index]!, counts: localSkillCounts(inventory), rows: [], notOffered: [], problems: [...inventory.problems, ...overrides.problems] };
     sections.push(local);
     // `only`: one folder's row without the fingerprint and digest cost of every other folder; counts stay the root's.
     const entries = only === undefined ? inventory.entries : inventory.entries.filter((entry) => entry.name === only);
@@ -522,7 +525,7 @@ export async function collectLocal(store: ConfigStore, home: string, io: Prompte
       if (ambiguous.has(entry.path)) local.problems.push({ path: entry.path, reason: 'identical bytes exist in more than one team; no version is shown' });
       if (tracked || inspection.kind === 'candidate') {
         const problem = inspection.kind === 'rejected' ? inspection.detail : inspection.kind === 'failed' ? inspection.reason : inspection.privileged ? 'contains plugin or hook definitions' : undefined;
-        local.rows.push({ skillId: entry.skillId, placed: entry.placement !== undefined, name: entry.name, path: entry.path, state: stateOf(entry), tracked, placement: entry.placement ?? null, health: healths.get(entry)!, edited: healths.get(entry) === 'local-changed', ...evals[entryIndex]!, description: describedBy(inspection), frontmatter: entry.frontmatter, body: entry.body ?? null, category: entry.category, characters: entry.characters ?? null, updated: entry.updated ?? null, ...(problem === undefined ? {} : { problem }) });
+        local.rows.push({ skillId: entry.skillId, placed: entry.placement !== undefined, name: entry.name, path: entry.path, state: stateOf(entry), tracked, placement: entry.placement ?? null, health: healths.get(entry)!, enabled: overrides.enabled(entry.name), edited: healths.get(entry) === 'local-changed', ...evals[entryIndex]!, description: describedBy(inspection), frontmatter: entry.frontmatter, body: entry.body ?? null, category: entry.category, characters: entry.characters ?? null, updated: entry.updated ?? null, ...(problem === undefined ? {} : { problem }) });
       } else if (inspection.kind === 'rejected') local.notOffered.push({ skillId: entry.skillId, name: entry.name, path: entry.path, reason: inspection.reason, detail: inspection.detail, description: inspection.description ?? null, frontmatter: entry.frontmatter, body: entry.body ?? null, category: entry.category, characters: entry.characters ?? null });
       if (inspection.kind === 'failed') {
         if (!tracked) local.notOffered.push({ skillId: entry.skillId, name: entry.name, path: entry.path, reason: 'failed', detail: inspection.reason, description: null, frontmatter: entry.frontmatter, body: entry.body ?? null, category: entry.category, characters: entry.characters ?? null });

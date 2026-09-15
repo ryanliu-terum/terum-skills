@@ -5,6 +5,15 @@ import type { Run, Frame } from '../types';
 afterEach(()=>{location.hash='';localStorage.clear();vi.useRealTimers();vi.restoreAllMocks();resetMockRemovals();});
 async function answerAll<T>(run:Run<T>,answer:(frame:Extract<Frame,{t:'ask'}>)=>string|boolean){for await(const frame of run.frames){if(frame.t==='ask')run.answer(frame.id,answer(frame));}return run.done;}
 it('advertises all mock capabilities and reads current scenarios on every call',async()=>{const b=createMockBackend();expect(await b.capabilities()).toEqual({appVersion:design.APP_VERSION,windowChrome:'cosmetic',windowControlsEnd:null,disablePerMachine:true,inboxEventLog:true,offtargetKind:true,machineRegistry:true,perCaseEvalTables:true,openInEditor:true,clipboard:true});expect(await b.surfaces()).toEqual({divergence:true,status:true,settings:true,onboarding:true,library:true,skill:true,receipts:true,inbox:true,catalog:true,roster:true,update:true,libraryProjects:false,appUpdate:false});expect((await b.library({scope:{kind:'global'}})).ok).toBe(true);location.hash='#/library/global?__mock=empty';const emptyLibrary=await b.library({scope:{kind:'global'}});expect(emptyLibrary.ok&&emptyLibrary.value.skills).toEqual([]);expect(emptyLibrary.ok&&emptyLibrary.value.title).toBe('0 skills');const status=await b.status();expect(status.ok&&status.value.counts.Global).toBe('0');expect(await b.inbox()).toEqual({ok:true,value:[]});const roster=await b.roster();expect(roster.ok&&roster.value.members.map(m=>m.handle)).toEqual(['teddy']);});
+it('setSkillEnabled answers in the CLI verb\'s shape and the next library read shows the flipped card',async()=>{
+ const b=createMockBackend();const path='/Users/you/.claude/skills/deploy-check';
+ expect(await answerAll(b.setSkillEnabled({path,enabled:false}),()=>true)).toEqual({ok:true,value:{kind:'disable',path,name:'deploy-check',enabled:false,settingsFile:'~/.claude/settings.json',changed:true,notices:[]}});
+ const off=await b.library({scope:{kind:'global'}});if(!off.ok)throw new Error(off.error);
+ expect(off.value.skills.find(card=>card.name==='deploy-check')?.enabled).toBe(false);
+ expect(await answerAll(b.setSkillEnabled({path,enabled:true}),()=>true)).toMatchObject({ok:true,value:{kind:'enable',enabled:true}});
+ const on=await b.library({scope:{kind:'global'}});if(!on.ok)throw new Error(on.error);
+ expect(on.value.skills.find(card=>card.name==='deploy-check')?.enabled).toBe(true);
+});
 it.each([
  ['library',"EACCES: permission denied, scandir '~/.terum/skills'"],
  ['skill',"ENOENT: no such file or directory, open '~/.claude/skills/deploy-check/SKILL.md'"],

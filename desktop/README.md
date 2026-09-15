@@ -7,7 +7,7 @@ design canvas; the gate that enforces that runs only where the canvas is present
 Status: preview. In a browser every screen renders on fixture data behind the `src/backend/` seam. In the shell the
 long verbs (install, connect, sync, publish, invite, team, setup, eval) and `search`/`validate` run the real CLI;
 the read models the CLI has no verb for yet render their error boards (`src/backend/tauri/README.md` lists them).
-`GAPS.md` lists what the drawn screens need from the CLI that it does not have.
+Read models the CLI has no verb for fail honestly and their screens are hidden by `surfaces()`.
 
 Run: `npm install`, `npm run dev` (port 1420), open `http://localhost:1420/#/library/global`. Node 24 (Node 25's
 built-in `localStorage` shadows jsdom's in the tests; run them with `NODE_OPTIONS=--no-experimental-webstorage` there).

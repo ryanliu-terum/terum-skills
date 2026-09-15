@@ -34,7 +34,8 @@ it('puts stale eval disclosure on the card face as a text node, never just a hov
  const label=screen.getByText('from v3 · v10 unreadable');
  expect(label).toHaveClass('card-version-label');
  expect(label.closest('.skill-card-bottom')).not.toBeNull();
- expect(label).not.toHaveAttribute('title');
+ // UI policy §4 (2026-09-14): a clipping label carries its full text in `title` too — the title is never the ONLY place the disclosure lives.
+ expect(label.getAttribute('title')).toBe(label.textContent);
  expect(screen.getByText('v10 · you have v2')).toBeInTheDocument();
 });
 it('opens the latest-version install dialog from Reinstall while preserving the marketplace origin', () => {

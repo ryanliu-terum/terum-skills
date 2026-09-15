@@ -13,9 +13,11 @@ export function useBackend():Backend{return useContext(BackendContext);}
 
 import { scriptedPrompter } from './prompter';
 import type { ScriptedPrompter } from './prompter';
-import type { PromptQuestion } from './types';
+import type { PromptOptions, PromptQuestion } from './types';
+export type { PromptOptions } from './types';
 export const PrintContext=createContext<(line:string)=>void>(()=>{});
-export const PromptContext=createContext<(question:PromptQuestion)=>Promise<string|boolean>>(async()=>{throw new Error('Prompt provider unavailable.');});
+/** Asks the person a question the CLI could not answer from the script. `options.signal` is the run that asked: when it aborts (the run settled — Stop, a failure, or the CLI finishing without waiting), the provider withdraws the question and rejects with PromptCancelledError, so no dead dialog outlives its run. */
+export const PromptContext=createContext<(question:PromptQuestion,options?:PromptOptions)=>Promise<string|boolean>>(async()=>{throw new Error('Prompt provider unavailable.');});
 export function usePrompter(answers:Record<string,string|boolean>):ScriptedPrompter{return scriptedPrompter(answers,useContext(PromptContext));}
 
 export function useFeatures(){const backend=useBackend();return useQuery({queryKey:['features'],queryFn:()=>backend.features()}).data;}

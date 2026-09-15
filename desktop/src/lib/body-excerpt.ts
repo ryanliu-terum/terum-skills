@@ -1,7 +1,7 @@
 /**
  * One-line card summary from a SKILL.md body (the post-frontmatter markdown): the first paragraph —
  * or the first three non-empty lines when the body opens with a list — flattened to plain text.
- * Ratified decision (teddyzheng, 2026-09-08): cards summarize from the body, frontmatter
+ * Ratified 2026-09-08: cards summarize from the body, frontmatter
  * `description:` is the fallback — callers write `bodyExcerpt(row.body) ?? row.description`.
  */
 const EXCERPT_MAX = 200;

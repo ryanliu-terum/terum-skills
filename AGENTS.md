@@ -12,24 +12,15 @@ no server. **There is no product source yet.** When implementation starts, code 
 
 ## Which document wins
 
-1. `.planning/specs/2026-09-02-phase-1-build.md` — the **build spec**. Authoritative. Rev and
-   date are in its status line; every rev is a full replacement, not a delta.
-2. `.planning/specs/2026-09-01-team-skill-sharing.md` — the **decision ledger** (D1…D39).
-   Background and rationale. Where it and the build spec disagree, the build spec wins.
-3. `.planning/decisions/2026-09-01-team-skill-sharing-decision-walk.md` — the decision walk.
-   History of how forks were closed. Decision 3 was reopened 2026-09-03; its reopen note wins
-   over the original text below it.
-4. `.planning/specs/reviews/*.codex-spec.r*.review.md` — prior audit rounds. Evidence, not rules.
-
-Status tags in the ledger mean what they say: DECIDED is settled; PROPOSED is a recommendation;
-OPEN is blank on purpose. In the build spec, **`[default — veto cheap]`** marks a default the
-author chose to close a gap — implement it as written, do not treat it as undecided.
+The build spec and decision ledger that drove the original implementation are not tracked in the
+working tree; they remain in this repository's git history. The invariants below are the rules that
+hold for code written here, and this file wins over any comment or doc that contradicts it.
 
 ## Invariants you must hold when you write code here
 
 - **Nothing runs anywhere but laptops and the git host.** No HTTP client, no server, no daemon,
-  no third-party CLI on the install path. Shell out only to `git` and `gh`. One exception, recorded
-  in `.planning/decisions/2026-09-08-desktop-app-cli-decision-walk.md` (D7, D8): `terum-skills app`
+  no third-party CLI on the install path. Shell out only to `git` and `gh`. One recorded exception:
+  `terum-skills app`
   and `terum-skills app-update` also run the platform's own tools to unpack, install and open the
   desktop app (`tar`, `open`, the NSIS installer they downloaded through `gh`), and `app-update
   --apply` re-runs this same CLI (`process.execPath`) as a detached process so the install outlives

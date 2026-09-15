@@ -37,10 +37,10 @@ test('sidebar hides, reopens and persists across a bare-route reload',async({pag
 });
 
 for(const {section,label,rows,route} of [
- {section:'projects',label:'Projects',rows:['Terum','SSM','MRF'],route:'#/marketplace/projects'},
+ {section:'projects',label:'Projects',rows:['Terum','SSM','MRF'],route:null},
  {section:'inbox',label:'Inbox',rows:['Pushes','Updates','Alerts'],route:'#/inbox'},
-]){
- test(`${label} collapses, restores and its label still navigates`,async({page})=>{
+] as {section:string;label:string;rows:string[];route:string|null}[]){
+ test(`${label} collapses and restores`,async({page})=>{
   const errors=await openLibrary(page,'#/library/global');
   const nav=page.getByRole('navigation',{name:'Main navigation'});
   const collapse=nav.getByRole('button',{name:'Collapse '+label});
@@ -50,13 +50,20 @@ for(const {section,label,rows,route} of [
   await expect(page).toHaveURL(new RegExp('#/library/global\\?'+section+'=collapsed$'));
   const expand=nav.getByRole('button',{name:'Expand '+label});
   await expect(expand).toHaveAttribute('aria-expanded','false');
-  await expect(expand.locator('svg')).toHaveAttribute('width','12');
+  await expect(expand.locator('.nav-chevron svg')).toHaveAttribute('width','12');
   // The same drawn chevron-right path as the Forward control, at the section's 12px size.
-  expect(await expand.locator('svg').innerHTML()).toBe(await page.getByRole('button',{name:'Forward'}).locator('svg').innerHTML());
+  expect(await expand.locator('.nav-chevron svg').innerHTML()).toBe(await page.getByRole('button',{name:'Forward'}).locator('svg').innerHTML());
   for(const row of rows)await expect(nav.getByRole('link',{name:new RegExp('^'+row+' ')})).toHaveCount(0);
   await expand.click();for(const row of rows)await expect(nav.getByRole('link',{name:new RegExp('^'+row+' ')})).toBeVisible();
-  await collapse.click();await nav.locator('a[href="'+route+'"]').locator('span').first().click();
-  await expect(page).toHaveURL(new RegExp(route+'$'));
+  await collapse.click();
+  if(route===null){
+   // Projects owns no page: the row toggles and the URL keeps only the collapsed flag.
+   await expect(nav.locator('a[href="#/marketplace/projects"]')).toHaveCount(0);
+   await expect(page).toHaveURL(new RegExp('#/library/global\\?'+section+'=collapsed$'));
+  }else{
+   await nav.locator('a[href="'+route+'"]').locator('span').first().click();
+   await expect(page).toHaveURL(new RegExp(route+'$'));
+  }
   await expect(nav.getByRole('button',{name:'Expand '+label})).toBeVisible();
   expect(errors).toEqual([]);
  });

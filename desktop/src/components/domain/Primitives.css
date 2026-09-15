@@ -4,3 +4,14 @@
 
 .board-table-row{box-sizing:content-box}
 .board-view-meta{display:flex;align-items:center;gap:6px;min-width:0;font-size:12px}.board-view-meta>span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+/* UI policy primitives (2026-09-14). None of these render on a drawn board unless a caller places them, so no board moves. */
+.path-text{display:inline-flex;flex-direction:column;gap:4px;min-width:0;max-width:100%}
+.path-text-value{display:block;font-size:12px;line-height:16px;color:var(--tk-text3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+.advice-block{display:flex;flex-direction:column;gap:8px}
+.advice-text{margin:0;font-size:13px;line-height:20px;color:var(--tk-text2);text-wrap:pretty;user-select:text;-webkit-user-select:text}
+.advice-actions{display:flex;justify-content:flex-end}
+.collapsible-command{display:flex;flex-direction:column;gap:4px;align-items:flex-start}
+.collapsible-command>.cli-box{align-self:stretch}
+.collapsible-toggle{border:0;background:none;padding:0;font:inherit;font-size:12px;line-height:16px;color:var(--tk-accent);cursor:pointer}
+.collapsible-toggle:hover{text-decoration:underline}

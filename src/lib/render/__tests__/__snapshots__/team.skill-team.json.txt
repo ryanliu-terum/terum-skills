@@ -130,6 +130,7 @@
               "version": "v1"
             },
             "health": "unknown",
+            "enabled": true,
             "edited": false,
             "localEval": {
               "schema_version": 2,

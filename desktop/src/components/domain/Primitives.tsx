@@ -1,12 +1,16 @@
 import { useEffect, useRef, useState } from 'react';
 import type { CSSProperties, PropsWithChildren, ReactNode } from 'react';
-import { useBackend } from '../../backend';
 import type { CardProvenance, ReceiptSummary } from '../../backend/types';
 import { Icon } from '../ui/Icon';
 import type { IconName } from '../ui/icon-paths';
 import { Button } from '../ui/Button';
 import { Menu,MenuTrigger,MenuPopup,MenuItem } from '../ui/Menu';
-import { useContextMenu, useCopy } from './context-menu';
+import { useContextMenu, useCopy, useCopyMenu, useCopySelfMenu } from './context-menu';
+import { CopyValue } from './ContextMenu';
+import { splitAdvice, adviceCommands } from '../../lib/advice';
+import { shortenPath } from '../../lib/path-text';
+import { revealLabel } from '../../lib/platform-labels';
+import { useBackend, useHostStatus } from '../../backend';
 import { verdictToken, liftLabel, provenanceLine } from './verdict';
 import './Primitives.css';
 import { token } from './presentation';
@@ -19,7 +23,10 @@ export function IconButton({icon,label,onClick,size=24,iconSize=16,pressed=false
 export function CommandText({command}:{command:string}){return command.split(' ').map((part,i)=><span key={i}>{i?' ':''}<span style={{display:'inline-block',overflowWrap:'anywhere'}}>{decodeText(part)}</span></span>);}
 /** Right-click copies the printed command (the hint itself stays text, as drawn). */
 export function TerminalHint({command,prefix}:{command:string;prefix?:string}){const copy=useCopy(),menu=useContextMenu(()=>[{key:'copy',label:'Copy command',icon:'copy',onSelect:()=>void copy(decodeText(command),'command')}]);return <div className="terminal-hint" ref={menu}><span className="terminal-glyph"><Icon name="terminal" size={12} stroke="2"/></span>{prefix?<span style={{whiteSpace:'nowrap'}}>{prefix} ·</span>:null}<span className="board-mono"><CommandText command={command}/></span></div>;}
-export function ErrorLine({children}:PropsWithChildren){return <div className="board-error-line">{children}</div>;}
+/** The boards' mono error line; right-click copies what it shows (UI policy §1). */
+export function ErrorLine({children}:PropsWithChildren){const menu=useCopySelfMenu('error');return <div className="board-error-line" ref={menu}>{children}</div>;}
+/** A `role="alert"` block that is selectable and copies on right-click (UI policy §1); `className` keeps the caller's metrics. */
+export function AlertText({children,className}:PropsWithChildren<{className?:string}>){const menu=useCopySelfMenu('error');return <div role="alert" className={className} ref={menu}>{children}</div>;}
 export function CenteredState({icon,title,body,primary,primaryDisabled=false,primaryReason,secondary,onPrimary,onSecondary,children,alert=false}:{icon:IconName;title:string;body:string;primary?:string;primaryDisabled?:boolean;primaryReason?:string|undefined;secondary?:string;onPrimary?:()=>void;onSecondary?:()=>void;children?:ReactNode;alert?:boolean}){return <div className="centered-state" role={alert?'alert':undefined}><div className="state-icon"><Icon name={icon} size={18}/></div><span className="state-title">{title}</span><span className="state-body">{decodeText(body)}</span><div className="state-actions">{primary?<Button kind="primary" disabled={primaryDisabled} title={primaryReason} onClick={onPrimary}>{primary}</Button>:null}{secondary?<Button onClick={onSecondary}>{secondary}</Button>:null}</div>{primaryReason?<Small>{primaryReason}</Small>:null}{children}</div>;}
 export function HoverTip({children,below=true}:{children:ReactNode;below?:boolean}){return <span role="tooltip" className={'tooltip board-hover-tip'+(below?' below':'')}>{children}</span>;}
 export function CopyButton({text}:{text:string}){const backend=useBackend(),[copied,setCopied]=useState(false),[error,setError]=useState<string|null>(null),timer=useRef<ReturnType<typeof setTimeout>|null>(null);useEffect(()=>()=>{if(timer.current)clearTimeout(timer.current);},[]);async function copy(){try{const result=await backend.copyToClipboard(text);if(!result.ok){setError(result.error);return;}setError(null);setCopied(true);if(timer.current)clearTimeout(timer.current);timer.current=setTimeout(()=>setCopied(false),1500);}catch(e){setError(e instanceof Error?e.message:'Clipboard unavailable.');}}return <span className="copy-control"><IconButton icon="copy" iconSize={14} label="Copy command" pressed={copied} onClick={()=>void copy()}/>{copied?<HoverTip below={false}>Copied</HoverTip>:null}{error?<span role="alert" className="tooltip board-hover-tip">{error}</span>:null}</span>;}
@@ -49,3 +56,22 @@ export function SearchRow({query,placeholder='Search 30 skills',onChange,onClear
  const label=sortOptions?.find(option=>option.value===sortValue)?.label??sort;
  return <div className="board-search-row"><div className="board-search-field"><Icon name="search" size={16}/><input aria-label={placeholder} value={query} placeholder={placeholder} onChange={e=>onChange(e.target.value)}/>{query?<IconButton icon="x" size={20} iconSize={14} label="Clear search" onClick={onClear??(()=>onChange(''))}/>:null}</div>{sortOptions?<Menu><MenuTrigger render={<Button kind="ghost" icon="sort"/>}>{label}</MenuTrigger><MenuPopup>{sortOptions.map(option=><MenuItem key={option.value} role="menuitemradio" aria-checked={option.value===sortValue} onClick={()=>onSort?.(option.value)}><span aria-hidden="true" style={{display:'inline-flex',alignItems:'center',justifyContent:'center',width:12,flexShrink:0}}>{option.value===sortValue?<Icon name="check" size={12} stroke="2.5"/>:null}</span>{option.label}</MenuItem>)}</MenuPopup></Menu>:<Button kind="ghost" icon="sort" onClick={onSort===undefined?undefined:()=>onSort(sortValue??'')}>{label}</Button>}{trailing}{children}</div>;}
 export function BoardTable({headers,rows,widths,mono=false,strong=[],muted=[]}:{headers:string[];rows:ReactNode[][];widths:number[];mono?:boolean;strong?:string[];muted?:string[]}){const cellStyle=(row:number,col:number,head:boolean):CSSProperties=>({...(widths[col]?{width:widths[col],flexShrink:0}:{flexGrow:1,minWidth:0}),textAlign:col?'right':'left',fontSize:head?11:12,fontWeight:head?510:strong.includes(`${row}:${col}`)?590:col===0?500:400,color:token(head||muted.includes(`${row}:${col}`)?'text3':col===0||strong.includes(`${row}:${col}`)?'text1':'text2')});return <div role="table" className={'board-table'+(mono?' board-mono':'')}><div role="row" className="board-table-head">{headers.map((h,i)=><span role="columnheader" key={i} style={cellStyle(-1,i,true)}>{h}</span>)}</div>{rows.map((row,i)=><div role="row" key={i} className="board-table-row">{row.map((value,col)=><span role="cell" key={col} style={cellStyle(i,col,false)}>{typeof value==='string'?decodeText(value):value}</span>)}</div>)}</div>;}
+
+/**
+ * UI policy §2: a filesystem path is never prose. One mono line, shortened in the middle past `max` characters
+ * (the folder name survives whole), the full path on hover, click or Enter copies it, right-click offers Copy
+ * path and the host's reveal verb. `what` names the copy in the toast.
+ */
+export function PathText({path,max=64,what='path'}:{path:string;max?:number;what?:string}){const backend=useBackend(),copy=useCopy(),status=useHostStatus(),reveal=revealLabel(status?.ok?status.value.machine.os:undefined),[error,setError]=useState<string|null>(null);const menu=useContextMenu(()=>[{key:'copy',label:'Copy '+what,icon:'copy',onSelect:()=>void copy(path,what)},{key:'reveal',label:reveal,icon:'folder',onSelect:()=>void backend.revealPath(path).then(result=>{if(!result.ok)setError(result.error);},reason=>setError(String(reason)))}]);return <span ref={menu} className="path-text"><CopyValue text={path} what={what} className="board-mono path-text-value"><span title={path}>{shortenPath(path,max)}</span></CopyValue>{error?<span role="alert" className="board-error-line">{error}</span>:null}</span>;}
+/**
+ * The CLI's advice lines as the dialog shows them: prose stays prose, each indented command becomes a CliBox with
+ * its own Copy (UI policy §1). With more than one command a "Copy all commands" ghost button copies them joined by
+ * newlines; `all` (the CLI's full printout, when the caller has it) makes that button copy the whole text instead.
+ */
+export function AdviceBlock({lines,all}:{lines:readonly string[];all?:readonly string[]}){const copy=useCopy(),segments=splitAdvice(lines),commands=adviceCommands(lines),whole=(all??lines).join('\n'),menu=useCopyMenu(()=>whole,'advice');return <div className="advice-block" ref={menu}>{segments.map((segment,i)=>segment.kind==='command'?<CliBox key={i} command={segment.text}/>:<p key={i} className="advice-text">{segment.text}</p>)}{commands.length>1||all?<div className="advice-actions"><Button kind="ghost" icon="copy" onClick={()=>void copy(all?whole:commands.join('\n'),all?'advice':'commands')}>{all?'Copy all':'Copy all commands'}</Button></div>:null}</div>;}
+/**
+ * A long command (an eval over dozens of folders) shown as its short form — the verb plus a count — with
+ * "Show full command" to expand the exact line (UI policy §3). Both forms copy the FULL command: the summary is
+ * for reading, never for running. With no `summary` it is a plain CliBox.
+ */
+export function CollapsibleCommand({command,summary}:{command:string;summary?:string|null}){const [expanded,setExpanded]=useState(false),copy=useCopy(),menu=useContextMenu(()=>[{key:'copy',label:'Copy command',icon:'copy',onSelect:()=>void copy(decodeText(command),'command')}]);if(!summary||expanded)return <div className="collapsible-command"><CliBox command={command}/>{summary?<button type="button" className="collapsible-toggle" aria-expanded onClick={()=>setExpanded(false)}>Hide full command</button>:null}</div>;return <div className="collapsible-command"><div className="cli-box" ref={menu}><span className="board-mono" title={decodeText(command)}><CommandText command={summary}/></span><CopyButton text={command}/></div><button type="button" className="collapsible-toggle" aria-expanded={false} onClick={()=>setExpanded(true)}>Show full command</button></div>;}

@@ -1,7 +1,7 @@
 #!/bin/zsh
 # Step 4 driver: launch the built app against a HOME, watch its CLI children, quit it, report orphans.
 # Usage: launch.sh <app-binary> <HOME> <label> [seconds=45]
-BIN=$1; H=$2; LABEL=$3; SECS=${4:-45}; S4=/Users/ryanliu/Documents/Terum/m7-step4; LOG=$S4/launch-$LABEL.log
+BIN=$1; H=$2; LABEL=$3; SECS=${4:-45}; S4=/home/dev/Documents/Terum/m7-step4; LOG=$S4/launch-$LABEL.log
 : > $LOG
 echo "launch $(date -u) HOME=$H" >> $LOG
 HOME=$H nohup "$BIN" >> $S4/app-$LABEL.stdout.log 2>> $S4/app-$LABEL.stderr.log &

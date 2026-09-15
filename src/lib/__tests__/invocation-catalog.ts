@@ -1189,7 +1189,7 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "file": "README.md",
     "line": 381,
     "policy": "prose",
-    "pattern": "| | `skill move <path> --to global\\|<project root>` / `skill copy <path> --to global\\|<project root>` / `skill rename <path> --to <new-name>` / `skill delete <path>` / `skill fix <path>` | Move, copy, rename, delete, or fix a folder in your Library. Copy leaves the source where it is, so one local skill can sit in two roots at once; the new folder keeps the source's `metadata.id` and is a plain Library folder with no install record of its own. Delete confirms by name; move, copy and rename ask nothing, because each is undone by running the verb the other way and none overwrites anything; fix applies the repairs with one right answer (quote a frontmatter value YAML refuses, set `name` to the folder, set `license` to the team policy, strip invisible characters, clear an executable bit on a non-script) and lists what still needs you. Delete removes an unmodified placement outright (the team repo still holds its bytes; reinstall restores them) and quarantines an edited placement or any folder that is not a placement; `prune` permanently deletes quarantine contents |"
+    "pattern": "| | `skill move <path> --to global\\|<project root>` / `skill copy <path> --to global\\|<project root>` / `skill rename <path> --to <new-name>` / `skill delete <path>` / `skill fix <path>` / `skill disable <path>` / `skill enable <path>` | Move, copy, rename, delete, fix, disable, or enable a folder in your Library. Copy leaves the source where it is, so one local skill can sit in two roots at once; the new folder keeps the source's `metadata.id` and is a plain Library folder with no install record of its own. Delete confirms by name; move, copy and rename ask nothing, because each is undone by running the verb the other way and none overwrites anything; fix applies the repairs with one right answer (quote a frontmatter value YAML refuses, set `name` to the folder, set `license` to the team policy, strip invisible characters, clear an executable bit on a non-script) and lists what still needs you. Delete removes an unmodified placement outright (the team repo still holds its bytes; reinstall restores them) and quarantines an edited placement or any folder that is not a placement; `prune` permanently deletes quarantine contents. Disable and enable are the per-machine switch: they write Claude Code's own `skillOverrides` setting for the folder's name (the same key Claude Code's `/skills` menu writes) — `~/.claude/settings.json` for a Global folder, the checkout's `.claude/settings.local.json` for a project folder — so Claude Code stops or resumes loading the skill on this machine while the folder stays where it is. Enable removes only an `off`; a `name-only` or `user-invocable-only` set by hand is left alone |"
   },
   {
     "file": "README.md",
@@ -1232,7 +1232,7 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "file": "README.md",
     "line": 382,
     "policy": "prose",
-    "pattern": "| | `app-update [--check\\|--stage\\|--apply] [--release <version>] [--reason on-close\\|overnight\\|manual]` | Check for, download, or install a newer desktop app; Settings ▸ Updates offers Install now, When I quit, or Overnight (01:00–05:00 after 30 idle minutes) |"
+    "pattern": "| | `app-update [--check\\|--stage\\|--apply] [--release <version>] [--reason on-close\\|overnight\\|manual]` | Check for, download, or install a newer desktop app; Settings ▸ Updates offers Install now, When I quit, or Overnight (01:00–05:00 after 30 idle minutes), and a one-shot Update and relaunch that asks GitHub now, downloads, and relaunches once you confirm |"
   },
   {
     "file": "README.md",
@@ -1418,7 +1418,7 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "file": "docs/frame-protocol.md",
     "line": 149,
     "policy": "prose",
-    "pattern": "`liftOnCards`, `runEvalInApp`, `progress`, `refresh`, `appUpdate`, `reconcile`, `serve`."
+    "pattern": "`liftOnCards`, `runEvalInApp`, `perCase`, `progress`, `refresh`, `appUpdate`, `reconcile`, `serve`."
   },
   {
     "file": "docs/frame-protocol.md",
@@ -1806,7 +1806,7 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "file": "docs/frame-protocol.md",
     "line": 0,
     "policy": "prose",
-    "pattern": "advertise their respective verbs. `reconcile` gates the Library's Check against the team action."
+    "pattern": "advertise their respective verbs. `reconcile` gates the Library's Sync action, which runs the fetch-only `sync` and then `reconcile --list`."
   },
   {
     "file": "docs/frame-protocol.md",
@@ -1982,4 +1982,52 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     policy: 'prose',
     pattern: '`eval`\'s own result (`EvalResult`) gained `report: { aggregate, triggers }` — the numbers `renderReport` prints, as data — and `receiptPath` on a completed run; `eval --drain` gained `outcomes: { skill, team?, ok, error? }[]`, one per attempted item in queue order. `validate` gained `directory`, the folder it checked. Additive; protocol stays 1.',
   },
+  {
+    "file": "docs/frame-protocol.md",
+    "line": 365,
+    "policy": "prose",
+    "pattern": "The desktop checks once at launch; that check refreshes the advertisement at most once a day (App updates above) and displays the advertised version in its top-bar update chip. Settings ▸ Updates uses `updates:app:policy`: `ask` (manual download/install), `on-close` (the default), or `overnight` (01:00–05:00 local after 30 idle minutes). The old boolean migrates once: false → ask, true → on-close. Successful install markers display “Updated to {version}”, adding “when you quit” or “overnight”; `updates:app:lastShown` acknowledges the marker across launches while the current session retains it. Failure markers remain visible. Settings ▸ Updates also carries a one-shot `Update and relaunch` row: it runs `app-update --check --force`, then `--stage` for the advertised build when it is newer and not yet staged, then the same confirmation dialog and `--apply --reason manual` followed by quit. A failed probe is reported as unreachable rather than as up to date, and the launch hook's automatic policy skips a version the row already started downloading in this session."
+  },
+  {
+    "file": ".claude/skills/terum-skills/SKILL.md",
+    "line": 119,
+    "policy": "fixed",
+    "pattern": "| `skill disable <abs-path>` | none | `npx -y terum-skills@latest skill disable <abs-path>` — writes `off` for the folder's name into Claude Code's own `skillOverrides` setting (the same key the `/skills` menu writes); the folder stays where it is |"
+  },
+  {
+    "file": ".claude/skills/terum-skills/SKILL.md",
+    "line": 120,
+    "policy": "fixed",
+    "pattern": "| `skill enable <abs-path>` | none | `npx -y terum-skills@latest skill enable <abs-path>` — removes that `off` and nothing else |"
+  },
+  {
+    "file": "docs/frame-protocol.md",
+    "line": 271,
+    "policy": "prose",
+    "pattern": "`skill disable <path>` / `skill enable <path>` are one-shot frame writes with no ask. They are the"
+  },
+  {
+    "file": "docs/frame-protocol.md",
+    "line": 273,
+    "policy": "prose",
+    "pattern": "and the app draws no switch): `disable` writes `\"off\"` for the"
+  },
+  {
+    "file": "docs/frame-protocol.md",
+    "line": 275,
+    "policy": "prose",
+    "pattern": "`enable` removes that `\"off\"` (never a `name-only` or `user-invocable-only` a person set by hand). A folder under"
+  },
+  {
+    "file": "docs/frame-protocol.md",
+    "line": 279,
+    "policy": "prose",
+    "pattern": "so. Every `ls --local` row carries `enabled` read from those same files, so a shell renders state it read, not"
+  },
+  {
+    "file": "src/lib/skill-overrides.ts",
+    "line": 4,
+    "policy": "prose",
+    "pattern": "* Claude Code loads whatever sits in a skills directory, so terum-skills cannot switch a placed copy"
+  }
 ];
