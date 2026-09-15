@@ -144,7 +144,7 @@ button:focus-visible,.button[data-state="focus"],[role="switch"]:focus-visible,[
 .prompt-path .prompt-field {flex:1 1 auto;min-width:0;}
 .prompt-actions {display:flex;justify-content:flex-end;gap:8px;margin-top:16px;}
 
-.eval-chip { font-size: 12px; background: var(--tk-bg2); border: 1px solid var(--tk-border1); border-radius: 6px; height: 24px; padding: 0 8px; color: var(--tk-text2); }
+.eval-chip { font-size: 12px; background: var(--tk-bg2); border: 1px solid var(--tk-border1); border-radius: 6px; height: 24px; padding: 0 8px; color: var(--tk-text2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .update-chip > span { color: var(--tk-brand); }
 .workflow-lines { font-size: 12px; max-height: 220px; overflow: auto; background: var(--tk-bg2); border: 1px solid var(--tk-border1); border-radius: 6px; padding: 8px 10px; white-space: pre-wrap; }
 
