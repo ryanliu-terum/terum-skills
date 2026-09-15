@@ -607,6 +607,17 @@ it('keeps a null tracking version and a missing placement folder honest',async()
  const local={roster:[],skills:[],problems:[],local:[{root:'/skills',scope:'global',rows:[{name:'a',path:'/skills/a',state:'unrelated',tracked:true,placement:{id:'id-a',team:'acme',version:null},health:'unknown',problem:'symbolic link'}],notOffered:[],problems:[]}]};
  expect(await createTauriBackend(inventoryBridge({local}).bridge).skill({ref:'a'})).toMatchObject({ok:true,value:{installed:'placed',version:'Version 1',version_full:'v1'}});
 });
+// A clean install reports `unknown` health now: src/commands/ls.ts `healthOf` answers
+// 'local-changed' when the folder's fingerprint has drifted from the ledger's and 'unknown' for
+// everything else — intact copies included. Treating 'unknown' as a fault put "placed copy could
+// not be inspected" on every untouched install and left the genuinely edited ones clean.
+it.each([['unknown',[],{}],['gone-from-repo',['broken'],{broken:'placed copy could not be inspected'}]] as [string,string[],Record<string,string>][])('an intact placement reporting %s health carries the right flags',async(health,flags,flagText)=>{
+ const local={roster:[],skills:[],problems:[],local:[{root:'/home/.claude/skills',scope:'global',rows:[{name:'a',path:'/home/.claude/skills/a',state:'placement recorded from acme',tracked:true,placement:{id:'id-a',team:'acme',version:'v1'},health}],notOffered:[],problems:[]}]};
+ const card=(await createTauriBackend(inventoryBridge({local}).bridge).skill({ref:'a',team:'acme'})).value;
+ expect(card).toMatchObject({name:'a',installed:'placed'});
+ expect(card?.flags).toEqual(flags);
+ expect(card?.flagText).toEqual(flagText);
+});
 it('rejects undeclared local row keys and missing typed provenance',async()=>{
   for(const extra of [{sharedState:'in-sync'}, {placement:undefined}]) {
     const local={roster:[],skills:[],problems:[],local:[{root:'/skills',scope:'global',rows:[{name:'a',path:'/skills/a',state:'x',tracked:true,placement:null,health:'unknown',...extra}],notOffered:[],problems:[]}]};
