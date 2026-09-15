@@ -33,7 +33,7 @@ import type { z } from 'zod';
 import type {
   cliInstalled, cliUninstalled, cliMachine, cliPublish, cliSetup, cliEval, cliSearch,
   cliCardReceipt, cliLsSkill, cliProject, cliLocalRow, cliLocalSection, cliProjectAdded,
-  cliProjectCreated, cliProjectRemoved, cliLs, cliStatusTeams, cliStatus,
+  cliProjectCreated, cliProjectRemoved, cliLs, cliStatusTeams, cliStatus, cliSkillToggle,
 } from '../src/backend/tauri/index';
 import type { cliRefresh } from '../src/backend/tauri/refresh';
 import type { cliEvalMany } from '../src/backend/tauri/eval-many';
@@ -50,6 +50,7 @@ import type { MachineUninstallResult } from '../../src/commands/uninstallMachine
 import type { ProjectResult } from '../../src/commands/project.js';
 import type { ProjectCreated } from '../../src/commands/team.js';
 import type { SyncResult } from '../../src/commands/refresh.js';
+import type { SkillToggleResult } from '../../src/commands/skillToggle.js';
 
 /**
  * The CLI's types use `readonly` arrays where zod's inferred input is mutable, and a `readonly T[]`
@@ -87,6 +88,7 @@ type Assertions = [
   Parses<typeof cliProjectRemoved, Mutable<Extract<ProjectResult, { placementsRemaining: number }>>>,
   Parses<typeof cliProjectCreated, Mutable<ProjectCreated>>,
   Parses<typeof cliRefresh, Mutable<SyncResult>>,
+  Parses<typeof cliSkillToggle, Mutable<SkillToggleResult>>,
 ];
 
 export type { Assertions };

@@ -137,7 +137,7 @@ hello lines under `.planning/codex-runs/*/frames/` precede B5's three skill verb
 `src/lib/frames.ts` now advertises this complete verb list:
 
 ```json
-["skill move","skill copy","skill rename","skill delete","skill fix","project add","project remove","project list","login","setup","team create","team join","team remove","team leave","team move","team workflow-update","team project create","invite","ls","status","reconcile","publish","validate","eval","eval-report","install","uninstall-skill","uninstall","sync","prune","search","update","app","profile","app-update","serve"]
+["skill move","skill copy","skill rename","skill delete","skill fix","skill enable","skill disable","project add","project remove","project list","login","setup","team create","team join","team remove","team leave","team move","team workflow-update","team project create","invite","ls","status","reconcile","publish","validate","eval","eval-report","install","uninstall-skill","uninstall","sync","prune","search","update","app","profile","app-update","serve"]
 ```
 
 `team migrate` is registered but terminal-only: under `--frames` it fails before doing any work and tells the
@@ -267,6 +267,17 @@ rewrites readable frontmatter to match the new folder name; publishing under a n
 a new lineage. Delete removes an unmodified placement outright, quarantines an edited placement,
 and quarantines a folder not tracked as a placement. Placement deletion also updates install records.
 The result is `{ kind, path, destination, quarantined, installed, notices }`.
+
+`skill disable <path>` / `skill enable <path>` are one-shot frame writes with no ask. They are the
+per-machine switch behind `features.disablePerMachine` (true once a CLI carries these verbs; an older CLI reports false
+and the app draws no switch): `disable` writes `"off"` for the
+folder's name into Claude Code's own `skillOverrides` setting — the same key the `/skills` menu writes — and
+`enable` removes that `"off"` (never a `name-only` or `user-invocable-only` a person set by hand). A folder under
+`~/.claude/skills` is governed by `~/.claude/settings.json`; a folder under a checkout's `.claude/skills` by that
+checkout's `.claude/settings.local.json`, which the CLI adds to `.git/info/exclude` when it creates the file. The
+result is `{kind, path, name, enabled, settingsFile, changed, notices}`; `changed:false` means the file already said
+so. Every `ls --local` row carries `enabled` read from those same files, so a shell renders state it read, not
+state it remembers. Nothing moves on disk and nothing is written to the team repository.
 
 `skill fix <path>` is a one-shot frame write with no ask. It applies every repair whose outcome is
 fixed by an authority other than the author's typing: quoting a bare frontmatter value that holds `: `

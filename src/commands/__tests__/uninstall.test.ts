@@ -1,5 +1,5 @@
 import { getStartedLines } from '../../lib/invocation.js';
-import { access, readFile } from 'node:fs/promises';
+import { access, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { run, ledgerScopes } from '../uninstall.js';
@@ -36,6 +36,33 @@ describe('uninstall (§6 pending)', () => {
     expect((await install({ ref: 'team/sample', config: store, home }, new ScriptedPrompter())).ok).toBe(true);
     // `install team/sample --team other` installs team's copy; the inverse must not delete other's.
     expect(await run({ ref: 'team/sample', team: 'other', config: store, home }, new ScriptedPrompter([], [true]))).toMatchObject({ ok: true, value: [{ id, team: 'team', removed: 1 }] });
+    expect((await store.read()).placements).toEqual({});
+  });
+
+  it('drops the skillOverrides "off" this tool wrote for a removed placement, keeps every other entry, and reports a settings file it cannot edit', async () => {
+    const fixture = await bareTeam();
+    const first = '11111111-1111-4111-8111-111111111111';
+    await pushFromSeed(fixture.seed, 'skills/first/v1/SKILL.md', `---\nname: first\ndescription: first\nlicense: UNLICENSED\nmetadata:\n  id: ${first}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
+    await pushFromSeed(fixture.seed, 'people/seed.json', `${JSON.stringify(person('seed', { installed: [{ id: first, version: null, scope: { kind: 'global' }, since: '2026-09-04' }] }), null, 2)}\n`);
+    const store = createConfigStore(join(fixture.root, 'state'));
+    await cloneWithIdentity(fixture.bare, store.teamClone('team'));
+    const home = join(fixture.root, 'home');
+    const settings = join(home, '.claude', 'settings.json');
+    await mkdir(join(home, '.claude'), { recursive: true });
+    await writeFile(settings, JSON.stringify({ theme: 'dark', skillOverrides: { first: 'off', other: 'off' } }));
+    await store.update((config) => {
+      config.teams.team = { remote: fixture.bare, handle: 'seed' };
+      config.placements[join(home, '.claude', 'skills', 'first')] = { id: first, team: 'team', version: null, scope: { kind: 'global' }, placed_at: '2026-09-04', fingerprint: 'sha256:first' };
+    });
+    expect(await run({ ref: 'first', team: 'team', config: store, home }, new ScriptedPrompter([], [true]))).toMatchObject({ ok: true, value: [{ id: first, removed: 1 }] });
+    expect(JSON.parse(await readFile(settings, 'utf8'))).toEqual({ theme: 'dark', skillOverrides: { other: 'off' } });
+    // A second placement of the same skill, this time behind a settings file nobody can parse: the folder still goes, and the line says why the entry stayed.
+    await writeFile(settings, '{ not json');
+    await store.update((config) => { config.placements[join(home, '.claude', 'skills', 'first')] = { id: first, team: 'team', version: null, scope: { kind: 'global' }, placed_at: '2026-09-04', fingerprint: 'sha256:first' }; });
+    const io = new ScriptedPrompter([], [true]);
+    expect(await run({ ref: 'first', team: 'team', config: store, home }, io)).toMatchObject({ ok: true, value: [{ id: first, removed: 1 }] });
+    expect(io.lines).toContain(`Removed ${join(home, '.claude', 'skills', 'first')} but could not clear its skillOverrides entry: Cannot edit ${settings}: it is not valid JSON. Fix it by hand or move it aside, then re-run.`);
+    expect(await readFile(settings, 'utf8')).toBe('{ not json');
     expect((await store.read()).placements).toEqual({});
   });
 

@@ -1,6 +1,7 @@
 import { invocation } from '../lib/invocation.js';
 import type { WithForm } from '../lib/invocation.js';
 import { basename, dirname, isAbsolute, join } from 'node:path';
+import { homedir } from 'node:os';
 import { ConfigStore, createConfigStore, selectTeam } from '../lib/config.js';
 import { projectPath } from '../lib/projects.js';
 import { AGENT_PATHS, checkoutRootOf } from '../lib/placer/agent-paths.js';
@@ -14,6 +15,8 @@ import { handleSchema, parseOrExplain, sameScope } from '../lib/schema.js';
 import { findSkill, readPerson, readTeam, skillRecords } from '../lib/skills.js';
 import { openTeamRepo, SafeWriteOptions, lockWait } from '../lib/teamRepo.js';
 import { writePersonFile } from '../lib/profile-entry.js';
+import { defaultHookOptions } from '../lib/hook.js';
+import { overrideTargetFor, writeSkillEnabled } from '../lib/skill-overrides.js';
 import { parseRef, placementHome, samePending, teamForReference } from './install.js';
 
 export interface UninstallArgs extends WithForm { from?: string; ref?: string; kind?: 'skill' | 'member' | 'project'; member?: string; project?: string; team?: string; config?: ConfigStore; runner?: Runner; cwd?: string; home?: string; safeWrite?: Pick<SafeWriteOptions, 'deadlineMs' | 'backoff' | 'now' | 'sleep'>; }
@@ -198,7 +201,7 @@ export async function uninstallMany(input: UninstallInput & { targets: readonly 
   const results: UninstalledResult[] = [];
   for (const { target, matching } of selections) {
     if (!matching.length) io.print(`${target.id.slice(0, 8)} is not placed on this machine.`);
-    await removePlacements(input.store, matching, io);
+    await removePlacements(input.store, matching, io, input.home);
     results.push({ id: target.id, team: input.team, removed: matching.length });
   }
   const remaining = Object.values((await input.store.read()).placements);
@@ -227,10 +230,11 @@ export async function uninstallOne(input: UninstallInput & UninstallTarget, io: 
  * The placement ledger is the sole authority for paths that may be removed locally. Returns the
  * ledger keys it processed, so a caller that took its list before a prompt can drop exactly those.
  */
-export async function removePlacements(store: ConfigStore, matching: ReadonlyArray<[string, { fingerprint: string }]>, io: Pick<Prompter, 'print'>): Promise<string[]> {
+export async function removePlacements(store: ConfigStore, matching: ReadonlyArray<[string, { fingerprint: string }]>, io: Pick<Prompter, 'print'>, home: string = homedir()): Promise<string[]> {
   const processed: string[] = [];
   for (const [path, entry] of matching) {
     const root = dirname(path);
+    await clearOverride(store, path, home, io);
     // A placement whose parent is gone (a deleted checkout, an unmounted volume) has nothing to
     // remove, and taking the target lock would recreate the tree: just drop the ledger entry.
     if (!(await exists(root))) { await store.update((fresh) => { delete fresh.placements[path]; }); processed.push(path); continue; }
@@ -243,6 +247,18 @@ export async function removePlacements(store: ConfigStore, matching: ReadonlyArr
     processed.push(path);
   }
   return processed;
+}
+
+/**
+ * A skill this tool switched off (`skill disable`) must not come back off on its next install: drop our
+ * `off` from the settings file that governs the folder. Only `off` is removed; a malformed file is
+ * reported and the uninstall goes on — the folder is what the user asked to remove.
+ */
+async function clearOverride(store: ConfigStore, path: string, home: string, io: Pick<Prompter, 'print'>): Promise<void> {
+  const target = overrideTargetFor(path, home);
+  if (!target) return;
+  try { await writeSkillEnabled({ settingsFile: target.files.write, backupDir: defaultHookOptions(store.root, home).backupDir }, target.name, true); }
+  catch (error) { io.print(`Removed ${path} but could not clear its skillOverrides entry: ${error instanceof Error ? error.message : String(error)}`); }
 }
 
 export async function ledgerScopes(store: ConfigStore, team: string, id: string, peopleScopes: Array<{ kind: 'global' } | { kind: 'project'; project: string }>): Promise<Array<{ kind: 'global' } | { kind: 'project'; project: string }>> {

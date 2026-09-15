@@ -28,8 +28,10 @@ export function defaultHookOptions(storeRoot: string, home = homedir()): Require
   return { settingsFile: join(home, '.claude', 'settings.json'), backupDir: join(storeRoot, 'backups') };
 }
 
-type Settings = Record<string, unknown>;
-const invalidSettings = (path: string): Error => new Error(`Cannot edit ${path}: it is not valid JSON. Fix it by hand or move it aside, then re-run.`);
+export type Settings = Record<string, unknown>;
+/** `edit` names the remedy; a read (the Library listing skill states) only reports the fault. */
+export type SettingsAction = 'edit' | 'read';
+const invalidSettings = (path: string, action: SettingsAction = 'edit'): Error => new Error(`Cannot ${action} ${path}: it is not valid JSON.${action === 'edit' ? ' Fix it by hand or move it aside, then re-run.' : ''}`);
 
 function matchingEntry(value: unknown): boolean {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
@@ -49,22 +51,41 @@ function stripOwnHooks(entry: unknown): unknown | null {
   return hooks.length ? { ...group, hooks } : null;
 }
 
-function parseSettings(source: string, path: string): Settings {
+function parseSettings(source: string, path: string, action: SettingsAction = 'edit'): Settings {
   let parsed: unknown;
-  try { parsed = JSON.parse(source); } catch { throw invalidSettings(path); }
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw invalidSettings(path);
+  try { parsed = JSON.parse(source); } catch { throw invalidSettings(path, action); }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw invalidSettings(path, action);
   const value = parsed as Settings;
-  if ('hooks' in value && (!value.hooks || typeof value.hooks !== 'object' || Array.isArray(value.hooks))) throw invalidSettings(path);
+  if ('hooks' in value && (!value.hooks || typeof value.hooks !== 'object' || Array.isArray(value.hooks))) throw invalidSettings(path, action);
   for (const event of MANAGED_EVENTS) {
     const entries = (value.hooks as Settings | undefined)?.[event];
-    if (entries !== undefined && !Array.isArray(entries)) throw invalidSettings(path);
+    if (entries !== undefined && !Array.isArray(entries)) throw invalidSettings(path, action);
   }
   return value;
 }
 
-async function readSettings(path: string): Promise<{ value: Settings; source?: string }> {
-  try { const source = await readFile(path, 'utf8'); return { value: parseSettings(source, path), source }; }
+async function readSettings(path: string, action: SettingsAction = 'edit'): Promise<{ value: Settings; source?: string }> {
+  try { const source = await readFile(path, 'utf8'); return { value: parseSettings(source, path, action), source }; }
   catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { value: {} }; throw error; }
+}
+
+/** The parsed file, or undefined when it does not exist. Malformed JSON is an error naming the file, never an empty object. */
+export async function readSettingsFile(path: string, action: SettingsAction = 'read'): Promise<Settings | undefined> {
+  const { value, source } = await readSettings(path, action);
+  return source === undefined ? undefined : value;
+}
+
+/**
+ * Read-mutate-write for one Claude Code settings file, on the same terms as the hook entries: the
+ * same parse and refusal, one backup before the first write, an atomic 0600 write. `mutate` returns
+ * false to leave the file untouched (no backup, no write, no file created).
+ */
+export async function editSettings(options: Required<HookOptions>, mutate: (value: Settings) => boolean): Promise<{ changed: boolean; created: boolean }> {
+  const { value, source } = await readSettings(options.settingsFile);
+  if (!mutate(value)) return { changed: false, created: false };
+  await backupOnce(options, source);
+  await writeAtomically(options.settingsFile, value, source !== undefined);
+  return { changed: true, created: source === undefined };
 }
 
 export async function eventHookInstalled(settingsFile: string, event: ManagedEvent): Promise<boolean> {
