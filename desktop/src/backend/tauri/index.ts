@@ -55,7 +55,7 @@ export const cliMachine = z.object({ teams: z.array(z.string()), removedPlacemen
 // §5.3: publish mints an immutable version on main. There is no branch and no pull request any
 // more, so `version` is the `v<N>` it minted — or null when the bytes were identical to one that
 // already exists, which `identicalTo` then names.
-export const cliPublish = z.object({ team: z.string(), id: z.string(), name: z.string(), project: z.string(), version: z.string().nullable(), created: z.boolean(), identicalTo: z.string().nullable(), attachedEvals: z.number(), evalAssets: z.number().default(0), profileAdded: z.boolean(), projectAdded: z.boolean() }).passthrough();
+export const cliPublish = z.object({ team: z.string(), id: z.string(), name: z.string(), project: z.string().nullable(), version: z.string().nullable(), created: z.boolean(), identicalTo: z.string().nullable(), attachedEvals: z.number(), evalAssets: z.number().default(0), profileAdded: z.boolean(), projectAdded: z.boolean() }).passthrough();
 const cliInvite = z.object({ team: z.string(), invited: z.array(z.string()), already: z.array(z.string()).default([]), failed: z.array(z.object({ login: z.string(), error: z.string() })).default([]) }).passthrough();
 const cliTeam = z.object({ team: z.string() }).passthrough();
 const cliTeamMove = z.object({ from: z.string(), to: z.string(), handle: z.string(), restored: z.array(z.string()), missing: z.array(z.string()), failed: z.array(z.object({ name: z.string(), error: z.string() })) }).passthrough();
