@@ -9,6 +9,6 @@
  * Reads only, deliberately. A long-lived process shared with install, sync, eval, connect, publish or
  * uninstall would share the clone writer lock, the shutdown hooks that release it, agent children and
  * per-request working directories — all process-global today. Their latency is git, network or a model
- * anyway, so the per-process saving is noise there. See .planning/specs/2026-09-11-w02b-subsecond.md §2.
+ * anyway, so the per-process saving is noise there (subsecond spec §2).
  */
 export const SERVE_READ_VERBS: readonly string[] = Object.freeze(['status', 'ls', 'eval-report', 'search', 'validate', 'update']);

@@ -97,9 +97,13 @@ it('requires an explicit select choice and renders a consumed join hand-off',asy
  expect(select).not.toBeChecked();expect(within(dialog).getAllByRole('radio')).toHaveLength(2);
  expect(within(dialog).getByRole('button',{name:'Continue'})).toBeDisabled();
  fireEvent.click(select);fireEvent.click(within(dialog).getByRole('button',{name:'Continue'}));
- await screen.findByRole('heading',{name:'Ask your team owner to invite you'});
- expect(screen.queryByText('Setup finished')).toBeNull();expect(screen.queryByRole('textbox')).toBeNull();
+ // The hand-off no longer asserts the person was never invited: an accepted invitation leaves nothing
+ // pending, so the screen asks for the repository it still needs instead of sending them to their owner.
+ await screen.findByRole('heading',{name:'Join an existing team'});
+ expect(screen.queryByText('Setup finished')).toBeNull();
+ expect(screen.getByLabelText('Team repository')).toBeInTheDocument();
  expect(b.prefs.get('launch:consumedWrittenAt','')).toBe(launch.writtenAt);
+ expect(screen.getByRole('button',{name:'Join'})).toBeInTheDocument();
  expect(screen.getByRole('button',{name:'Back to the Library'})).toBeInTheDocument();
 });
 it('select Cancel is a typed cancellation consumed before navigation',async()=>{

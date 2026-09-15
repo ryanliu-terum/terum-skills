@@ -43,8 +43,8 @@ it('does not advertise a release before checking',async()=>{
  open('#/settings/about');expect(await screen.findByText('terum-skills CLI')).toBeVisible();
  expect(screen.queryByText(/available/)).toBeNull();expect(screen.getByRole('button',{name:'Check'})).toBeVisible();
 });
-it('does not offer or describe unknown eval defaults',async()=>{
- open('#/settings/evals');expect(await screen.findByText('terum-skills keeps no default k; the CLI decides per run.')).toBeVisible();
+it('names the CLI default k and offers no unknown-k choice',async()=>{
+ open('#/settings/evals');expect(await screen.findByText('terum-skills runs k = 1 unless a run passes --k, and the app passes none from here yet; k = 3 or more for a receipt you intend to gate on.')).toBeVisible();
  expect(screen.queryByRole('option',{name:'—'})).toBeNull();expect(screen.queryByText(/k = —/)).toBeNull();
  expect(screen.getByText('The app passes no eval flags; terum-skills uses its own defaults.')).toBeVisible();
 });

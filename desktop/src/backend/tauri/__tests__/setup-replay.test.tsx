@@ -128,12 +128,18 @@ it('replays the target-less Join hand-off and consumes the successful request',a
  const dialog=await screen.findByRole('dialog',{name:'Create a team or join one?'});
  fireEvent.click(within(dialog).getByRole('radio',{name:'Join an existing team'}));
  fireEvent.click(within(dialog).getByRole('button',{name:'Continue'}));
- await screen.findByRole('heading',{name:'Ask your team owner to invite you'});
+ await screen.findByRole('heading',{name:'Join an existing team'});
  const output=screen.getByLabelText('Setup output');expect(output.children).toHaveLength(5);
  for(const line of ['Ask the team owner to invite you, then run the command they send you.','It may look like:','npx -y terum-skills@latest setup <org>/<repo>',"If you already have access, use that setup command with your team's repository.",'No changes were made.'])expect(output).toHaveTextContent(line);
- expect(screen.queryByText('Setup finished')).toBeNull();expect(screen.queryByRole('textbox')).toBeNull();
+ expect(screen.queryByText('Setup finished')).toBeNull();
  expect(backend.prefs.get('launch:consumedWrittenAt','')).toBe(STATE.writtenAt);
  expect(fake.spawns.filter(spawn=>spawn.args[0]==='setup').map(spawn=>spawn.args)).toEqual([['setup']]);
+ // The CLI's own closing line is "If you already have access, use that setup command with your team's
+ // repository" — which the app had no way to act on. Naming the repository here is that command: the
+ // second run carries it as the target, so a member with nothing pending is not sent back to their owner.
+ fireEvent.change(screen.getByLabelText('Team repository'),{target:{value:' acme/team '}});
+ fireEvent.click(screen.getByRole('button',{name:'Join'}));
+ await waitFor(()=>expect(fake.spawns.filter(spawn=>spawn.args[0]==='setup').map(spawn=>spawn.args)).toEqual([['setup'],['setup','--','acme/team']]));
 });
 it('replays configured-machine resume because setup intent wins over the existing team',async()=>{
  const {fake,backend}=firstRunReplay('setup-resume',{...STATE,intent:'setup'},true);

@@ -4,7 +4,7 @@ import { version as releaseVersion } from '../../../../../package.json' with { t
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Bridge } from '../bridge';
 import type { Backend } from '../../Backend';
-import { createTauriBackend } from '../index';
+import { BUNDLED_NOTE, createTauriBackend } from '../index';
 import { createMockBackend } from '../../mock';
 import { fakeBridge } from './fake-bridge';
 import { installedReplay } from './installed-fixture';
@@ -170,7 +170,7 @@ it('serves status, settings, library, skill, update, roster and catalog while th
   const b = createTauriBackend(f.bridge);
   expect(await b.surfaces()).toEqual({ divergence: false, status: true, settings: true, onboarding: false, library: true, skill: true, receipts: true, inbox: false, catalog: true, roster: true, update: true, libraryProjects: true, appUpdate: true });
   for (const result of await Promise.all([b.onboarding(), b.inbox()])) {
-    expect(result).toEqual({ ok: false, error: expect.stringContaining('(desktop/GAPS.md)') });
+    expect(result).toEqual({ ok: false, error: expect.stringContaining('the CLI has no verb that returns it') });
   }
   expect(f.spawns).toHaveLength(0);
 });
@@ -318,7 +318,7 @@ it.each(['global','checkout','trailing'] as const)('maps the %s library from loc
   const local={roster:[],skills:[],problems:[],local:[{root:'/home/.claude/skills',scope:'global',rows:[{name:'a',path:'/home/.claude/skills/a',state:'prose is not provenance',tracked:true,placement:{id:'id-a',team:'acme',version:'a'.repeat(40)},health:'up-to-date'}],notOffered:[],problems:[]},{root:'/work/ops/.claude/skills',repoRoot:'/work/ops',scope:'project',rows:[],problems:[]}]};
   const scope=mode==='global'?{kind:'global' as const}:{kind:'checkout' as const,root:'/work/ops'+(mode==='trailing'?'/':'')};
   const f=inventoryBridge({local});const result=await createTauriBackend(f.bridge).library({scope,team:'acme'});
-  expect(result).toMatchObject({ok:true,value:{title:mode==='global'?'1 skill':'0 skills',root:{id:mode==='global'?'global':'/work/ops',kind:scope.kind,label:mode==='global'?'Global':'ops',count:undefined},skills:mode==='global'?[{name:'a',desc:'',project:'Global',installs:'—',installsN:0,installed:'placed',placed:true,path:'/home/.claude/skills/a',updated:null,normalizedGrants:null,grantsHash:null,size:'—',tokensK:0,wlt:null,summary:null,favorite:false,favorites:null,enabled:true,flags:[]}]:[],overview:{skills:mode==='global'?'1':'0',installs:'—',evaluated:'0',attention:'0',meter:{pass_:0,neutral:0,fail:0,total:0},skills_note:'',installs_note:''}}});
+  expect(result).toMatchObject({ok:true,value:{title:mode==='global'?'1 skill':'0 skills',root:{id:mode==='global'?'global':'/work/ops',kind:scope.kind,label:mode==='global'?'Global':'ops',count:undefined},skills:mode==='global'?[{name:'a',desc:'',project:'Global',installs:'—',installsN:0,installed:'placed',placed:true,path:'/home/.claude/skills/a',updated:null,normalizedGrants:null,grantsHash:null,size:'—',tokensK:0,wlt:null,summary:null,favorite:false,favorites:null,enabled:true,flags:[]}]:[],overview:{skills:mode==='global'?'1':'0',installs:'—',evaluated:'0',attention:'0',meter:{pass_:0,neutral:0,fail:0,total:mode==='global'?1:0},skills_note:'',installs_note:''}}});
   expect(f.spawns.map(s=>s.args)).toEqual([['ls','--local']]);
 });
 it('abbreviates a Library card checkout projectRoots entry under the home directory', async () => {
@@ -337,7 +337,7 @@ it('abbreviates a Library card checkout projectRoots entry under the home direct
 
 it('maps the detail body, grants and all install records without fabricating missing values',async()=>{
   const f=inventoryBridge();const result=await createTauriBackend(f.bridge).skill({ref:'acme/a'});
-  expect(result).toMatchObject({ok:true,value:{desc:'Live description',skillMd:{frontmatter:'',body:[],markdown:'# Live body\n'},favorites:null,lines:1,receipt:null,summary:null,wlt:null,evalEstimate:null,incumbentLift:null,reportNumbers:null,scoreFractions:{routesExpected:null,roi:null,quality:null},hygiene:[],hygieneCaption:null,hygieneStatus:'pass',grants:['Bash','Read'],grants_approved:'',history:[],activity:[],files:null,used_by:['MC'],users:[['mira','MC','Global · since 2026-08-01'],['mira','MC','ops · since 2026-08-02']],path:'/home/.claude/skills/a',repo:'acme/team'}});
+  expect(result).toMatchObject({ok:true,value:{desc:'Live description',skillMd:{frontmatter:'',body:[],markdown:'# Live body\n'},favorites:null,lines:1,receipt:null,summary:null,wlt:null,evalEstimate:null,incumbentLift:null,reportNumbers:null,scoreFractions:{routesExpected:null,roi:null},hygiene:[],hygieneCaption:null,hygieneStatus:'pass',grants:['Bash','Read'],grants_approved:'',history:[],activity:[],files:null,used_by:['MC'],users:[['mira','MC','Global · since 2026-08-01'],['mira','MC','ops · since 2026-08-02']],path:'/home/.claude/skills/a',repo:'acme/team'}});
   expect(f.spawns.map(s=>s.args)).toEqual([['status','--team','acme'],['ls','--local'],['ls','--team','acme'],['validate','--team','acme','--','a'],['eval-report','--team','acme','--','a']]);
 });
 // §8.4: a row is `broken` only for a real inspection problem now — `unresolved` is deleted, so a
@@ -801,18 +801,19 @@ it('returns an empty Global only for an empty scan, even with a team inventory',
 it('deduplicates by path and includes only the D2 countable frontmatter reasons',async()=>{
  const drawn=['no-frontmatter','invalid-yaml','illegal-name','name-mismatch','description-missing','unsupported-field','malformed-allowed-tools'];
  const entry=(reason:string)=>({name:reason,path:'/skills/'+reason,reason});
- // The bundled /terum-skills wrapper is a folder the CLI counts and the Library never draws.
+ // The bundled /terum-skills wrapper draws a card like any other folder (§7.4 D16); what it does not
+ // draw is the red flag — see the `bundled` test below.
  const local={roster:[],skills:[],problems:[],local:[{root:'/skills',scope:'global',counts:{skillFolders:12,connectable:0},rows:[],problems:[],notOffered:[...drawn.map(entry),entry('managed-wrapper'),entry('invalid-yaml'),...['symlink','inside-state-root','unreadable','other'].map(entry)]}]};
  const backend=createTauriBackend(inventoryBridge({local,teams:[]}).bridge);
  const result=await backend.library({scope:{kind:'global'}});
  expect(result.value?.skills.map(s=>s.name)).toEqual([...drawn,'managed-wrapper','symlink','inside-state-root','unreadable','other']);
- // Eight folders on disk, seven cards: every number follows the grid, not the CLI's folder count.
+ // Every number follows the grid, which draws every folder the scan returned.
  expect(result.value?.title).toBe('12 skills');
  expect(result.value?.root.count).toBe('12');
  expect(result.value?.overview.skills).toBe('12');
 });
 
-it('keeps the sidebar Global count in step with the grid when a managed wrapper is hidden',async()=>{
+it('keeps the sidebar Global count in step with the grid, wrapper included',async()=>{
  const entry=(reason:string)=>({name:reason,path:'/skills/'+reason,reason});
  const local={roster:[],skills:[],problems:[],local:[{root:'/skills',scope:'global',counts:{skillFolders:3,connectable:1},rows:[{name:'handoff',path:'/skills/handoff',state:'untracked locally',tracked:false,placement:null,health:'untracked'}],problems:[],notOffered:[entry('name-mismatch'),entry('managed-wrapper')]}]};
  const f=fakeBridge((args,emit)=>{
@@ -827,6 +828,24 @@ it('keeps the sidebar Global count in step with the grid when a managed wrapper 
  expect(library.value?.skills.map(s=>s.name)).toEqual(['handoff','name-mismatch','managed-wrapper']);
  expect(library.value?.title).toBe('3 skills');
  expect(library.value?.overview.skills).toBe('3');
+});
+
+it('draws the bundled wrapper as a neutral card, and a real fault as a broken one',async()=>{
+ const wrapper={name:'terum-skills',path:'/skills/terum-skills',reason:'managed-wrapper',detail:'the /terum-skills Claude Code skill that ships with terum-skills; not a team skill',description:'Run a terum-skills CLI verb from inside the session.'};
+ const fault={name:'half-written',path:'/skills/half-written',reason:'invalid-yaml',detail:'SKILL.md frontmatter is not valid YAML',description:null};
+ const local={roster:[],skills:[],problems:[],local:[{root:'/skills',scope:'global',counts:{skillFolders:2,connectable:0},rows:[],problems:[],notOffered:[wrapper,fault]}]};
+ const backend=createTauriBackend(inventoryBridge({local,teams:[]}).bridge);
+ const result=await backend.library({scope:{kind:'global'}});
+ const [bundled,broken]=result.value!.skills;
+ // The wrapper is not a fault: its own description survives, the chip is the muted `bundled` one, and
+ // the card stays out of the attention tile. Its sentence is the one the disabled rows repeat.
+ expect(bundled).toMatchObject({name:'terum-skills',flags:['bundled'],desc:'Run a terum-skills CLI verb from inside the session.'});
+ expect(bundled!.flagText.bundled).toBe(BUNDLED_NOTE);
+ expect(bundled!.indicators.bundled).toEqual({icon:'box',token:'text3',text:BUNDLED_NOTE});
+ // Every other reason keeps the red flag, the path-and-reason body and its place in the count.
+ expect(broken).toMatchObject({name:'half-written',flags:['broken']});
+ expect(broken!.desc).toBe('/skills/half-written · SKILL.md frontmatter is not valid YAML');
+ expect(result.value?.overview.attention).toBe('1');
 });
 
 it('fills a local card from the row the CLI now supplies, and estimates tokens with a tilde',async()=>{

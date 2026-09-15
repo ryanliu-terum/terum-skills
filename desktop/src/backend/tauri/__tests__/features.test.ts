@@ -45,5 +45,5 @@ it('declares reconcile once and gives it exactly one drawn feature consumer',()=
  expect(FEATURE_KEYS.filter(key=>key==='reconcile')).toEqual(['reconcile']);
  const source=readFileSync('src/screens/library/LibraryScreen.tsx','utf8');
  expect(source.match(/features\?\.reconcile/g)).toHaveLength(1);
- expect(source).toContain('Check against the team');
+ expect(source).toContain("{checking?'Syncing…':'Sync'}");
 });

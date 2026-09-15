@@ -16,8 +16,7 @@ name: Release
 # GitHub environment `npm` restricted to main with a required reviewer; branch protection on main.
 # Trusted publishing needs npm >= 11.5.1 on Node >= 22.14 (docs.npmjs.com/trusted-publishers).
 # Since 0.1.6 the desktop app (desktop/) is built in the same run on macOS and Windows runners and attached to
-# the Release before anything is tagged; the npm publish waits on those builds. See .planning/decisions/
-# 2026-09-08-desktop-app-cli-decision-walk.md (D2, D3) and docs/frame-protocol.md.
+# the Release before anything is tagged; the npm publish waits on those builds. See docs/frame-protocol.md.
 
 on:
   workflow_dispatch:

@@ -2,16 +2,28 @@ __pycache__/
 *.pyc
 .DS_Store
 
-# Claude Code harness — machine-local / per-session files (tracked harness lives in .claude/)
-.claude/worktrees/
-.claude/settings.local.json
-.claude/handoff*.md
-.claude/summaries/
-.planning/debug/.bug-counter
-.planning/debug/.bug-counter.lock.d
-
-# Terum capture (personal — do not commit)
+# Agent harness and planning documents are deliberately NOT tracked here.
+# Keep local working copies if you like; they must not be committed.
+CLAUDE.md
 CLAUDE.local.md
+AGENTS.local.md
+
+# .claude/ is untracked except the one file `npm run build` bundles into dist/
+# (scripts/bundle-skill.mjs reads .claude/skills/terum-skills/SKILL.md).
+.claude/*
+!.claude/skills/
+.claude/skills/*
+!.claude/skills/terum-skills/
+
+# .planning/ is untracked except the capture recordings the desktop tests replay
+# (src/commands/__tests__/capture-frames.test.ts and desktop/src/backend/tauri/__tests__/*).
+.planning/*
+!.planning/codex-runs/
+# ...and within it, no Codex run artifacts: prompts, reports, logs and patches.
+.planning/codex-runs/**/*.md
+.planning/codex-runs/**/*.log
+.planning/codex-runs/**/patch_*.py
+.planning/codex-runs/**/codex-report*.json
 
 # npm
 node_modules

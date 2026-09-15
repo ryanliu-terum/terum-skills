@@ -1,1 +1,0 @@
-Invoke the `terum-skills` skill with the verb `install`: run `npx -y terum-skills@latest install …` from inside the session, following that skill's run-here / hand-off rules. Pass through any arguments after the verb: `install $ARGUMENTS`
