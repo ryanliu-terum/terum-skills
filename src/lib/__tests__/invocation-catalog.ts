@@ -1193,9 +1193,9 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
   },
   {
     "file": "README.md",
-    "line": 381,
+    "line": 388,
     "policy": "prose",
-    "pattern": "| | `skill move <path> --to global\\|<project root>` / `skill copy <path> --to global\\|<project root>` / `skill rename <path> --to <new-name>` / `skill delete <path>` / `skill fix <path>` / `skill disable <path>` / `skill enable <path>` | Move, copy, rename, delete, fix, disable, or enable a folder in your Library. Copy leaves the source where it is, so one local skill can sit in two roots at once; the new folder keeps the source's `metadata.id` and is a plain Library folder with no install record of its own. Delete confirms by name; move, copy and rename ask nothing, because each is undone by running the verb the other way and none overwrites anything; fix applies the repairs with one right answer (quote a frontmatter value YAML refuses, set `name` to the folder, set `license` to the team policy, strip invisible characters, clear an executable bit on a non-script) and lists what still needs you. Delete removes an unmodified placement outright (the team repo still holds its bytes; reinstall restores them) and quarantines an edited placement or any folder that is not a placement; `prune` permanently deletes quarantine contents. Disable and enable are the per-machine switch: they write Claude Code's own `skillOverrides` setting for the folder's name (the same key Claude Code's `/skills` menu writes) — `~/.claude/settings.json` for a Global folder, the checkout's `.claude/settings.local.json` for a project folder — so Claude Code stops or resumes loading the skill on this machine while the folder stays where it is. Enable removes only an `off`; a `name-only` or `user-invocable-only` set by hand is left alone |"
+    "pattern": "| | `skill move <path> --to global\\|<project root>` / `skill copy <path> --to global\\|<project root>` / `skill rename <path> --to <new-name>` / `skill delete <path>` / `skill fix <path>` / `skill category <path> --to <name>` / `skill disable <path>` / `skill enable <path>` | Move, copy, rename, delete, fix, recategorise, disable, or enable a folder in your Library. Copy leaves the source where it is, so one local skill can sit in two roots at once; the new folder keeps the source's `metadata.id` and is a plain Library folder with no install record of its own. Delete confirms by name; move, copy and rename ask nothing, because each is undone by running the verb the other way and none overwrites anything; fix applies the repairs with one right answer (quote a frontmatter value YAML refuses, set `name` to the folder, set `license` to the team policy, strip invisible characters, clear an executable bit on a non-script) and lists what still needs you. Delete removes an unmodified placement outright (the team repo still holds its bytes; reinstall restores them) and quarantines an edited placement or any folder that is not a placement; `prune` permanently deletes quarantine contents. Category rewrites `metadata.terum-category` in SKILL.md and stops there — it never publishes, and a published category lives inside an immutable version, so the team keeps showing the one its newest version carries until you publish again (the run prints that command). Any name is accepted: your team's `categories` list is advice, so an off-list value is written and given the same warning `publish` would; a name the team spells differently takes the team's spelling. Disable and enable are the per-machine switch: they write Claude Code's own `skillOverrides` setting for the folder's name (the same key Claude Code's `/skills` menu writes) — `~/.claude/settings.json` for a Global folder, the checkout's `.claude/settings.local.json` for a project folder — so Claude Code stops or resumes loading the skill on this machine while the folder stays where it is. Enable removes only an `off`; a `name-only` or `user-invocable-only` set by hand is left alone |"
   },
   {
     "file": "README.md",
@@ -1999,5 +1999,23 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "line": 4,
     "policy": "prose",
     "pattern": "* Claude Code loads whatever sits in a skills directory, so terum-skills cannot switch a placed copy"
+  },
+  {
+    "file": ".claude/skills/terum-skills/SKILL.md",
+    "line": 63,
+    "policy": "routed",
+    "pattern": "| `skill category <abs-path> --to <name>` | none; the folder is the user's own | show stdout; it rewrites `metadata.terum-category` locally and publishes nothing, so the team keeps showing the category its newest version carries until the user runs the `publish` the output prints. Any name is accepted; an off-list one gets the same advisory warning `publish` gives |"
+  },
+  {
+    "file": "docs/frame-protocol.md",
+    "line": 293,
+    "policy": "prose",
+    "pattern": "`skill category <path> --to <name>` is a one-shot frame write with no ask. It rewrites"
+  },
+  {
+    "file": "docs/frame-protocol.md",
+    "line": 299,
+    "policy": "prose",
+    "pattern": "category inside that version's immutable files), and print the `publish` that would mint the next"
   }
 ];

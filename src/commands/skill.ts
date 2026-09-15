@@ -16,14 +16,16 @@ import { cancelled, failure, fromError, success, type Result } from '../lib/resu
 import { systemRunner, type Runner } from '../lib/runner.js';
 import { FRONTMATTER, isSkillName, type Config } from '../lib/schema.js';
 import { planRepairs } from '../lib/skill-repair.js';
-import { assessHygiene, formatHygieneFindings, HygieneRefused } from '../lib/evals/hygiene.js';
+import { assessHygiene, formatHygieneFindings, HygieneRefused, offListCategory } from '../lib/evals/hygiene.js';
 import { selectTeam } from '../lib/config.js';
-import { readTeam } from '../lib/skills.js';
+import { teamCategory } from '../lib/categorize.js';
+import { declaredCategory, readTeam, skillRecords } from '../lib/skills.js';
+import { versionLabel } from '../lib/versions.js';
 import { inspectSkillSource, scanSkillFolder, sourceFiles } from '../lib/skill-source.js';
-import type { WithForm } from '../lib/invocation.js';
+import { invocation, type WithForm } from '../lib/invocation.js';
 import { uninstallMany } from './uninstall.js';
 
-export interface SkillArgs extends WithForm { kind: 'move' | 'copy' | 'rename' | 'delete' | 'fix'; path: string; to?: string; config?: ConfigStore; home?: string; runner?: Runner }
+export interface SkillArgs extends WithForm { kind: 'move' | 'copy' | 'rename' | 'delete' | 'fix' | 'category'; path: string; to?: string; config?: ConfigStore; home?: string; runner?: Runner }
 export interface SkillResult { kind: SkillArgs['kind']; path: string; destination: string | null; quarantined: string | null; installed: boolean; notices: string[] }
 interface Operation { source: string; ledgerPath?: string; destination: string | null; placement?: Config['placements'][string]; fingerprint: string | null; kept: string | null; destinationExisted: boolean; done: boolean; result?: SkillResult }
 
@@ -117,8 +119,72 @@ async function fix(args: SkillArgs, io: Prompter): Promise<Result<SkillResult>> 
   } finally { await release(); }
 }
 
+/**
+ * `skill category <path> --to <name>`: rewrite one Library folder's `metadata.terum-category`, then stop.
+ *
+ * The category is the one managed field a person legitimately changes their mind about, and
+ * `publish --category` cannot do it: `injectManagedFields` FILLS a missing category and never
+ * overwrites a declared one, so that flag is the default for a folder carrying none, not an editor.
+ * This is the editor, and it edits nothing else — no publish, no network, no write to the team. What
+ * reaches the team stays a decision the user makes afterwards, because a published category lives
+ * inside an immutable `v<N>/SKILL.md` that guard row a′ refuses to modify: the only way to change
+ * what the marketplace shows is a new version. So when the team already holds this name, the run says
+ * what the team still shows and prints the publish that would mint the next one.
+ *
+ * The value is free text on purpose. `team.json.categories` is advice — HYG7 warns on an off-list
+ * value and gates nothing — so an off-list category is written and given HYG7's own sentence beside
+ * it. A value the team already spells differently takes the team's spelling, the rule every other
+ * category source goes through (categorize.ts `teamCategory`), so `--to Ops` lands in the one `ops`
+ * bucket instead of opening a second beside it.
+ */
+async function category(args: SkillArgs, io: Prompter): Promise<Result<SkillResult>> {
+  const requested = args.to?.trim();
+  if (!requested) throw new Error('--to must be a non-empty category name.');
+  const store = args.config ?? createConfigStore();
+  const source = resolve(args.path), name = basename(source);
+  await plainFolder(source);
+  const config = await store.read();
+  const installed = config.placements[source] !== undefined;
+  // Offline and read-only: the clone as the last sync left it. Both things it supplies are advice —
+  // the team's spelling of the category, and what the team's newest version still declares — so no
+  // configured team, an unreadable clone, or a name the team has never seen drops a line rather than
+  // refusing an edit to the user's own folder. The name is the lineage key publish itself joins on.
+  let categories: readonly string[] = [], published: { version: number; category: string } | undefined;
+  try {
+    const [team] = selectTeam(config.teams, undefined, args.form), clone = store.teamClone(team);
+    categories = (await readTeam(clone)).categories;
+    const record = (await skillRecords(clone, team)).find((record) => record.name === name);
+    if (record) published = { version: record.latestVersion, category: record.frontmatter.metadata['terum-category'] };
+  } catch { /* Nothing to compare against; the local edit stands on its own. */ }
+  const chosen = teamCategory(requested, categories) ?? requested;
+  // Hold the folder's lock across read and write, as `fix` does: a concurrent rename must not slip between them.
+  const release = await lockTarget(dirname(source), name);
+  try {
+    if (!(await present(join(source, 'SKILL.md')))) throw new Error(`${source} has no SKILL.md; there is no category to change.`);
+    const fm = await frontmatter(source);
+    if (!fm) throw new Error(`${source}: SKILL.md frontmatter is not readable YAML; run \`${invocation(args.form, 'skill fix', source)}\` first.`);
+    const current = declaredCategory(fm.raw);
+    if (current === chosen) throw new Error(`${name} already declares ${chosen}; nothing to change.`);
+    // A real YAML map for a folder with no `metadata:` block at all: `setIn` walks nodes and treats a
+    // plain `{}` as a scalar, the same shape that used to crash the connect (skills.ts injectManagedFields).
+    if (!YAML.isMap(fm.document.get('metadata'))) fm.document.set('metadata', fm.document.createNode({}));
+    fm.document.setIn(['metadata', 'terum-category'], chosen);
+    await writeFile(join(source, 'SKILL.md'), `---\n${fm.document.toString()}---\n${fm.raw.slice(fm.end)}`);
+    const notices = [current === undefined ? `Set ${name} to ${chosen}; its SKILL.md declared no category.` : `Changed ${name} from ${current} to ${chosen}.`];
+    if (categories.length && teamCategory(chosen, categories) === undefined) notices.push(offListCategory(chosen, categories));
+    if (published?.category === chosen) notices.push(`The team already shows ${chosen}: ${versionLabel(published.version)} declares it too, so there is nothing to publish.`);
+    else if (published) notices.push(
+      `The team still shows ${published.category}: a published category lives inside ${versionLabel(published.version)}'s files, which never change.`,
+      `Publish to mint ${versionLabel(published.version + 1)} with the new category:`,
+      `  ${invocation(args.form, 'publish', name)}`);
+    for (const line of notices) io.print(line);
+    return success({ kind: 'category', path: source, destination: null, quarantined: null, installed, notices });
+  } finally { await release(); }
+}
+
 export async function run(args: SkillArgs, io: Prompter): Promise<Result<SkillResult>> {
   if (args.kind === 'fix') return fix(args, io).catch(fromError);
+  if (args.kind === 'category') return category(args, io).catch(fromError);
   const releases: Array<() => Promise<void>> = [];
   const locked = new Set<string>();
   // One non-waiting lock per folder (retries: 0): a second acquire on a folder this run already holds would refuse itself.
