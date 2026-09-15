@@ -2,6 +2,7 @@ import { afterEach,beforeEach,expect,it,vi } from 'vitest';
 import { cleanup,fireEvent,render,screen,waitFor,within } from '@testing-library/react';
 import { App } from '../../app/App';
 import { Providers } from '../../app/providers';
+import { PublishRunProvider } from '../../app/PublishRunProvider';
 import { useUiStore } from '../../app/store';
 import { BackendContext } from '../../backend';
 import { createMockBackend } from '../../backend/mock';
@@ -220,7 +221,8 @@ it('keeps install and uninstall in the card menu alone, with no button of their 
  expect(document.querySelector('.card-install')).toBeNull();
 });
 
-function openWith(route:string,backend:Backend){location.hash=route;return render(<Providers><BackendContext value={backend}><App/></BackendContext></Providers>);}
+// The publish run lives in `Providers`, above this backend override, so a nearer `PublishRunProvider` keeps the run on the mock (see publishing.test.tsx).
+function openWith(route:string,backend:Backend){location.hash=route;return render(<Providers><BackendContext value={backend}><PublishRunProvider><App/></PublishRunProvider></BackendContext></Providers>);}
 it('preserves checkout root and URL state across search and overview changes',async()=>{
  const root='/Users/you/code/mrf';open('#/library/checkout?root='+encodeURIComponent(root)+'&q=migration&overview=0&__mock=missing-root&theme=light');
  expect(await screen.findByRole('link',{name:'MRF 2'})).toHaveAttribute('aria-current','page');

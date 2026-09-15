@@ -9,6 +9,7 @@ import type { Result, Run } from '../../../backend/types.js';
 import { App } from '../../../app/App.js';
 import * as backendModule from '../../../backend/index.js';
 import { Providers } from '../../../app/providers.js';
+import { PublishRunProvider } from '../../../app/PublishRunProvider';
 
 const runs: Run<unknown>[] = [];
 afterEach(async () => {
@@ -36,7 +37,7 @@ async function open(kind: Kind = 'install', prompts = false) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   location.hash = `#/skill/deploy-check?dialog=${kind}`;
   if (prompts) vi.spyOn(backendModule, 'pickBackend').mockReturnValue(backend);
-  const view = render(prompts ? <Providers><App/></Providers> : <BackendContext value={backend}><QueryClientProvider client={client}><Tooltip.Provider><PromptContext value={async () => true}><PrintContext value={() => undefined}><App/></PrintContext></PromptContext></Tooltip.Provider></QueryClientProvider></BackendContext>);
+  const view = render(prompts ? <Providers><App/></Providers> : <BackendContext value={backend}><QueryClientProvider client={client}><Tooltip.Provider><PromptContext value={async () => true}><PrintContext value={() => undefined}><PublishRunProvider><App/></PublishRunProvider></PrintContext></PromptContext></Tooltip.Provider></QueryClientProvider></BackendContext>);
   await screen.findByRole('dialog');
   return { backend, client, ...view };
 }

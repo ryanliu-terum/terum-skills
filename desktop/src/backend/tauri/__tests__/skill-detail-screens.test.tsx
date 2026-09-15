@@ -5,6 +5,7 @@ import { QueryClient,QueryClientProvider } from '@tanstack/react-query';
 import { Tooltip } from '@base-ui/react/tooltip';
 import { BackendContext } from '../../index';
 import { EvalRunProvider } from '../../../app/EvalRunProvider';
+import { PublishRunProvider } from '../../../app/PublishRunProvider';
 import { createRun } from '../../mock/run';
 import { App } from '../../../app/App';
 import { useUiStore } from '../../../app/store';
@@ -23,7 +24,7 @@ function open(route:string,amend?:AmendResult,launch:'fresh'|'consumed'='fresh')
   if(launch==='consumed')backend.prefs.set('launch:consumedWrittenAt',STATE.writtenAt);
   const client=new QueryClient({defaultOptions:{queries:{retry:false}}});
   location.hash=route;
-  render(<BackendContext value={backend}><QueryClientProvider client={client}><Tooltip.Provider><EvalRunProvider><App/></EvalRunProvider></Tooltip.Provider></QueryClientProvider></BackendContext>);
+  render(<BackendContext value={backend}><QueryClientProvider client={client}><Tooltip.Provider><EvalRunProvider><PublishRunProvider><App/></PublishRunProvider></EvalRunProvider></Tooltip.Provider></QueryClientProvider></BackendContext>);
   return {f,backend,client};
 }
 

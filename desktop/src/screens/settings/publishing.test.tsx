@@ -3,6 +3,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { MachineRemovalProvider } from '../../app/MachineRemovalProvider';
 import { App } from '../../app/App';
 import { Providers } from '../../app/providers';
+import { PublishRunProvider } from '../../app/PublishRunProvider';
 import { useUiStore } from '../../app/store';
 import { BackendContext } from '../../backend';
 import { createMockBackend } from '../../backend/mock';
@@ -14,7 +15,7 @@ import { CATEGORY_ASK, MARKETPLACE_ONLY, PUBLISH_CATEGORY_KEY, PUBLISH_TARGET_KE
 // Settings ▸ Publishing (Teddy, 2026-09-14): Defaults the publish dialogs honour, the Global folders with their state
 // on the team, the CLI's own rules, and the promise that nothing is shared automatically.
 const backend = createMockBackend();
-function open(route: string) { location.hash = route; return render(<Providers><BackendContext value={backend}><MachineRemovalProvider><App/></MachineRemovalProvider></BackendContext></Providers>); }
+function open(route: string) { location.hash = route; return render(<Providers><BackendContext value={backend}><PublishRunProvider><MachineRemovalProvider><App/></MachineRemovalProvider></PublishRunProvider></BackendContext></Providers>); }
 beforeEach(() => { localStorage.clear(); useUiStore.getState().setTheme('dark'); });
 afterEach(() => { cleanup(); location.hash = ''; vi.restoreAllMocks(); });
 async function globalCards(): Promise<SkillCard[]> { const result = await backend.library({ scope: { kind: 'global' } }); if (!result.ok) throw new Error(result.error); return result.value.skills; }
