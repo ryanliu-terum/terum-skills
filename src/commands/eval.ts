@@ -10,7 +10,7 @@ import { ConfigStore, createConfigStore, selectTeam } from '../lib/config.js';
 import type { Config } from '../lib/schema.js';
 import { localReceiptsFor, newestReceiptAt } from '../lib/evals/receipt-store.js';
 import { type AgentApi, DEFAULT_MODEL, preflight as systemPreflight, systemAgent } from '../lib/evals/agent.js';
-import { type ArmSample, type ComparisonRow, loadCase, runCase } from '../lib/evals/execution.js';
+import { type DroppedCase, type ArmSample, type ComparisonRow, loadCase, runCase } from '../lib/evals/execution.js';
 import { generate, type GeneratedAssets } from '../lib/evals/generate.js';
 import { assessHygiene, exemptAuthorEmail, formatHygieneFindings, HygieneRefused, inspectContent, reportHygieneWarnings } from '../lib/evals/hygiene.js';
 import { makeRng } from '../lib/evals/judge.js';
@@ -266,6 +266,7 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
     const rows: ComparisonRow[] = [];
     const arms: ArmSample[] = [];
     const environmentSkips: Record<string, string[]> = {};
+    const droppedCases: Record<string, DroppedCase> = {};
     const caseNames: string[] = [];
     const rng = makeRng(0);
     let expectedRows = 0;
@@ -291,9 +292,10 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
         );
         rows.push(...output.rows); arms.push(...output.arms);
         if (output.skipped) environmentSkips[name] = output.skipped;
+        if (output.dropped) droppedCases[name] = output.dropped;
       }
     }
-    const summary = aggregate(rows, arms, expectedRows, environmentSkips);
+    const summary = aggregate(rows, arms, expectedRows, environmentSkips, droppedCases);
     await writeRunTree(runDir, {
       team: teamName, skill_id: skillId, skill_name: local.name, run_id: runId,
       cc_version: preflight.value.ccVersion, model, judge_model: args.judgeModel ?? model,
@@ -323,6 +325,7 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
       comparisons: summary.comparisons,
       arm_scores: summary.arm_scores,
       environment_skips: summary.environment_skips,
+      dropped_cases: summary.dropped_cases,
       per_case: summary.per_case,
       case_runs: summary.case_runs,
       triggers: triggers === null ? null : { recall: triggers.recall, precision: triggers.precision, tp: triggers.tp, fn: triggers.fn, fp: triggers.fp, tn: triggers.tn },

@@ -63,7 +63,7 @@ it('says there is nowhere to move a folder when Global is the only root, and kee
  expect(within(dialog).queryByLabelText('Move to')).toBeNull();
  expect(within(dialog).getByRole('button',{name:'Move'})).toBeDisabled();
 });
-it('copies the local folder into the other root through skillFile.copy, leaves the source listed, and lands on the copy',async()=>{
+it('copies the local folder into the other root through skillFile.copy, leaves the source listed, and returns to the Library',async()=>{
  const backend=createMockBackend(),copy=vi.spyOn(backend.skillFile,'copy'),install=vi.spyOn(backend,'install'),uninstall=vi.spyOn(backend,'uninstallSkill');
  openWith('#/skill/local?path='+encodeURIComponent('~/.claude/skills/deploy-check')+'&dialog=file-copy',backend);
  const dialog=await screen.findByRole('dialog',{name:'Copy deploy-check'});
@@ -75,9 +75,8 @@ it('copies the local folder into the other root through skillFile.copy, leaves t
  expect(copy).toHaveBeenCalledWith({path:'~/.claude/skills/deploy-check',to:'/Users/you/code/ssm'});
  expect(install).not.toHaveBeenCalled();expect(uninstall).not.toHaveBeenCalled();
  fireEvent.click(within(dialog).getByRole('button',{name:'Done'}));
- await waitFor(()=>expect(location.hash).toBe('#/skill/local?path='+encodeURIComponent('/Users/you/code/ssm/.claude/skills/deploy-check')));
+ await waitFor(()=>expect(location.hash).toBe('#/library/global'));
  // The source is still a card in the root it was copied from: a copy takes nothing away.
- cleanup();openWith('#/library/global',backend);
  expect(await screen.findByTestId('skill-card-deploy-check')).toBeInTheDocument();
 });
 it('shows a failed local move without running install or uninstall',async()=>{
@@ -423,10 +422,19 @@ it.each(['','&'+terumOrigin])('preselects Global in the install dialog whatever 
  expect(within(dialog).getAllByRole('radio')).toHaveLength(4);
  expect(within(dialog).getByRole('radio',{name:/Global.*every session.*~\/.claude\/skills/})).toBeChecked();
 });
-it.each([true,false])('follows the moved folder by path from either Library root (%s)',async project=>{
+// 2026-09-14 (Ajay): a finished move returns to the list it was started from, whichever root that was —
+// the same place delete already went. Following `destination` to /skill/local?path=… made a by-path read
+// the landing page, which answers "Not in your library" until the moved folder is scanned again.
+it.each([true,false])('returns to the Library root the move was started from (project %s)',async project=>{
  const backend=createMockBackend(),dialog=await openMove(backend,project?'/Users/you/code/terum/.claude/skills/deploy-check':'~/.claude/skills/deploy-check');
  fireEvent.click(within(dialog).getByRole('button',{name:'Move'}));fireEvent.click(await within(dialog).findByRole('button',{name:'Done'}));
- await waitFor(()=>expect(location.hash).toBe('#/skill/local?path='+encodeURIComponent('/Users/you/code/ssm/.claude/skills/deploy-check')));
+ await waitFor(()=>expect(location.hash).toBe(project?'#/library/checkout?'+terumOrigin:'#/library/global'));
+ // The board that greets the reader is the Library, never a detail page that cannot find the folder it
+ // just moved; the card is gone from this root because the folder is, which is the truthful answer.
+ expect(await screen.findByText(/^\d+ skills?$/)).toBeVisible();
+ expect(screen.queryByTestId('skill-card-deploy-check')).toBeNull();
+ expect(screen.queryByText('Not in your library')).toBeNull();
+ expect(screen.queryByText(/^Couldn['’]t (find|read)/)).toBeNull();
 });
 // hybrid review r1 (high): after a successful move the dialog showed Done, but Escape or an outside
 // click fired onClose, so the page stayed on ?path=<old> and reported the moved folder as not in the
@@ -435,7 +443,7 @@ it('hands a finished file operation on when the dialog is dismissed with Escape'
  const backend=createMockBackend(),dialog=await openMove(backend);fireEvent.click(within(dialog).getByRole('button',{name:'Move'}));
  await within(dialog).findByRole('button',{name:'Done'});
  fireEvent.keyDown(document.activeElement??document.body,{key:'Escape'});
- await waitFor(()=>expect(location.hash).toBe('#/skill/local?path='+encodeURIComponent('/Users/you/code/ssm/.claude/skills/deploy-check')));
+ await waitFor(()=>expect(location.hash).toBe('#/library/global'));
 });
 // A cancelled or refused CLI result lands in useWorkflow.notice and closes the dialog; the dialog owned
 // the workflow, so the notice unmounted with it and the user saw nothing (AGENTS.md: a Result.ok===false

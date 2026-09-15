@@ -41,6 +41,8 @@ export interface LsReceipt {
   execution_status: Receipt['execution_status'];
   expected_rows: number;
   scored_rows: number;
+  /** Eval-gen D4: why a partial receipt is partial; absent on receipts written before D4. */
+  dropped_cases?: Receipt['dropped_cases'];
   comparisons: Receipt['comparisons'];
   arm_scores: Receipt['arm_scores'];
   provenance: Pick<Receipt['provenance'], 'model' | 'k' | 'cc_version' | 'timestamp' | 'runner_handle'>;
@@ -209,7 +211,7 @@ async function cardReceipt(clone: string, id: string, versions: readonly SkillVe
   if (selected.eval === null) return { ...fields, receipt: null };
   const found = selected.eval.receipt.receipt;
   const { model, k, cc_version, timestamp, runner_handle } = found.provenance;
-  return { ...fields, receipt: { run_id: found.run_id, verdict: found.verdict, execution_status: found.execution_status, expected_rows: found.expected_rows, scored_rows: found.scored_rows, comparisons: found.comparisons, arm_scores: found.arm_scores, provenance: { model, k, cc_version, timestamp, runner_handle } } };
+  return { ...fields, receipt: { run_id: found.run_id, verdict: found.verdict, execution_status: found.execution_status, expected_rows: found.expected_rows, scored_rows: found.scored_rows, ...(found.dropped_cases === undefined ? {} : { dropped_cases: found.dropped_cases }), comparisons: found.comparisons, arm_scores: found.arm_scores, provenance: { model, k, cc_version, timestamp, runner_handle } } };
 }
 async function showMember(handle: string | undefined, people: Awaited<ReturnType<typeof readPeople>>, skills: readonly LsSkill[], io: Prompter, roster: LsResult['roster'], projects: NonNullable<LsResult['projects']>, problems: LsResult['problems']): Promise<Result<LsResult>> {
   if (!handle) throw new Error('Specify a member handle.');

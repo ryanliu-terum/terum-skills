@@ -1,10 +1,10 @@
-import { mkdir, mkdtemp, readFile, stat, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { AgentRunError, Transcript, type AgentApi } from '../agent.js';
-import { ContaminationError, decide, loadCase, missingRequirements, runCase, seedSandbox, type EvalCase } from '../execution.js';
+import { casePathViolation, ContaminationError, decide, dryRunCase, loadCase, missingRequirements, runCase, seedSandbox, type EvalCase } from '../execution.js';
 
 let scratch: string;
 beforeEach(async () => { scratch = await mkdtemp(join(tmpdir(), 'exec-')); });
@@ -101,6 +101,51 @@ describe('sandbox seeding (§4.3, strictly in order)', () => {
     // Non-root .claude directories are ordinary fixture content and stay allowed.
     const sandbox = await seedSandbox(caseOf({ files: { 'docs/.claude/note.md': 'x' } }), { caseDir: scratch, skillName: 's', skillDir: null, scratch });
     expect(existsSync(join(sandbox, 'docs', '.claude', 'note.md'))).toBe(true);
+  });
+
+  it('D2: one shared path predicate — the same reasons seedSandbox throws, as data for the generator', () => {
+    expect(casePathViolation('/etc/evil')).toBe('unsafe file path in case: /etc/evil');
+    expect(casePathViolation('a/../b')).toBe('unsafe file path in case: a/../b');
+    expect(casePathViolation('./.claude/settings.json')).toBe('unsafe file path in case (seeds .claude): ./.claude/settings.json');
+    expect(casePathViolation('docs/.claude/note.md')).toBeNull();
+    expect(casePathViolation('bin/codex')).toBeNull();
+  });
+
+  it('D1/D3: a bin/ stub is made executable so a setup that calls it can start', async () => {
+    const sandbox = await seedSandbox(caseOf({ files: { 'bin/codex': '#!/bin/sh\necho ok\n' }, setup: './bin/codex > out.txt' }), { caseDir: scratch, skillName: 's', skillDir: null, scratch });
+    expect((await stat(join(sandbox, 'bin', 'codex'))).mode & 0o111).toBeTruthy();
+    expect(await readFile(join(sandbox, 'out.txt'), 'utf8')).toBe('ok\n');
+  });
+
+  it('D3: dryRunCase reports the run-time abort message for a case that cannot start, and leaves nothing behind', async () => {
+    expect(await dryRunCase(caseOf({ setup: 'touch ok.txt' }), scratch)).toBeNull();
+    expect(await dryRunCase(caseOf({ setup: 'Assume codex is logged in.' }), scratch)).toMatch(/^case 'c': setup failed \(rc=127\): .*Assume.*not found/s);
+    expect(await dryRunCase(caseOf({ files: { '/tmp/x': 'x' } }), scratch)).toBe("case 'c': unsafe file path in case: /tmp/x");
+    expect((await readdir(scratch)).filter((entry) => entry.startsWith('dry-'))).toEqual([]);
+  });
+});
+
+describe('cases that never start (eval-gen D4)', () => {
+  const untouchable: AgentApi = {
+    runAgent: () => { throw new Error('must not run'); },
+    askJson: () => { throw new Error('must not run'); },
+  };
+  const options = () => ({ k: 1, skillName: 's', caseDir: scratch, arms: { candidate: scratch }, scratch, transcriptDir: scratch });
+
+  it('a failing setup drops the case with kind setup and the shell error, scoring nothing', async () => {
+    const lines: string[] = [];
+    const out = await runCase({ agent: untouchable, rng: () => 0.5, log: (line) => lines.push(line) }, caseOf({ setup: 'No AGENTS.md exists.' }), options());
+    expect(out.rows).toEqual([]);
+    expect(out.arms).toEqual([]);
+    expect(out.dropped).toMatchObject({ kind: 'setup', detail: expect.stringMatching(/^setup failed \(rc=127\)/) });
+    expect(lines[0]).toMatch(/^ {2}c: ABORTED \(setup\) — setup failed/);
+  });
+
+  it('an unstageable case drops with kind staging instead of killing the eval', async () => {
+    const out = await runCase({ agent: untouchable, rng: () => 0.5 }, caseOf({ files: { '/tmp/scratch/findings.json': '{}' } }), options());
+    expect(out).toMatchObject({ rows: [], arms: [], dropped: { kind: 'staging', detail: 'unsafe file path in case: /tmp/scratch/findings.json' } });
+    const fixture = await runCase({ agent: untouchable, rng: () => 0.5 }, caseOf({ fixture: 'no-such-dir' }), options());
+    expect(fixture.dropped).toMatchObject({ kind: 'staging', detail: expect.stringContaining('fixture dir not found') });
   });
 });
 
@@ -291,7 +336,8 @@ describe('the three-arm matrix (§7.1 / §7.3)', () => {
       { agent: armAwareAgent('s'), rng: () => 0.9 }, caseOf({ setup: 'exit 3' }),
       { k: 1, skillName: 's', caseDir: scratch, arms: { candidate: skillDir }, scratch, transcriptDir: scratch },
     );
-    expect(output).toEqual({ rows: [], arms: [] });
+    // D4: the hole is named on the way out, so the receipt can say why it is partial.
+    expect(output).toEqual({ rows: [], arms: [], dropped: { kind: 'setup', detail: 'setup failed (rc=3): ' } });
   });
 
   it('refuses the run when the skill under eval leaks into the baseline arm (§7.3)', async () => {
