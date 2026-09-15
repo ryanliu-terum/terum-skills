@@ -65,7 +65,24 @@ npx -y terum-skills@latest app
 
 There is no install step — `npx -y` fetches and runs the latest release every time. (Prefer a permanent `terum-skills` binary? See [Installing, updating, uninstalling](#installing-updating-uninstalling).)
 
-Setup also offers the `/terum-skills` Claude Code skill, placed at `~/.claude/skills/terum-skills/`, so Claude Code can run these commands for you inside a session (and hand you the ones that need a terminal). It ships inside the npm package; re-running `npx -y terum-skills@latest setup` after an update refreshes it. The session hook also refreshes an outdated managed copy and announces the update; it leaves a foreign copy alone.
+Setup also offers eight skills for Claude Code and Codex, so either assistant can run these commands for you inside a session and show the result as a board — see [From Claude Code and Codex](#from-claude-code-and-codex).
+
+## From Claude Code and Codex
+
+Setup places eight skills at `~/.claude/skills/<name>/` for Claude Code and `~/.codex/skills/<name>/` for Codex (when `~/.codex` exists), so either assistant can run terum-skills for you inside a session and show the result as a Markdown board. They ship inside the npm package; re-running `npx -y terum-skills@latest setup` after an update refreshes them, and the session hook refreshes or adds them on a machine that already holds one. Invoke them as `/name` in Claude Code and `$name` in Codex:
+
+| Skill | What it runs |
+|---|---|
+| `list-skills [--local\|--team]` | `ls --local --format md` and `ls --format md` — your Library and the team Marketplace |
+| `skill-info <name>` | `ls skill <name> --format md`, then `eval-report <name> --format md` for a team skill |
+| `search-skills <term>` | `search <term> --format md` |
+| `eval <skill> [flags]` | `eval <skill> --format md`, after confirming the cost with you |
+| `eval-report <skill>` | `eval-report <skill> --format md` |
+| `skill-status` | `status --format md`, then `update --format md` |
+| `sync-skills` | `sync --format md` |
+| `terum-skills <verb …>` | any verb with `--format md`; the verbs that ask a question are handed to your terminal |
+
+Uninstall removes the copies it placed; a folder at one of those names that is not the bundled skill is left alone.
 
 ## How it works
 
@@ -357,7 +374,7 @@ Every rule above traces back to something we measured rather than assumed: that 
 
 - **Default (no install):** every documented command runs as `npx -y terum-skills@latest <verb>`. npx fetches the newest release on each run, so there is nothing to install, update, or add to PATH. The forms below are optional alternatives that give you a bare `terum-skills` binary.
 - **Update:** `npx -y terum-skills@latest update` prints this copy's version, the newest advertised release, and the exact command that updates *this* copy. It never runs a package manager. `npx -y terum-skills@latest` fetches the newest release every run and updates nothing else.
-- **Uninstall:** `npx -y terum-skills@latest uninstall` removes your team from this machine (placed skills, clone, cache), the session-start hook, the `/terum-skills` Claude Code skill it placed, and `~/.terum/skills` except its recovery data (`quarantine/`, `backups/`) and local eval runs (`evals/`); it also removes the downloaded desktop app bundle (`app/`), then prints the one package-manager line to finish. `uninstall-skill <skill>` removes one skill.
+- **Uninstall:** `npx -y terum-skills@latest uninstall` removes your team from this machine (placed skills, clone, cache), the session-start hook, the terum-skills skills it placed for Claude Code and Codex, and `~/.terum/skills` except its recovery data (`quarantine/`, `backups/`) and local eval runs (`evals/`); it also removes the downloaded desktop app bundle (`app/`), then prints the one package-manager line to finish. `uninstall-skill <skill>` removes one skill.
 
 Release notices appear last on stderr, at most once per release per day, and are suppressed in CI, when stderr is piped, or when `NO_UPDATE_NOTIFIER` or `TERUM_SKILLS_NO_UPDATE_NOTIFIER` is set. Version checks read git tags from this repository only, never the npm registry, and only when a configured team is on GitHub.
 
@@ -371,7 +388,7 @@ Release notices appear last on stderr, at most once per release per day, and are
 
 | Group | Command | What it does |
 |---|---|---|
-| Team | `setup [<org>/<repo>] [--no-existing]` | Create-or-join wizard; sequences the verbs below, checks existing Library folders against the team, then offers the session hook and the `/terum-skills` Claude Code skill; `--no-existing` skips that check |
+| Team | `setup [<org>/<repo>] [--no-existing]` | Create-or-join wizard; sequences the verbs below, checks existing Library folders against the team, then offers the session hook and the terum-skills skills for Claude Code and Codex; `--no-existing` skips that check |
 | | `login` | Check `gh` and record your name, email, and handle |
 | | `team create` / `team join` / `team leave` / `team move <org>/<repo>` / `team remove <handle>` | Manage the repo and its roster; `move` follows a team whose repository was recreated elsewhere (leave, join, place the shared skills again) |
 | | `invite <github-user>…` | Grant repo access and print the join line |

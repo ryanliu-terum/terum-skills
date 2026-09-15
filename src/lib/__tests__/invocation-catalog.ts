@@ -821,9 +821,57 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
   },
   {
     "file": "README.md",
-    "line": 68,
+    "line": 72,
     "policy": "fixed",
-    "pattern": "Setup also offers the `/terum-skills` Claude Code skill, placed at `~/.claude/skills/terum-skills/`, so Claude Code can run these commands for you inside a session (and hand you the ones that need a terminal). It ships inside the npm package; re-running `npx -y terum-skills@latest setup` after an update refreshes it. The session hook also refreshes an outdated managed copy and announces the update; it leaves a foreign copy alone."
+    "pattern": "Setup places eight skills at `~/.claude/skills/<name>/` for Claude Code and `~/.codex/skills/<name>/` for Codex (when `~/.codex` exists), so either assistant can run terum-skills for you inside a session and show the result as a Markdown board. They ship inside the npm package; re-running `npx -y terum-skills@latest setup` after an update refreshes them, and the session hook refreshes or adds them on a machine that already holds one. Invoke them as `/name` in Claude Code and `$name` in Codex:"
+  },
+  {
+    "file": "README.md",
+    "line": 76,
+    "policy": "prose",
+    "pattern": "| `list-skills [--local\\|--team]` | `ls --local --format md` and `ls --format md` — your Library and the team Marketplace |"
+  },
+  {
+    "file": "README.md",
+    "line": 77,
+    "policy": "prose",
+    "pattern": "| `skill-info <name>` | `ls skill <name> --format md`, then `eval-report <name> --format md` for a team skill |"
+  },
+  {
+    "file": "README.md",
+    "line": 78,
+    "policy": "prose",
+    "pattern": "| `search-skills <term>` | `search <term> --format md` |"
+  },
+  {
+    "file": "README.md",
+    "line": 79,
+    "policy": "prose",
+    "pattern": "| `eval <skill> [flags]` | `eval <skill> --format md`, after confirming the cost with you |"
+  },
+  {
+    "file": "README.md",
+    "line": 80,
+    "policy": "prose",
+    "pattern": "| `eval-report <skill>` | `eval-report <skill> --format md` |"
+  },
+  {
+    "file": "README.md",
+    "line": 81,
+    "policy": "prose",
+    "pattern": "| `skill-status` | `status --format md`, then `update --format md` |"
+  },
+  {
+    "file": "README.md",
+    "line": 82,
+    "policy": "prose",
+    "pattern": "| `sync-skills` | `sync --format md` |"
+  },
+  {
+    "file": "README.md",
+    "line": 83,
+    "policy": "prose",
+    "pattern": "| `terum-skills <verb …>` | any verb with `--format md`; the verbs that ask a question are handed to your terminal |"
   },
   {
     "file": "README.md",
@@ -887,15 +935,15 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
   },
   {
     "file": "README.md",
-    "line": 360,
+    "line": 376,
     "policy": "fixed",
-    "pattern": "- **Uninstall:** `npx -y terum-skills@latest uninstall` removes your team from this machine (placed skills, clone, cache), the session-start hook, the `/terum-skills` Claude Code skill it placed, and `~/.terum/skills` except its recovery data (`quarantine/`, `backups/`) and local eval runs (`evals/`); it also removes the downloaded desktop app bundle (`app/`), then prints the one package-manager line to finish. `uninstall-skill <skill>` removes one skill."
+    "pattern": "- **Uninstall:** `npx -y terum-skills@latest uninstall` removes your team from this machine (placed skills, clone, cache), the session-start hook, the terum-skills skills it placed for Claude Code and Codex, and `~/.terum/skills` except its recovery data (`quarantine/`, `backups/`) and local eval runs (`evals/`); it also removes the downloaded desktop app bundle (`app/`), then prints the one package-manager line to finish. `uninstall-skill <skill>` removes one skill."
   },
   {
     "file": "README.md",
-    "line": 374,
+    "line": 390,
     "policy": "prose",
-    "pattern": "| Team | `setup [<org>/<repo>] [--no-existing]` | Create-or-join wizard; sequences the verbs below, checks existing Library folders against the team, then offers the session hook and the `/terum-skills` Claude Code skill; `--no-existing` skips that check |"
+    "pattern": "| Team | `setup [<org>/<repo>] [--no-existing]` | Create-or-join wizard; sequences the verbs below, checks existing Library folders against the team, then offers the session hook and the terum-skills skills for Claude Code and Codex; `--no-existing` skips that check |"
   },
   {
     "file": "README.md",
