@@ -292,7 +292,12 @@ function inventoryCard(row: InventorySkill, local: Inventory, team: string, feat
   // no receipt at its current version keeps summary null, which the card draws as '—'.
   const summary = receiptSummary(row.receipt);
   const provenance = row.receipt ? { model: row.receipt.provenance.model, k: row.receipt.provenance.k, ccVersion: row.receipt.provenance.cc_version, runner: row.receipt.provenance.runner_handle, when: row.receipt.provenance.timestamp.slice(0, 10) } : null;
-  const problem = placements.find(r => r.problem !== undefined || r.health === 'unknown' || r.health === 'gone-from-repo');
+  // `unknown` is NOT a problem: since the CLI narrowed its health vocabulary (src/commands/ls.ts
+  // `healthOf`), an unmodified placement whose fingerprint matches the ledger reports `unknown`, and
+  // an edited one reports `local-changed`. Flagging `unknown` marked every clean install broken and
+  // left the edited ones clean — exactly backwards. Only an explicit problem or a skill the team
+  // dropped is a problem.
+  const problem = placements.find(r => r.problem !== undefined || r.health === 'gone-from-repo');
   // Only ledger versions may annotate the catalogue. Multiple differing placements have no
   // single truthful version; keep the annotation null until a per-root display is specified.
   const recordedVersions = ledger.filter(p => p.id === row.id && p.team === team).map(p => p.version ?? null);
