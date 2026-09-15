@@ -39,7 +39,7 @@ import { isUnderRoot, samePath } from '../../lib/skill-path';
 
 /**
  * The real adapter: every long verb is one `terum-skills --frames <verb>` process (run.ts). What the CLI has
- * no verb for yet is answered honestly with a failing Result that names GAPS.md, so the screens render their
+ * no verb for yet is answered honestly with a failing Result saying so, so the screens render their
  * drawn error states instead of fixture data pretending to be real. Mappings between the CLI's result shapes
  * (src/commands/*.ts) and the seam's DTOs (../types) are here and nowhere else.
  */
@@ -226,7 +226,7 @@ function notOfferedCard(entry:NotOffered,section:LocalSection,home:string):Skill
 }
 function localDetail(card:SkillCard,section:LocalSection,path:string,home:string):SkillDetail {
   const pathLabel=abbreviateHome(path,home);
-  return {...card,desc_long:card.desc,size_bytes:'—',team:null,skillRef:'local:'+path,root:'Global',owningRoot:owningRootOf(section),installScopes:[],projectNames:null,favorites:null,lines:null,hygieneCaption:null,hygieneStatus:null,hygieneWhen:null,path,pathLabel,repo:null,repoPath:pathLabel,version:'—',version_full:null,scope:section.scope==='global'?'Global':labelOf(section),installs_n:0,used_by:[],users:[],author:{name:'',handle:'',role:'',initials:''},files:null,grants_approved:'',receipt:null,history:[],activity:[],hygiene:[],skillMd:{frontmatter:(section.rows.find(row=>samePath(row.path,path))??section.notOffered?.find(row=>samePath(row.path,path)))?.frontmatter??'',body:[],markdown:(section.rows.find(row=>samePath(row.path,path))??section.notOffered?.find(row=>samePath(row.path,path)))?.body??null},evalEstimate:null,evalEstimateText:'',evalEstimateTip:'',evalCommand:'npx -y terum-skills@latest eval '+card.name,shareCommand:'npx -y terum-skills@latest publish '+card.name,incumbentLift:null,reportNumbers:null,scoreFractions:{routesExpected:null,roi:null,quality:null},method:'',versions:null,latestState:'none',invalidReceiptFile:null,evalReportError:null,localRuns:[],unidentifiedLocal:null,viewerHandle:null};
+  return {...card,desc_long:card.desc,size_bytes:'—',team:null,skillRef:'local:'+path,root:'Global',owningRoot:owningRootOf(section),installScopes:[],projectNames:null,favorites:null,lines:null,hygieneCaption:null,hygieneStatus:null,hygieneWhen:null,path,pathLabel,repo:null,repoPath:pathLabel,version:'—',version_full:null,scope:section.scope==='global'?'Global':labelOf(section),installs_n:0,used_by:[],users:[],author:{name:'',handle:'',role:'',initials:''},files:null,grants_approved:'',receipt:null,history:[],activity:[],hygiene:[],skillMd:{frontmatter:(section.rows.find(row=>samePath(row.path,path))??section.notOffered?.find(row=>samePath(row.path,path)))?.frontmatter??'',body:[],markdown:(section.rows.find(row=>samePath(row.path,path))??section.notOffered?.find(row=>samePath(row.path,path)))?.body??null},evalEstimate:null,evalEstimateText:'',evalEstimateTip:'',evalCommand:'npx -y terum-skills@latest eval '+card.name,shareCommand:'npx -y terum-skills@latest publish '+card.name,incumbentLift:null,reportNumbers:null,scoreFractions:{routesExpected:null,roi:null},method:'',versions:null,latestState:'none',invalidReceiptFile:null,evalReportError:null,localRuns:[],unidentifiedLocal:null,viewerHandle:null};
 }
 /** A bare name that is not in the team may still name a folder on this machine — one nobody has
  *  shared, or one whose frontmatter the CLI could not parse. Deep links, bookmarks and hand-typed
@@ -352,7 +352,7 @@ function inventoryDetail(row: InventorySkill, local: Inventory, team: InventoryT
     unidentifiedLocal: card.installed === 'placed' ? null : unidentifiedLocal(local, row.name, features, home), viewerHandle: team.handle,
     used_by: [...new Map(installers.map(person => [person.handle, initials(person.displayName)])).values()], users: installers.map(person => [person.handle, initials(person.displayName), `${person.scope.kind === 'global' ? 'Global' : person.scope.project}${person.since ? ` · since ${person.since.slice(0, 10)}` : ''}`]),
     author: { name, handle, role: '', initials: initials(name) }, repo, repoPath: `skills/${row.name}`, path, pathLabel: path === null ? '—' : abbreviateHome(path, home), grants_approved: '', versions:null,latestState:'none',invalidReceiptFile:null,localRuns:[],evalReportError:null, receipt: null, history: [], activity: [], hygiene: [], hygieneCaption: null, hygieneStatus: validation.value === undefined ? null : validation.ok && validation.value.findings === 0 ? 'pass' : 'fail', hygieneWhen: null,
-    skillMd: { frontmatter: row.frontmatter ?? '', body: [], markdown: row.body ?? null }, evalEstimate: null, evalEstimateText: '', evalEstimateTip: '', evalCommand: `npx -y terum-skills@latest eval ${row.name}`, incumbentLift: null, reportNumbers: null, scoreFractions: { routesExpected: null, roi: null, quality: null }, method: '',
+    skillMd: { frontmatter: row.frontmatter ?? '', body: [], markdown: row.body ?? null }, evalEstimate: null, evalEstimateText: '', evalEstimateTip: '', evalCommand: `npx -y terum-skills@latest eval ${row.name}`, incumbentLift: null, reportNumbers: null, scoreFractions: { routesExpected: null, roi: null }, method: '',
   };
 }
 
@@ -530,7 +530,7 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
     return value.ok ? value : { ...value, error: abbreviateHome(value.error, await home()) };
   }
   const fail = (error: string) => result<never>({ ok: false, error });
-  const gap = (what: string) => fail(`${what} is not available from terum-skills yet: the CLI has no verb that returns it (desktop/GAPS.md). The terminal has everything the app shows here.`);
+  const gap = (what: string) => fail(`${what} is not available from terum-skills yet: the CLI has no verb that returns it. The terminal has everything the app shows here.`);
   const listeners = new Set<(source: ChangeSource) => void>();
   const reads = new Map<string, { promise: Promise<{ result: Result<unknown>; lines: string[] }>; at: number; stale: boolean; refreshing: boolean }>();
   // Every mutation evicts every cached read, and that is deliberate. A targeted map would have to know which

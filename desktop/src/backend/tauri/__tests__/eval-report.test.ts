@@ -30,7 +30,8 @@ it('maps the stated receipt values and formats their units without fixture const
  expect(r.value.summary).toEqual({w:6,l:1,t:2,n:9,lift:56,verdict:'PASS',partial:null,signP:'0.125'});
  expect(r.value.reportNumbers).toEqual({holes:0,nRounds:9,triggerTotal:6});
  expect(r.value.receipt).toMatchObject({model:'sonnet',cc:'2.1.250',runner:'mira',timestamp:'2026-09-09 01:00 UTC',catalog:0,per_case:[],arm:{candidate:0.81,baseline:0.45,incumbent:null},eff:{candidate:['2','61 s','$0.40'],baseline:['3','90 s','$0.50'],incumbent:null}});
- expect(r.value.scoreFractions).toEqual({routesExpected:4,roi:[0.8,1],quality:[0.81,0.45]});
+ expect(r.value.scoreFractions).toEqual({routesExpected:4,roi:[0.8,1]});
+ expect(r.value.receipt).not.toHaveProperty('case_rows');expect(r.value.receipt).not.toHaveProperty('case_runs');
  expect(r.value.evalEstimate).toEqual({cases:3,k:3,arms:2,runs:18,minutes:25,dollars:8,model:'sonnet'});
  expect(r.value.evalEstimateText).toMatch(/arm-run pricing from the last receipt\.$/);
 });
@@ -44,6 +45,15 @@ it('states the receipt numbers at display precision, never a raw float',async()=
  expect(r.value.receipt?.results).toBe('Arm scores: candidate 0.56, baseline 0.11, incumbent \u2014.');
  for(const text of [r.value.receipt?.abstract,r.value.receipt?.results,r.value.receipt?.trigger_text,r.value.receipt?.coverage,r.value.receipt?.efficiency_text])expect(text).not.toMatch(/\d\.\d{4,}/);
  expect(r.value.summary?.lift).toBe(33);
+});
+it('rev 20: maps the receipt\'s per-case rows and tally verbatim, and states them in §2 at k=1 and k>1',async()=>{
+ const rows=[{case:'one',rep:0,arms:{candidate:{passed:true,checks:[['file_exists:out.md',true]]},baseline:{passed:false,checks:[['file_exists:out.md',false]]}},outcomes:{'candidate-vs-baseline':'win'}}];
+ const latest={...receipt(),per_case:rows,case_runs:{candidate:{passed:1,total:3},baseline:{passed:0,total:3}},provenance:{...receipt().provenance,k:1}};
+ const r=await adapter({...report(),latest}).backend.evalReport({ref:'deploy-check'});if(!r.ok)throw new Error(r.error);
+ expect(r.value.receipt?.case_rows).toEqual(rows);expect(r.value.receipt?.case_runs).toEqual({candidate:{passed:1,total:3},baseline:{passed:0,total:3}});
+ expect(r.value.receipt?.results).toBe('Candidate passed 1 of 3 cases, baseline 0 of 3. A case passes an arm when every deterministic check passes. Check share by arm: candidate 0.81, baseline 0.45.');
+ const three=await adapter({...report(),latest:{...latest,provenance:{...latest.provenance,k:3},case_runs:{candidate:{passed:2,total:9},baseline:{passed:0,total:9}}}}).backend.evalReport({ref:'deploy-check'});
+ expect(three.value?.receipt?.results).toBe('Candidate passed 2 of 9 case-runs (3 cases × 3 reps), baseline 0 of 9. A case-run passes an arm when every deterministic check passes. Check share by arm: candidate 0.81, baseline 0.45.');
 });
 it('keeps ROI fractions null when an arm cost is missing',async()=>{
  const latest=receipt();latest.efficiency.candidate.cost_usd=null as unknown as number;

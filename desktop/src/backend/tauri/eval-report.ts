@@ -14,10 +14,15 @@ const comparison = z.object({ win:z.number(), loss:z.number(), tie:z.number(), n
 const efficiency = z.object({ turns:z.number().nullish(), duration_ms:z.number().nullish(), cost_usd:z.number().nullish() }).passthrough();
 const executionStatus = z.enum(['complete','partial','failed']);
 const verdict = z.enum(['PASS','NEUTRAL','FAIL']);
+/** Eval-engine §5.3 rev 20: the receipt's own per-(case × rep) verdicts and per-arm tally. Both optional — a receipt written before rev 20 has neither, and the report says so instead of deriving them. */
+const caseRunArm = z.object({ passed:z.boolean().nullable(), checks:z.array(z.tuple([z.string(),z.boolean()])) }).passthrough();
+const caseRow = z.object({ case:z.string(), rep:z.number(), arms:z.record(z.string(),caseRunArm), outcomes:z.record(z.string(),z.enum(['win','loss','tie'])) }).passthrough();
+const caseRuns = z.record(z.string(), z.object({ passed:z.number(), total:z.number() }).passthrough());
 export const cliReceipt = z.object({
  path:z.string(), version:z.string().nullable(), run_id:z.string(), verdict, execution_status:executionStatus,
  expected_rows:z.number(), scored_rows:z.number(), attribution:z.string(),
  comparisons:z.record(z.string(),comparison), arm_scores:z.record(z.string(),z.number().nullable()),
+ per_case:z.array(caseRow).optional(), case_runs:caseRuns.optional(),
  triggers:z.object({tp:z.number(),fn:z.number(),fp:z.number(),tn:z.number(),recall:z.number().nullable(),precision:z.number().nullable()}).passthrough().nullable(),
  efficiency:z.record(z.string(),efficiency),
  provenance:z.object({timestamp:z.string(),runner_handle:z.string(),model:z.string(),judge_model:z.string(),cc_version:z.string(),engine_version:z.string(),engine_commit:z.string(),k:z.number(),cases:z.array(z.string())}).passthrough(),
@@ -32,11 +37,18 @@ export const cliEvalReport = z.object({
 type CliReceipt = z.infer<typeof receipt>;
 type Comparison = z.infer<typeof comparison>;
 function wlt(c:Comparison):[number,number,number] { return [c.win,c.loss,c.tie]; }
-/** Display precision for a receipt's own fractions: two decimals, the form Figure 1's arm bars and
- *  the per-case table already show. Rendering only — the receipt's stored value is never rounded. */
+/** Display precision for a receipt's own fractions: two decimals, the form the arm-score prose and
+ *  Table 2 show. Rendering only — the receipt's stored value is never rounded. */
 function fixed2(value:number|null|undefined):string { return value==null?'—':value.toFixed(2); }
 /** A sign-test p in the form every surface states it (§12), so prose and Figure 2 cannot disagree. */
 function fixed3(value:number|null|undefined):string { return value==null?'—':value.toFixed(3); }
+/** §2's opening line. With rev-20 fields it states the receipt's case-run tally verbatim (the card's Quality number) and keeps the arm scores as the check share; without them, the arm scores alone. */
+function resultsText(r:CliReceipt):string {
+ const armScores=Object.entries(r.arm_scores).map(([arm,score])=>`${arm} ${fixed2(score)}`).join(', ');
+ const runs=r.case_runs;if(!runs)return `Arm scores: ${armScores}.`;
+ const k=r.provenance.k,say=(arm:string):string=>{const t=runs[arm];return t?`${t.passed} of ${t.total}`:'—';};
+ return `Candidate passed ${say('candidate')} ${k===1?'cases':`case-runs (${r.provenance.cases.length} cases × ${k} reps)`}, baseline ${say('baseline')}. A ${k===1?'case':'case-run'} passes an arm when every deterministic check passes. Check share by arm: ${armScores}.`;
+}
 function mapReceipt(r:CliReceipt):Receipt {
  const p=r.provenance,c=r.comparisons['candidate-vs-baseline'],inc=r.comparisons['candidate-vs-incumbent'],t=r.triggers,signP=fixed3(c?.sign_p);
  const eff=(arm:string):string[]=>{const e=r.efficiency[arm];return [String(e?.turns??'—'),e?.duration_ms==null?'—':`${Math.round(e.duration_ms/1000)} s`,e?.cost_usd==null?'—':`$${e.cost_usd.toFixed(2)}`];};
@@ -47,8 +59,10 @@ function mapReceipt(r:CliReceipt):Receipt {
  triggers:{tp:t?.tp??0,fn:t?.fn??0,fp:t?.fp??0,tn:t?.tn??0,recall:fixed2(t?.recall),precision:fixed2(t?.precision),misses:[]},
  eff:{candidate:eff('candidate'),incumbent:r.efficiency.incumbent?eff('incumbent'):null,baseline:eff('baseline')},
  attribution:r.attribution,model:p.model,judge:p.judge_model,cc:p.cc_version,k:p.k,engine:p.engine_version,per_case:[],
+ // Rev 20: the receipt's own rows and tally, or neither — the report never derives them (AGENTS invariant 6).
+ ...(r.per_case&&r.case_runs?{case_rows:r.per_case,case_runs:r.case_runs}:{}),
  abstract:c?`${p.cases.length} cases at k=${p.k}. Candidate vs baseline: ${c.win}W–${c.loss}L–${c.tie}T, net lift ${fixed2(c.net_lift)}, sign p ${signP}. Verdict ${r.verdict}.`:'No baseline comparison in this receipt.',
- results:`Arm scores: ${Object.entries(r.arm_scores).map(([arm,score])=>`${arm} ${fixed2(score)}`).join(', ')}.`,
+ results:resultsText(r),
  trigger_text:t?`Trigger counts: ${t.tp} true positives, ${t.fn} false negatives, ${t.fp} false positives, ${t.tn} true negatives.`:'No trigger evaluation in this receipt.',
  efficiency_text:'Per-task means by arm are in Table 2.',
  coverage:`${r.scored_rows} of ${r.expected_rows} rounds scored; execution ${r.execution_status}. Run ${r.run_id} by ${p.runner_handle}, engine ${p.engine_version} (${p.engine_commit}), agent CLI ${p.cc_version}.`,
@@ -72,6 +86,6 @@ export function mapEvalReport(report:z.infer<typeof cliEvalReport>,lines:readonl
  }
  return {receipt:r?mapReceipt(r):null,summary:s,wlt:s?[s.w,s.l,s.t]:null,incumbentLift:inc?[Math.round(inc.net_lift*100),inc.sign_p.toFixed(3)]:null,
  reportNumbers:s?{holes,nRounds:s.n+holes,triggerTotal:t?t.fp+t.tn:0}:null,
- scoreFractions:{routesExpected:t?t.tp+t.fn:null,roi: roiFractions(r?.efficiency.candidate?.cost_usd, r?.efficiency.baseline?.cost_usd),quality:r?.arm_scores.candidate!=null&&r.arm_scores.baseline!=null?[r.arm_scores.candidate,r.arm_scores.baseline]:null},
+ scoreFractions:{routesExpected:t?t.tp+t.fn:null,roi: roiFractions(r?.efficiency.candidate?.cost_usd, r?.efficiency.baseline?.cost_usd)},
  history,versions:report.versions,latestState:report.latestState,invalidReceiptFile:report.latestState==='invalid'?lines.find(line=>line.includes('newest receipt is invalid'))??null:null,localRuns,evalEstimate,evalEstimateText,evalEstimateTip:evalEstimateText};
 }

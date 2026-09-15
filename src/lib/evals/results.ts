@@ -5,7 +5,7 @@
  */
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { ArmSample, ComparisonRow } from './execution.js';
+import type { Arm, ArmSample, ComparisonRow, Outcome } from './execution.js';
 import type { TriggerSummary } from './triggers.js';
 import { netLift, signTest, summarize, verdictBand, type Verdict } from './stats.js';
 
@@ -37,6 +37,18 @@ export interface EfficiencySummary {
   cost_usd: number | null;
 }
 
+/**
+ * §5.3 rev 20: one arm's result on one (case × rep). `passed` is the §5.1 all-or-nothing verdict —
+ * true when every deterministic check passed, false when one failed, null when it cannot be said
+ * (the arm run failed twice, or the case has no checks). `checks` is [name, passed] per check; the
+ * engine's `detail` string never crosses into a receipt (it can quote the transcript).
+ */
+export interface CaseRunArm { passed: boolean | null; checks: [string, boolean][] }
+/** §5.3 rev 20: one (case × rep) — every arm's verdict plus each comparison's row outcome. */
+export interface CaseRun { case: string; rep: number; arms: Partial<Record<Arm, CaseRunArm>>; outcomes: Record<string, Outcome> }
+/** §5.3 rev 20: how many case-runs an arm passed, over the case-runs where `passed` is not null. */
+export interface CaseRunTally { passed: number; total: number }
+
 export interface Aggregate {
   verdict: Verdict;
   attribution: string;
@@ -48,6 +60,10 @@ export interface Aggregate {
   efficiency: Record<string, EfficiencySummary>;
   /** Rev 8: cases skipped for missing host tools, case → missing requirements. Never scored, always visible. */
   environment_skips: Record<string, string[]>;
+  /** §5.3 rev 20: per-(case × rep) rows, in execution order. Display only — no statistic reads them. */
+  per_case: CaseRun[];
+  /** §5.3 rev 20: passed case-runs per arm, the card's Quality number. Same keys as `arm_scores`. */
+  case_runs: Record<string, CaseRunTally>;
 }
 
 /**
@@ -83,6 +99,7 @@ export function aggregate(rows: readonly ComparisonRow[], arms: readonly ArmSamp
   const executionStatus = expectedRows === 0 ? 'complete' : scored === 0 ? 'failed' : scored < expectedRows ? 'partial' : 'complete';
   const headline = comparisons['candidate-vs-baseline'];
   const verdict = headline ? verdictBand(headline.win, headline.loss, headline.tie) : 'NEUTRAL';
+  const perCase = perCaseRows(rows, arms);
   return {
     verdict,
     attribution: attributionLine(rows),
@@ -93,7 +110,52 @@ export function aggregate(rows: readonly ComparisonRow[], arms: readonly ArmSamp
     arm_scores: armScores,
     efficiency,
     environment_skips: environmentSkips,
+    per_case: perCase,
+    case_runs: caseRunTally(perCase, Object.keys(armScores)),
   };
+}
+
+/**
+ * §5.3 rev 20: fold arm samples and comparison rows into one entry per (case × rep). Arm samples
+ * seed the entries (a failed arm is `passed: null` with no checks — its checks ran against an empty
+ * transcript and say nothing about the skill); rows then supply each arm's check list and the
+ * comparison outcomes. Insertion order is execution order, so cases read top to bottom as they ran.
+ */
+export function perCaseRows(rows: readonly ComparisonRow[], arms: readonly ArmSample[]): CaseRun[] {
+  const entries = new Map<string, CaseRun>();
+  const failed = new Set<string>();
+  const entry = (caseName: string, rep: number): CaseRun => {
+    const key = `${caseName}\u0000${rep}`;
+    let found = entries.get(key);
+    if (!found) { found = { case: caseName, rep, arms: {}, outcomes: {} }; entries.set(key, found); }
+    return found;
+  };
+  for (const sample of arms) {
+    if (sample.failed) failed.add(`${sample.case}\u0000${sample.rep}\u0000${sample.arm}`);
+    entry(sample.case, sample.rep).arms[sample.arm] = { passed: sample.failed || sample.fraction === null ? null : sample.fraction === 1, checks: [] };
+  }
+  const record = (target: CaseRun, arm: Arm, checks: ComparisonRow['checks_candidate']): void => {
+    if (failed.has(`${target.case}\u0000${target.rep}\u0000${arm}`)) { target.arms[arm] = { passed: null, checks: [] }; return; }
+    target.arms[arm] = { passed: checks.length ? checks.every((check) => check.passed) : null, checks: checks.map((check) => [check.name, check.passed]) };
+  };
+  for (const row of rows) {
+    const target = entry(row.case, row.rep);
+    target.outcomes[row.comparison] = row.outcome;
+    record(target, 'candidate', row.checks_candidate);
+    const opponent = row.comparison.replace(/^candidate-vs-/, '');
+    if (opponent === 'baseline' || opponent === 'incumbent') record(target, opponent, row.checks_opponent);
+  }
+  return [...entries.values()];
+}
+
+/** §5.3 rev 20: passed / decidable case-runs per arm. A null verdict is neither passed nor counted. */
+export function caseRunTally(perCase: readonly CaseRun[], armNames: readonly string[]): Record<string, CaseRunTally> {
+  const tally: Record<string, CaseRunTally> = {};
+  for (const arm of armNames) {
+    const verdicts = perCase.map((run) => run.arms[arm as Arm]?.passed).filter((passed): passed is boolean => typeof passed === 'boolean');
+    tally[arm] = { passed: verdicts.filter(Boolean).length, total: verdicts.length };
+  }
+  return tally;
 }
 
 function mean(values: readonly (number | null)[]): number | null {
@@ -133,6 +195,8 @@ export function renderReport(aggregateResult: Aggregate, triggers: TriggerSummar
   }
   const scores = Object.entries(aggregateResult.arm_scores).map(([arm, score]) => `${arm} ${score === null ? 'n/a' : score.toFixed(2)}`);
   if (scores.length) lines.push(`arm scores: ${scores.join(' · ')}`);
+  const caseRuns = Object.entries(aggregateResult.case_runs).filter(([, tally]) => tally.total > 0).map(([arm, tally]) => `${arm} ${tally.passed}/${tally.total}`);
+  if (caseRuns.length) lines.push(`case-runs passed: ${caseRuns.join(' · ')}`);
   if (triggers) {
     const format = (value: number | null): string => (value === null ? 'n/a' : value.toFixed(2));
     lines.push(`triggers: recall=${format(triggers.recall)} precision=${format(triggers.precision)} (tp=${triggers.tp} fn=${triggers.fn} fp=${triggers.fp} tn=${triggers.tn})`);

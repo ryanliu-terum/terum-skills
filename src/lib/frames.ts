@@ -46,13 +46,13 @@ export const FRAME_VERBS = [
  * "no lift-style decimal appears at card level" for the desktop app's Library and Marketplace cards
  * only; the rest of D29 stands. The card is backed by `ls`'s `receipt` limb, so the number a card
  * shows is one receipt's own `candidate-vs-baseline` net lift with its provenance beside it, never a
- * statistic derived across receipts. See .planning/specs/2026-09-04-eval-engine.md §12.
+ * statistic derived across receipts (eval-engine spec §12).
  */
 export const FRAME_FEATURES: Readonly<Record<string, boolean>> = Object.freeze({
   libraryProjects: true, projects: true,
   memberRole: true, localIdentity: true, roles: true,
   favorites: false, follow: false, lastSeen: false, installScope: true, inviteScoping: false,
-  disablePerMachine: false, projectMembers: false, liftOnCards: true, runEvalInApp: true, perCase: false, progress: true,
+  disablePerMachine: false, projectMembers: false, liftOnCards: true, runEvalInApp: true, perCase: true, progress: true,
   refresh: true, appUpdate: true, reconcile: true,
   serve: true,
 });

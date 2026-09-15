@@ -132,7 +132,7 @@ A second-team binding refused before any side effect:
 
 ## Versioning
 
-The current package reports version `0.18.0`, protocol `1`. The re-recorded 0.14.0
+The current package reports version `0.19.0`, protocol `1`. The re-recorded 0.14.0
 hello lines under `.planning/codex-runs/*/frames/` precede B5's three skill verbs;
 `src/lib/frames.ts` now advertises this complete verb list:
 
@@ -147,14 +147,16 @@ command: use `sync`. Neither belongs in the advertised verb list.
 `hello.features` names `libraryProjects`, `projects`, `memberRole`, `localIdentity`, `roles`, `favorites`, `follow`, `lastSeen`, `installScope`, `inviteScoping`, `disablePerMachine`, `projectMembers`, `liftOnCards`, `runEvalInApp`, `perCase`, `progress`, `refresh`, `appUpdate`, `reconcile`, and `serve`.
 
 True: `libraryProjects`, `projects`, `memberRole`, `localIdentity`, `roles`, `installScope`,
-`liftOnCards`, `runEvalInApp`, `progress`, `refresh`, `appUpdate`, `reconcile`, `serve`.
-False: `favorites`, `follow`, `lastSeen`, `inviteScoping`, `disablePerMachine`, `projectMembers`, `perCase`.
+`liftOnCards`, `runEvalInApp`, `perCase`, `progress`, `refresh`, `appUpdate`, `reconcile`, `serve`.
+False: `favorites`, `follow`, `lastSeen`, `inviteScoping`, `disablePerMachine`, `projectMembers`.
+
+`perCase` turned true with eval-engine spec rev 20 (2026-09-14): receipts now carry `per_case` rows and a `case_runs` tally, and the desktop gates its per-case table on this flag.
 
 `libraryProjects` is the explicit local registry (`project add`, `project remove`, `project list`);
 `projects` is team grouping (`team project create`). `memberRole` is the owner-written job label;
 `roles` supports GitHub Admin/Member permissions from `status --permissions` (otherwise unknown).
 `installScope` supports destinations and destination-aware removal. `appUpdate` and `serve`
-advertise their respective verbs. `reconcile` gates the Library's Check against the team action.
+advertise their respective verbs. `reconcile` gates the Library's Sync action, which runs the fetch-only `sync` and then `reconcile --list`.
 Read feature values rather than assuming a control is available.
 
 `localIdentity` covers `skillId` on local rows and rejected entries, and `placed` on rows.
@@ -362,7 +364,7 @@ On macOS, quit the running app before applying from a terminal: `open` without `
 
 `app-update --reason on-close|overnight|manual` records the install reason in every apply marker and forwards it from `--apply` to `--apply-now`. Omission remains compatible with old callers and displays the manual wording. No CLI verb or feature key is added.
 
-The desktop checks once at launch; that check refreshes the advertisement at most once a day (App updates above) and displays the advertised version in its top-bar update chip. Settings ▸ Updates uses `updates:app:policy`: `ask` (manual download/install), `on-close` (the default), or `overnight` (01:00–05:00 local after 30 idle minutes). The old boolean migrates once: false → ask, true → on-close. Successful install markers display “Updated to {version}”, adding “when you quit” or “overnight”; `updates:app:lastShown` acknowledges the marker across launches while the current session retains it. Failure markers remain visible.
+The desktop checks once at launch; that check refreshes the advertisement at most once a day (App updates above) and displays the advertised version in its top-bar update chip. Settings ▸ Updates uses `updates:app:policy`: `ask` (manual download/install), `on-close` (the default), or `overnight` (01:00–05:00 local after 30 idle minutes). The old boolean migrates once: false → ask, true → on-close. Successful install markers display “Updated to {version}”, adding “when you quit” or “overnight”; `updates:app:lastShown` acknowledges the marker across launches while the current session retains it. Failure markers remain visible. Settings ▸ Updates also carries a one-shot `Update and relaunch` row: it runs `app-update --check --force`, then `--stage` for the advertised build when it is newer and not yet staged, then the same confirmation dialog and `--apply --reason manual` followed by quit. A failed probe is reported as unreachable rather than as up to date, and the launch hook's automatic policy skips a version the row already started downloading in this session.
 
 Native-command amendment: `app_update_on_close({ version: string | null })` arms or disarms one detached installer. This additional command is necessary because the installer must outlive the WebView. The base actually has six commands including `quit`, so this is its seventh (the original decision's “five” count predates `quit`). On the last window's CloseRequested or ExitRequested, the shell consumes the arm once and invokes the recorded Node/CLI with `app-update --apply-now --release <version> --reason on-close`, plus `--await-pid <shell-pid>` to preserve the CLI's Windows wait. It uses a new process group on macOS and CREATE_NO_WINDOW | DETACHED_PROCESS on Windows and stays outside the bridge's child cleanup. The command follows the existing application-command registration, without a separate app ACL permission. Before spawning, the shell writes a waiting marker; a spawn failure replaces it with a failed marker. A child that dies before executing the CLI leaves the waiting marker visible as an unfinished install on the next launch. An unwritable marker is logged without preventing close. A manual or overnight handoff first disarms the close action to prevent two installers; a failed handoff restores the previous arm unless the policy changed in the meantime.
 

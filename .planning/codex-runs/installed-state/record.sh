@@ -50,7 +50,6 @@ git -C "$FX/repo/seed" commit -q -am 'mira: no installs'; git -C "$FX/repo/seed"
 git -C "$CLONE" fetch -q "$FX/repo/team.git" main; git -C "$CLONE" reset -q --hard FETCH_HEAD
 rec ls-member-none.jsonl ls member mira
 
-# Not re-recorded: real-data-check-ls.jsonl and real-data-check-ls-local.jsonl are genuine captures of Ryan's own
-# machine (his real team with ajayw36 and ryanliu-terum, the real decision-walk/handoff/spec-readable/state skills,
-# and the eighty-odd third-party gsd-* folders under his ~/.claude/skills). No fixture reproduces them; they are
-# evidence, not a replay input (no desktop test reads them).
+# Removed: real-data-check-ls.jsonl and real-data-check-ls-local.jsonl were captures of a maintainer's own machine,
+# kept as evidence rather than as a replay input (no desktop test read them). They carried that machine's home paths
+# and installed-skill inventory, so they were dropped rather than re-recorded.

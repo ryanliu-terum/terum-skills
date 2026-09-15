@@ -1238,7 +1238,7 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "file": "README.md",
     "line": 382,
     "policy": "prose",
-    "pattern": "| | `app-update [--check\\|--stage\\|--apply] [--release <version>] [--reason on-close\\|overnight\\|manual]` | Check for, download, or install a newer desktop app; Settings ▸ Updates offers Install now, When I quit, or Overnight (01:00–05:00 after 30 idle minutes) |"
+    "pattern": "| | `app-update [--check\\|--stage\\|--apply] [--release <version>] [--reason on-close\\|overnight\\|manual]` | Check for, download, or install a newer desktop app; Settings ▸ Updates offers Install now, When I quit, or Overnight (01:00–05:00 after 30 idle minutes), and a one-shot Update and relaunch that asks GitHub now, downloads, and relaunches once you confirm |"
   },
   {
     "file": "README.md",
@@ -1424,7 +1424,7 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "file": "docs/frame-protocol.md",
     "line": 149,
     "policy": "prose",
-    "pattern": "`liftOnCards`, `runEvalInApp`, `progress`, `refresh`, `appUpdate`, `reconcile`, `serve`."
+    "pattern": "`liftOnCards`, `runEvalInApp`, `perCase`, `progress`, `refresh`, `appUpdate`, `reconcile`, `serve`."
   },
   {
     "file": "docs/frame-protocol.md",
@@ -1812,7 +1812,7 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "file": "docs/frame-protocol.md",
     "line": 0,
     "policy": "prose",
-    "pattern": "advertise their respective verbs. `reconcile` gates the Library's Check against the team action."
+    "pattern": "advertise their respective verbs. `reconcile` gates the Library's Sync action, which runs the fetch-only `sync` and then `reconcile --list`."
   },
   {
     "file": "docs/frame-protocol.md",
@@ -1952,4 +1952,10 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     policy: 'prose',
     pattern: 'publish hand-off it names. A skill edited and never published is a skill only that machine has.'
   },
+  {
+    "file": "docs/frame-protocol.md",
+    "line": 365,
+    "policy": "prose",
+    "pattern": "The desktop checks once at launch; that check refreshes the advertisement at most once a day (App updates above) and displays the advertised version in its top-bar update chip. Settings ▸ Updates uses `updates:app:policy`: `ask` (manual download/install), `on-close` (the default), or `overnight` (01:00–05:00 local after 30 idle minutes). The old boolean migrates once: false → ask, true → on-close. Successful install markers display “Updated to {version}”, adding “when you quit” or “overnight”; `updates:app:lastShown` acknowledges the marker across launches while the current session retains it. Failure markers remain visible. Settings ▸ Updates also carries a one-shot `Update and relaunch` row: it runs `app-update --check --force`, then `--stage` for the advertised build when it is newer and not yet staged, then the same confirmation dialog and `--apply --reason manual` followed by quit. A failed probe is reported as unreachable rather than as up to date, and the launch hook's automatic policy skips a version the row already started downloading in this session."
+  }
 ];

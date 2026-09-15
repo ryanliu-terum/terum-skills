@@ -29,7 +29,7 @@ specs; the maintainers write the specs, run every gate themselves, and do all gi
    The mock answers `true` to all of them and the UI renders every board as drawn. A control whose switch is
    `false` is hidden (or degraded exactly as the S7q spec table says), never disabled or stubbed; a screen
    reads a switch through `useFeatures()` / `useCapabilities()`, never by probing the platform, and never
-   invents a flag. Gaps are recorded by the maintainers in `GAPS.md`; an implementing agent never edits `GAPS.md`,
+   invents a flag. Gaps are recorded by the maintainers in the tracking issues; an implementing agent never invents a flag to close one,
    `FIDELITY.md`, `AGENTS.md`, `README.md` or `package.json` — describe what you found in the report's
    `openQuestions` / `deviations` instead.
    A new `ls --local` key is declared optional in the app before or with the CLI that emits it, never after.
@@ -116,7 +116,7 @@ src/styles/                 tokens.css (GENERATED) + app.css (@import tailwindcs
 e2e/routes/                 one Playwright smoke test per route + state (*.spec.ts)
 e2e/fidelity/               boards.ts (name -> route, class, viewport, hover), tolerance.ts, fidelity.spec.ts, fidelity.md-parser
 e2e/out/                    gitignored: actual / diff PNGs and report.json
-FIDELITY.md · GAPS.md       maintainer-owned status files (never edited by an implementing agent)
+FIDELITY.md                 maintainer-owned board status table (never edited by an implementing agent)
 ```
 
 Conventions: `.spec.ts` under `e2e/` is Playwright; `*.test.ts(x)` anywhere is vitest. PascalCase components,

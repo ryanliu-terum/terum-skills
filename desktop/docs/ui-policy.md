@@ -26,7 +26,7 @@ guard test (`src/components/domain/__tests__/ui-policy.test.ts`) fails a build t
 - A path renders through `PathText`: mono, one line, shortened in the MIDDLE so the root and the folder name both
   stay legible, the full path in `title`, click copies it, right-click offers "Copy path" and the host's reveal
   verb ("Show in Finder" / "Show in Explorer" / "Show in file manager", from `revealLabel`).
-- When a list can hold two folders of the same name (Check against the team, Library projects), each row carries a
+- When a list can hold two folders of the same name (the Library's Sync dialog, Library projects), each row carries a
   **root label** beside the name (`skillRootLabel`: "Global", or the project folder's name) so the rows are told
   apart without reading the path.
 - A path never appears inside a sentence, a hint, or a chip label. A CLI message that embeds one (`lstat '<path>'`)
@@ -68,8 +68,7 @@ guard test (`src/components/domain/__tests__/ui-policy.test.ts`) fails a build t
 
 ## §6 Say a thing once, and collapse what is long
 
-- A hint that applies to several rows appears ONCE under the group (the rename footnote in Check against the
-  team), never repeated under every row.
+- A hint that applies to several rows appears ONCE under the group (the rename footnote in the Library's Sync dialog), never repeated under every row.
 - A note that lists many items (Left out of the eval) is one sentence with a count when collapsed
   ("17 of 45 selected skills are left out of the eval — 3 reasons. Show why") and, expanded, groups the items
   under a shared heading with the instance-specific tail stripped (`reasonHeading`); each item keeps its full

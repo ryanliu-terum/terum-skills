@@ -323,6 +323,8 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
       comparisons: summary.comparisons,
       arm_scores: summary.arm_scores,
       environment_skips: summary.environment_skips,
+      per_case: summary.per_case,
+      case_runs: summary.case_runs,
       triggers: triggers === null ? null : { recall: triggers.recall, precision: triggers.precision, tp: triggers.tp, fn: triggers.fn, fp: triggers.fp, tn: triggers.tn },
       efficiency: summary.efficiency,
       provenance: {

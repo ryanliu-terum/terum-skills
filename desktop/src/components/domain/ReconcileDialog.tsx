@@ -22,7 +22,7 @@ function defaults(result: ReconcileResult): Set<SelectionKey> {
 }
 
 /** A single explicit batch coordinator: rows remain independent and report their own outcome. */
-export function ReconcileDialog({ result, title = 'Your skills', onClose, onFinished }: { result: ReconcileResult; title?: string; onClose: () => void; onFinished?: () => void }) {
+export function ReconcileDialog({ result, title = 'Your skills', note = null, onClose, onFinished }: { result: ReconcileResult; title?: string; /** The Library's Sync: why this comparison may be behind the team (components/domain/reconcile.ts fetchNote). */ note?: string | null; onClose: () => void; onFinished?: () => void }) {
   const backend = useBackend();
   const ask = useContext(PromptContext);
   const print = useContext(PrintContext);
@@ -75,6 +75,7 @@ export function ReconcileDialog({ result, title = 'Your skills', onClose, onFini
   return <Dialog open onOpenChange={(open) => { if (!open && !busy) onClose(); }}><WorkflowPopup style={{width:560,maxHeight:'calc(100vh - 32px)',overflowY:'auto'}}>
     <DialogTitle>{title}</DialogTitle>
     <DialogDescription>Choose which existing folders to record or publish. No folder is copied or replaced.</DialogDescription>
+    {note !== null ? <div role="note" style={{fontSize:12}}>{note}</div> : null}
     {result.identical.length ? group('Matches the team exactly', result.identical.map((row) => {
       const key = `adopt:${row.path}` as const;
       // UI policy §2: the path sits OUTSIDE the checkbox's <label> — a click that copies it must never toggle the row.
