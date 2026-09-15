@@ -36,7 +36,8 @@ it('toggles the sort button between the drawn ranking and Name, reordering the l
   await waitFor(() => expect(names('skill-card-')).toEqual(design.DERIVED.topRated));
   expect(screen.getByRole('button', { name: 'Most installed' })).toBeInTheDocument();
 });
-it('renders projects in projectsByMembers order', async () => { open('#/marketplace/projects'); await screen.findByRole('heading', { name: 'Teams / Projects' }); const expected = design.DERIVED.projectsByMembers.map(name => design.PROJECTS.find(p => p.name === name)?.key); expect(names('project-card-')).toEqual(expected); });
+it('has no Teams / Projects list page behind the home section', async () => { open('#/marketplace/projects'); expect(await screen.findByText('No such page')).toBeVisible(); });
+it('draws every project on the home section without a View all control', async () => { open('#/marketplace'); await screen.findByRole('region', { name: 'Teams / Projects' }); expect(names('project-card-')).toEqual(design.PROJECTS.map(p => p.key)); expect(screen.queryByRole('button', { name: 'View all Teams / Projects' })).toBeNull(); });
 it('renders all twelve people in rosterByAdoption order', async () => { open('#/marketplace/people'); await screen.findByRole('heading', { name: 'People' }); expect(names('person-card-')).toEqual(design.DERIVED.rosterByAdoption); expect(names('person-card-')).toHaveLength(12); });
 it('renders ten category rows with supplied remaining counts', async () => { open('#/marketplace/categories'); await screen.findByRole('heading', { name: 'Browse by category' }); expect(names('category-row-')).toEqual(design.CATEGORIES.map(c => c[0])); for(const [category] of design.CATEGORIES){expect(design.DERIVED.categoryRemaining[category as keyof typeof design.DERIVED.categoryRemaining]).toBe(0);const row=screen.getByTestId('category-row-'+category);expect(within(row).queryByText(/\+\d+ more/)).toBeNull();expect(row.lastElementChild?.previousElementSibling).toHaveTextContent(design.DERIVED.categorySkills[category as keyof typeof design.DERIVED.categorySkills].join(' · '));} });
 it('renders infra skills in categorySkills order', async () => { open('#/marketplace/categories/infra'); await screen.findByRole('heading', { name: 'infra' }); expect(names('skill-card-')).toEqual(design.DERIVED.categorySkills.infra); });
@@ -158,10 +159,10 @@ it('clears the query at once from the field and cancels the keystroke behind it'
     expect(location.hash).toBe('#/marketplace');
   } finally { vi.useRealTimers(); }
 });
-it.each([['Top rated', 'skills'], ['Teams / Projects', 'projects'], ['People', 'people'], ['Browse by category', 'categories']])('navigates %s pager to the expanded list', async (title, path) => { open('#/marketplace'); fireEvent.click(await screen.findByRole('button', { name: 'View all ' + title })); await waitFor(() => expect(location.hash).toBe('#/marketplace/' + path)); });
+it.each([['Top rated', 'skills'], ['People', 'people'], ['Browse by category', 'categories']])('navigates %s pager to the expanded list', async (title, path) => { open('#/marketplace'); fireEvent.click(await screen.findByRole('button', { name: 'View all ' + title })); await waitFor(() => expect(location.hash).toBe('#/marketplace/' + path)); });
 it('creates a team project from the Add button and lands on its card', async () => {
   const create = vi.spyOn(pickBackend().teamProjects, 'create');
-  open('#/marketplace/projects');
+  open('#/marketplace');
   fireEvent.click(await screen.findByRole('button', { name: 'Add' }));
   const dialog = await screen.findByRole('dialog');
   fireEvent.change(within(dialog).getByRole('textbox', { name: 'Project name' }), { target: { value: 'Payments' } });
@@ -175,7 +176,7 @@ it('creates a team project from the Add button and lands on its card', async () 
 });
 it('omits the repository from the call when the field is left empty', async () => {
   const create = vi.spyOn(pickBackend().teamProjects, 'create');
-  open('#/marketplace/projects?dialog=new-project');
+  open('#/marketplace?dialog=new-project');
   const dialog = await screen.findByRole('dialog');
   fireEvent.change(within(dialog).getByRole('textbox', { name: 'Project name' }), { target: { value: 'Platform' } });
   fireEvent.click(within(dialog).getByRole('button', { name: 'Create project' }));
@@ -183,7 +184,7 @@ it('omits the repository from the call when the field is left empty', async () =
 });
 it('refuses a name an existing card already carries, before calling the CLI', async () => {
   const create = vi.spyOn(pickBackend().teamProjects, 'create');
-  open('#/marketplace/projects?dialog=new-project');
+  open('#/marketplace?dialog=new-project');
   const dialog = await screen.findByRole('dialog');
   fireEvent.change(within(dialog).getByRole('textbox', { name: 'Project name' }), { target: { value: 'terum' } });
   expect(await within(dialog).findByText('This team already has a project named Terum.')).toBeInTheDocument();
@@ -194,18 +195,18 @@ it('refuses a name an existing card already carries, before calling the CLI', as
 it('shows the CLI refusal in the dialog and keeps what was typed', async () => {
   const backend = pickBackend();
   vi.spyOn(backend.teamProjects, 'create').mockReturnValue(createRun(async () => ({ ok: false, error: 'a project name is 1-64 characters: letters, digits, spaces, dot, underscore, or hyphen, and cannot start with a dot or a space' })));
-  open('#/marketplace/projects?dialog=new-project');
+  open('#/marketplace?dialog=new-project');
   const dialog = await screen.findByRole('dialog');
   fireEvent.change(within(dialog).getByRole('textbox', { name: 'Project name' }), { target: { value: 'Billing' } });
   fireEvent.click(within(dialog).getByRole('button', { name: 'Create project' }));
   expect(await within(dialog).findByText(/a project name is 1-64 characters/)).toBeInTheDocument();
   expect(within(dialog).getByRole('textbox', { name: 'Project name' })).toHaveValue('Billing');
-  expect(location.hash).toBe('#/marketplace/projects?dialog=new-project');
+  expect(location.hash).toBe('#/marketplace?dialog=new-project');
 });
 it('hides Add when the CLI reports no project verb', async () => {
   const backend = pickBackend(), features = await backend.features();
   vi.spyOn(backend, 'features').mockResolvedValue({ ...features, projects: false });
-  open('#/marketplace/projects');
+  open('#/marketplace');
   await screen.findByRole('heading', { name: 'Teams / Projects' });
   expect(screen.queryByRole('button', { name: 'Add' })).toBeNull();
 });
@@ -326,16 +327,14 @@ it('keeps one person link and follows without leaving the people list', async ()
   expect(location.hash).toBe('#/marketplace/people');
 });
 
-it('preserves the mock role line and project description/admin foot', async () => {
+it('preserves the mock role line and project description', async () => {
   open('#/marketplace/people');
   expect(await screen.findByText('founder · ryan')).toBeVisible();
   cleanup();
-  open('#/marketplace/projects');
+  open('#/marketplace');
   const card = await screen.findByTestId('project-card-terum');
   const project = design.PROJECTS.find(p => p.key === 'terum')!;
   expect(card.querySelector('.market-project-desc')?.textContent).toBe(project.desc);
-  expect(card.querySelector('.market-project-foot')).toHaveTextContent(project.admin.name);
-  expect(card.querySelector('.market-project-foot')).toHaveTextContent(`admin · updated ${project.updated}`);
 });
 it('asks every bulk-install tool question and treats declined consent as cancellation', async () => {
   const answers: unknown[] = [];
