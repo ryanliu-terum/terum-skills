@@ -473,8 +473,9 @@ dialog a background verb must never raise), `SSH_ASKPASS_REQUIRE=never`, and `cr
 appended after any `GIT_CONFIG_*` pairs the caller passed.
 
 `--hook` is the session-start entry and must never be driven over frames (rule 2). It is also the one
-carve-out from "nothing on this machine is changed": it may replace Terum's own bundled
-`/terum-skills` manual when that copy is outdated, and nothing else.
+carve-out from "nothing on this machine is changed": in a skills root that already holds one of Terum's
+own bundled skills it may replace an outdated copy and add a missing one (`~/.claude/skills/<name>`,
+`~/.codex/skills/<name>`), and nothing else.
 
 Work recorded in `pending` is drained by re-running the matching `install` or `uninstall-skill`, never
 by `sync`.

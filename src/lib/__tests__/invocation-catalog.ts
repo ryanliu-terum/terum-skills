@@ -161,9 +161,9 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
   },
   {
     "file": "src/commands/refresh.ts",
-    "line": 95,
-    "policy": "prose",
-    "pattern": "notices.push('Updated your /terum-skills manual for this CLI.');"
+    "line": 166,
+    "policy": "not-a-hint",
+    "pattern": "if (written.length) notices.push('Updated your terum-skills skills for this CLI.');"
   },
   {
     "file": "src/commands/team.ts",
@@ -1682,12 +1682,6 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "pattern": "`sync` fetches each configured team clone and hard-resets it to `origin/main`, one team at a time,"
   },
 
-  {
-    "file": "docs/frame-protocol.md",
-    "line": 392,
-    "policy": "prose",
-    "pattern": "`/terum-skills` manual when that copy is outdated, and nothing else."
-  },
   {
     "file": "docs/frame-protocol.md",
     "line": 394,

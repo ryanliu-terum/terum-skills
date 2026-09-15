@@ -5,7 +5,8 @@ import { createConfigStore } from '../../lib/config.js';
 import { stampedAt, stampIsFresh } from '../../lib/hook.js';
 import { receiptSchema } from '../../lib/evals/receipt.js';
 import { systemRunner, type RunOptions } from '../../lib/runner.js';
-import { bareTeam, pushFromSeed, cloneWithIdentity, git, holdCloneLock, denyingRunner, fakeGh, ScriptedPrompter, clean, exists, wrapRunner, temporaryDirectory } from '../../lib/__tests__/fixtures.js';
+import { listManagedSkills, readBundledSkills } from '../../lib/wrapper.js';
+import { bareTeam, pushFromSeed, cloneWithIdentity, git, holdCloneLock, denyingRunner, fakeGh, ScriptedPrompter, clean, exists, wrapRunner, CANONICAL_SKILLS, wrapperFor, temporaryDirectory } from '../../lib/__tests__/fixtures.js';
 import { nonInteractiveGitEnv, run, REFRESH_DEADLINE_MS, SUCCESSOR_CACHE_MS } from '../refresh.js';
 import { run as evalReport } from '../evalReport.js';
 
@@ -130,6 +131,31 @@ describe('refresh', () => {
     const { store, clone } = await setup(); const other = await bareTeam();
     await git(['remote', 'set-url', 'origin', other.bare], clone);
     expect(await run({ config: store }, new ScriptedPrompter())).toMatchObject({ ok: true, value: { teams: [{ state: 'no-clone', detail: expect.stringMatching(/^the folder is a clone of /) }] } });
+  });
+  it('in hook mode adds and refreshes the bundled skills only where a managed copy already exists, says so once, and never touches them outside hook mode', async () => {
+    const OLD_COPY = '---\nname: terum-skills\ndescription: an older bundled copy\nmetadata:\n  managed-by: terum-skills\n---\nold body\n';
+    const { store } = await setup(['a']);
+    const home = await temporaryDirectory('terum-hook-home-'); await mkdir(join(home, '.claude'), { recursive: true });
+    const wrapper = wrapperFor(home); const claude = wrapper.roots[0]!.root;
+    const bundled = (await readBundledSkills(CANONICAL_SKILLS))!;
+    // No managed copy anywhere: consent is not on record, so the hook writes nothing and says nothing.
+    const silent = await run({ config: store, hook: true, wrapper }, new ScriptedPrompter());
+    expect(silent).toMatchObject({ ok: true, value: { notices: [] } });
+    expect(await listManagedSkills(claude)).toEqual([]);
+    // An old single copy: the manual is refreshed and the other skills added, with one notice on the hook's stderr channel.
+    await mkdir(join(claude, 'terum-skills'), { recursive: true }); await writeFile(join(claude, 'terum-skills', 'SKILL.md'), OLD_COPY);
+    const io = new ScriptedPrompter();
+    const outcome = await run({ config: store, hook: true, wrapper }, io);
+    expect(io.lines).toEqual(['{"hookSpecificOutput":{"hookEventName":"SessionStart","reloadSkills":true}}']);
+    expect(outcome).toMatchObject({ ok: true, value: { notices: ['Updated your terum-skills skills for this CLI.'] } });
+    expect((await listManagedSkills(claude)).map((skill) => skill.name)).toEqual([...bundled.keys()].sort());
+    expect(await readFile(join(claude, 'terum-skills', 'SKILL.md'), 'utf8')).toBe(bundled.get('terum-skills'));
+    expect(await listManagedSkills(wrapper.roots[1]!.root)).toEqual([]);
+    // Current copies: no notice (the clone is `fresh` now — hook mode left it alone, which adds no notice either). Plain sync: never a skills write, even with an outdated copy.
+    expect(await run({ config: store, hook: true, wrapper }, new ScriptedPrompter())).toMatchObject({ ok: true, value: { notices: [], teams: [{ team: 'a', state: 'fresh' }] } });
+    await writeFile(join(claude, 'terum-skills', 'SKILL.md'), OLD_COPY);
+    expect(await run({ config: store, wrapper }, new ScriptedPrompter())).toMatchObject({ ok: true, value: { notices: [] } });
+    expect(await readFile(join(claude, 'terum-skills', 'SKILL.md'), 'utf8')).toBe(OLD_COPY);
   });
   it('discards a local commit in the clone: the clone is disposable state', async () => {
     const { store, clone } = await setup(); const stray = join(clone, 'stray.txt');
