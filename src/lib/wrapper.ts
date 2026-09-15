@@ -14,12 +14,9 @@ export const BUNDLED_SKILLS = join(packageRoot() ?? fileURLToPath(new URL('../..
 
 export type ManagedHost = 'claude' | 'codex';
 export interface ManagedRoot { host: ManagedHost; root: string }
-/** `skillsRoot` and `source` are transitional single-wrapper compatibility fields. */
 export interface WrapperOptions {
   roots?: ManagedRoot[];
   bundle?: string;
-  /** @deprecated Task 5 removes this. */ skillsRoot?: string;
-  /** @deprecated Task 5 removes this. */ source?: string;
 }
 
 export function managedSkillRoots(home = homedir(), env: NodeJS.ProcessEnv = process.env): ManagedRoot[] {
@@ -29,7 +26,7 @@ export function managedSkillRoots(home = homedir(), env: NodeJS.ProcessEnv = pro
 
 export function defaultWrapperOptions(home = homedir(), env: NodeJS.ProcessEnv = process.env): Required<WrapperOptions> {
   const roots = managedSkillRoots(home, env);
-  return { roots, bundle: BUNDLED_SKILLS, skillsRoot: roots[0]!.root, source: join(BUNDLED_SKILLS, 'terum-skills', 'SKILL.md') };
+  return { roots, bundle: BUNDLED_SKILLS };
 }
 
 export function managedSkillDirectory(root: string, name: string): string { return join(root, name); }
@@ -204,11 +201,16 @@ export async function refreshManagedSkills(options: Required<WrapperOptions>): P
   return written;
 }
 
-export interface ManagedInventory { roots: { host: ManagedHost; root: string; managed: { name: string; directory: string }[]; foreign: { name: string; directory: string; why: string }[] }[] }
+export interface ManagedInventory {
+  roots: { host: ManagedHost; root: string; managed: { name: string; directory: string }[]; foreign: { name: string; directory: string; why: string }[] }[];
+  skipped: ManagedRoot[];
+}
 export async function managedSkillInventory(options: Required<WrapperOptions>): Promise<ManagedInventory> {
   const bundled = await readBundledSkills(options.bundle);
   const roots: ManagedInventory['roots'] = [];
+  const skipped: ManagedRoot[] = [];
   for (const root of options.roots) {
+    if (!(await eligible(root))) { skipped.push(root); continue; }
     const managed = await listManagedSkills(root.root);
     const foreign: { name: string; directory: string; why: string }[] = [];
     for (const name of bundled?.keys() ?? []) {
@@ -217,33 +219,5 @@ export async function managedSkillInventory(options: Required<WrapperOptions>): 
     }
     roots.push({ host: root.host, root: root.root, managed, foreign });
   }
-  return { roots };
+  return { roots, skipped };
 }
-
-/** @deprecated Task 5 removes this. */ export const WRAPPER_NAME = 'terum-skills';
-/** @deprecated Task 5 removes this. */ export const BUNDLED_WRAPPER = join(BUNDLED_SKILLS, WRAPPER_NAME, 'SKILL.md');
-/** @deprecated Task 5 removes this. */ export function wrapperDestination(skillsRoot: string): string { return managedSkillDirectory(skillsRoot, WRAPPER_NAME); }
-/** @deprecated Task 5 removes this. */ export const isManagedWrapper = isManagedSkill;
-/** @deprecated Task 5 removes this. */ export type WrapperPresence = SkillPresence;
-/** @deprecated Task 5 removes this. */ export async function inspectWrapper(skillsRoot: string): Promise<WrapperPresence> { return inspectManagedSkill(skillsRoot, WRAPPER_NAME); }
-/** @deprecated Task 5 removes this. */ export type WrapperState = SkillState | 'unavailable';
-/** @deprecated Task 5 removes this. */
-export async function wrapperState(options: Required<WrapperOptions>): Promise<WrapperState> {
-  const bundle = options.source === BUNDLED_WRAPPER ? options.bundle : dirname(dirname(options.source));
-  const bundled = await readBundledSkills(bundle);
-  if (bundled === null) return 'unavailable';
-  const presence = await inspectManagedSkill(options.skillsRoot, WRAPPER_NAME);
-  if (presence.kind !== 'managed') return presence.kind;
-  return presence.raw === bundled.get(WRAPPER_NAME) ? 'current' : 'outdated';
-}
-/** @deprecated Task 5 removes this. */
-export async function installWrapper(options: Required<WrapperOptions>): Promise<'installed' | 'replaced'> {
-  let raw: string;
-  try { raw = await readFile(options.source, 'utf8'); } catch (error) {
-    if (isMissing(error)) throw new Error(`The terum-skills skills are not bundled in this copy of terum-skills (expected under ${dirname(dirname(options.source))}).`);
-    throw error;
-  }
-  if (!isManagedSkill(raw)) throw new Error(`The terum-skills skills are not bundled in this copy of terum-skills (expected under ${dirname(dirname(options.source))}).`);
-  return installManagedSkill(options.skillsRoot, WRAPPER_NAME, raw);
-}
-/** @deprecated Task 5 removes this. */ export async function removeWrapper(options: Pick<Required<WrapperOptions>, 'skillsRoot'>): Promise<'removed' | 'absent' | 'foreign'> { return removeManagedSkill(options.skillsRoot, WRAPPER_NAME); }

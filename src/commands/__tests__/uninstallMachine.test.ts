@@ -3,11 +3,11 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { createConfigStore } from '../../lib/config.js';
 import { fsForTests as hookFs, installHook } from '../../lib/hook.js';
-import { installWrapper } from '../../lib/wrapper.js';
+import { installManagedSkill, readBundledSkills } from '../../lib/wrapper.js';
 import { place } from '../../lib/placer.js';
 import { packageRemovalLines } from '../../lib/launch.js';
 import { PromptClosedError } from '../../lib/prompt.js';
-import { bareTeam, cloneWithIdentity, holdCloneLock, ScriptedPrompter, temporaryDirectory, wrapperFor } from '../../lib/__tests__/fixtures.js';
+import { bareTeam, bundledNames, CANONICAL_SKILLS, cloneWithIdentity, holdCloneLock, ScriptedPrompter, temporaryDirectory, wrapperFor } from '../../lib/__tests__/fixtures.js';
 import { fsForTests, run } from '../uninstallMachine.js';
 
 const complete = 'Machine cleanup complete. The package itself has not been removed; finish with the package manager that installed it.';
@@ -22,7 +22,9 @@ async function prepared(names = ['team']) {
   const fixture = await bareTeam(); const store = createConfigStore(join(fixture.root, 'state'));
   const hook = { settingsFile: join(fixture.root, 'settings.json'), backupDir: join(store.root, 'backups') };
   const placements: string[] = [];
-  const wrapper = wrapperFor(join(fixture.root, 'home')); await installWrapper(wrapper);
+  const home = join(fixture.root, 'home'); await mkdir(join(home, '.codex'), { recursive: true });
+  const wrapper = wrapperFor(home); const claude = wrapper.roots[0]!.root, codex = wrapper.roots[1]!.root;
+  for (const [name, raw] of (await readBundledSkills(CANONICAL_SKILLS))!) await installManagedSkill(claude, name, raw);
   for (const name of names) {
     await cloneWithIdentity(fixture.bare, store.teamClone(name));
     const source = join(fixture.root, `source-${name}`); await mkdir(source);
@@ -35,51 +37,63 @@ async function prepared(names = ['team']) {
     await mkdir(join(store.root, 'cache', name), { recursive: true });
     await mkdir(join(store.root, 'run'), { recursive: true }); await writeFile(join(store.root, 'run', `${name}.stamp`), 'stamp');
   }
-  return { fixture, store, hook, wrapper, placements };
+  return { fixture, store, hook, wrapper, claude, codex, placements };
 }
 async function gone(path: string) { await expect(access(path)).rejects.toMatchObject({ code: 'ENOENT' }); }
 
 describe('machine uninstall', () => {
   // legacy: two teams bound before the one-team rule (2026-09-08); reads/syncs keep working
   it('cleans two teams and the hook, preserves unrelated settings and recovery records, and prints the manual step', async () => {
-    const { store, hook, wrapper, placements } = await prepared(['team', 'other']);
+    const { store, hook, wrapper, claude, codex, placements } = await prepared(['team', 'other']);
     await writeFile(hook.settingsFile, JSON.stringify({ hooks: { SessionStart: [unrelated] } })); await installHook(hook);
-    const wrapperDir = join(wrapper.skillsRoot, 'terum-skills');
     const before = await store.read(); const io = new ScriptedPrompter([], [true]);
     const launch = { kind: 'global' as const, path: '/opt/homebrew/lib/node_modules/terum-skills/dist/index.js' };
     const result = await run({ config: store, hook, wrapper, launch }, io);
-    expect(result).toMatchObject({ ok: true, value: { teams: ['team', 'other'], removedPlacements: 2, hookRemoved: true, wrapperRemoved: true, configRemoved: true, launch } });
+    expect(result).toMatchObject({ ok: true, value: { teams: ['team', 'other'], removedPlacements: 2, hookRemoved: true, wrapperRemoved: true, wrappersRemoved: (await bundledNames()).map((name) => join(claude, name)), configRemoved: true, launch } });
     if (!result.ok) throw new Error(result.error);
     expect(result.value.advice).toEqual(packageRemovalLines(launch));
     for (const path of [...placements, store.teamClone('team'), store.teamClone('other'), ...['config.json', 'run', 'cache', 'teams'].map((x) => join(store.root, x))]) await gone(path);
-    await gone(wrapperDir);
+    for (const name of await bundledNames()) await gone(join(claude, name));
     expect(JSON.parse(await readFile(result.value.record, 'utf8'))).toEqual(before);
     expect((await stat(result.value.record)).mode & 0o777).toBe(0o600);
     expect((await readdir(hook.backupDir)).filter((name) => name.startsWith('settings.'))).toHaveLength(1);
     expect(JSON.parse(await readFile(hook.settingsFile, 'utf8'))).toEqual({ hooks: { SessionStart: [unrelated] } });
     await expect(access(store.root)).resolves.toBeUndefined();
     expect(io.details['Remove terum-skills from this machine?']).toContain(membership);
-    expect(io.details['Remove terum-skills from this machine?']).toContain(`  /terum-skills Claude Code skill at ${wrapperDir}`);
-    expect(io.lines).toContain(`Removed the /terum-skills Claude Code skill from ${wrapperDir}.`);
+    const names = (await bundledNames()).join(', ');
+    expect(io.details['Remove terum-skills from this machine?']).toContain(`  terum-skills skills in ${claude}: ${names}`);
+    expect(io.details['Remove terum-skills from this machine?']).toContain(`  No terum-skills skills in ${codex}`);
+    expect(io.lines).toContain(`Removed the terum-skills skills from ${claude}: ${names}.`);
     expect(io.lines.slice(-3)).toEqual([complete, `This copy of terum-skills runs from ${launch.path}.`, 'If you installed it with npm: npm uninstall -g terum-skills   (pnpm: pnpm remove -g terum-skills · yarn: yarn global remove terum-skills · bun: bun remove -g terum-skills · Volta: volta uninstall terum-skills)']);
     expect(io.asked).toEqual(['Remove terum-skills from this machine?']);
   });
 
-  it('leaves a terum-skills folder that is not the bundled skill alone, and says so', async () => {
-    const { store, hook, wrapper } = await prepared(); const wrapperDir = join(wrapper.skillsRoot, 'terum-skills');
-    const theirs = '---\nname: terum-skills\ndescription: someone else\'s skill under our name\n---\n'; await writeFile(join(wrapperDir, 'SKILL.md'), theirs);
+  it('leaves a folder at a bundled name that is not the bundled skill alone, says so, and still removes the copies that are ours', async () => {
+    const { store, hook, wrapper, claude } = await prepared(); const theirs = join(claude, 'terum-skills');
+    const someoneElses = '---\nname: terum-skills\ndescription: someone else\'s skill under our name\n---\n'; await writeFile(join(theirs, 'SKILL.md'), someoneElses);
     const io = new ScriptedPrompter([], [true]); const result = await run({ config: store, hook, wrapper }, io);
-    expect(result).toMatchObject({ ok: true, value: { teams: ['team'], wrapperRemoved: false } });
-    expect(await readFile(join(wrapperDir, 'SKILL.md'), 'utf8')).toBe(theirs);
-    expect(io.details['Remove terum-skills from this machine?']).toContain(`  ${wrapperDir} is not the bundled /terum-skills Claude Code skill (it is a different skill); left alone`);
-    expect(io.lines.join('\n')).not.toContain('Removed the /terum-skills');
+    const ours = (await bundledNames()).filter((name) => name !== 'terum-skills');
+    expect(result).toMatchObject({ ok: true, value: { teams: ['team'], wrapperRemoved: ours.length > 0, wrappersRemoved: ours.map((name) => join(claude, name)) } });
+    expect(await readFile(join(theirs, 'SKILL.md'), 'utf8')).toBe(someoneElses);
+    expect(io.details['Remove terum-skills from this machine?']).toContain(`  ${theirs} is not a bundled terum-skills skill (it is a different skill); left alone`);
   });
 
-  it('reports no bundled skill when none was placed', async () => {
-    const { store, hook } = await minimal(); const wrapper = wrapperFor(join(store.root, '..', 'home'));
+  it('reports no skills on a machine that never had them', async () => {
+    const { store, hook } = await minimal(); const home = join(store.root, '..', 'home'); await mkdir(join(home, '.codex'), { recursive: true }); const wrapper = wrapperFor(home);
     const io = new ScriptedPrompter([], [true]);
-    expect(await run({ config: store, hook, wrapper }, io)).toMatchObject({ ok: true, value: { wrapperRemoved: false } });
-    expect(io.details['Remove terum-skills from this machine?']).toContain(`  No /terum-skills Claude Code skill at ${join(wrapper.skillsRoot, 'terum-skills')}`);
+    expect(await run({ config: store, hook, wrapper }, io)).toMatchObject({ ok: true, value: { wrapperRemoved: false, wrappersRemoved: [] } });
+    for (const root of wrapper.roots) expect(io.details['Remove terum-skills from this machine?']).toContain(`  No terum-skills skills in ${root.root}`);
+  });
+
+  it('skips the Codex root when there is no Codex home, and says so in the inventory', async () => {
+    const { store, hook } = await minimal(); const home = join(store.root, '..', 'home-without-codex'); const wrapper = wrapperFor(home);
+    const io = new ScriptedPrompter([], [true]);
+    expect(await run({ config: store, hook, wrapper }, io)).toMatchObject({ ok: true, value: { wrapperRemoved: false, wrappersRemoved: [] } });
+    const detail = io.details['Remove terum-skills from this machine?']!;
+    expect(detail).toContain(`  No terum-skills skills in ${wrapper.roots[0]!.root}`);
+    expect(detail).toContain(`  No ${join(home, '.codex')} on this machine; Codex skills skipped.`);
+    expect(detail).not.toContain(`  No terum-skills skills in ${wrapper.roots[1]!.root}`);
+    await gone(join(home, '.codex'));
   });
 
   it('leaves settings with no hook byte-identical and writes no settings backup', async () => {
@@ -227,7 +241,7 @@ it('removes a config whose only remaining content is the machine checkout regist
 
 
 it('carries the complete former inventory only in the confirm detail, in order', async () => {
-  const { store, hook, wrapper, placements, fixture } = await prepared(['team', 'other']);
+  const { store, hook, wrapper, claude, codex, placements, fixture } = await prepared(['team', 'other']);
   await installHook(hook);
   const io = new ScriptedPrompter([], [true]);
   const result = await run({ config: store, hook, wrapper }, io);
@@ -240,7 +254,8 @@ it('carries the complete former inventory only in the confirm detail, in order',
     `    (a clone holding uncommitted or unpushed work is moved to ${join(store.root, 'quarantine')} instead)`,
     '  Version cache and run files for these teams',
     `  Session-start hook in ${hook.settingsFile}`,
-    `  /terum-skills Claude Code skill at ${join(wrapper.skillsRoot, 'terum-skills')}`,
+    `  terum-skills skills in ${claude}: ${(await bundledNames()).join(', ')}`,
+    `  No terum-skills skills in ${codex}`,
     `  No edit hook at ${join(store.root, 'hooks', 'terum-skills-edit.mjs')}`,
     `  ${join(store.root, 'config.json')}`,
     `Kept: ${join(store.root, 'backups')} (settings backups and a record of this uninstall)`,

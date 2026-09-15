@@ -251,57 +251,57 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
   },
   {
     "file": "src/commands/uninstallMachine.ts",
-    "line": 34,
+    "line": 35,
     "policy": "prose",
-    "pattern": "// The /terum-skills Claude Code skill setup placed: only a copy carrying our marker is ours to remove."
+    "pattern": "// The terum-skills skills setup placed under each host's skills root: only a copy carrying our marker is ours to remove."
   },
   {
     "file": "src/commands/uninstallMachine.ts",
-    "line": 54,
+    "line": 59,
     "policy": "prose",
     "pattern": "detail.push('terum-skills will be removed from this machine.');"
   },
   {
     "file": "src/commands/uninstallMachine.ts",
-    "line": 67,
+    "line": 73,
     "policy": "not-a-hint",
-    "pattern": "if (wrapperPresence.kind === 'foreign') detail.push(`  ${wrapperDir} is not the bundled /terum-skills Claude Code skill (${wrapperPresence.why}); left alone`);"
+    "pattern": "detail.push(root.managed.length ? `  terum-skills skills in ${root.root}: ${root.managed.map((skill) => skill.name).join(', ')}` : `  No terum-skills skills in ${root.root}`);"
   },
   {
     "file": "src/commands/uninstallMachine.ts",
-    "line": 68,
+    "line": 74,
     "policy": "not-a-hint",
-    "pattern": "else detail.push(`  ${wrapperPresence.kind === 'managed' ? '/terum-skills Claude Code skill at' : 'No /terum-skills Claude Code skill at'} ${wrapperDir}`);"
+    "pattern": "for (const entry of root.foreign) detail.push(`  ${entry.directory} is not a bundled terum-skills skill (${entry.why}); left alone`);"
   },
   {
     "file": "src/commands/uninstallMachine.ts",
-    "line": 76,
+    "line": 86,
     "policy": "fixed",
     "pattern": "detail.push('Your membership and installed-skill records in the team repo are unchanged. Rejoining does not re-place skills; `npx -y terum-skills@latest install member <handle>` does.');"
   },
   {
     "file": "src/commands/uninstallMachine.ts",
-    "line": 78,
+    "line": 88,
     "policy": "prose",
     "pattern": "if (!(await io.confirm('Remove terum-skills from this machine?', { detail }))) return cancelled('Uninstall was cancelled.');"
   },
   {
     "file": "src/commands/uninstallMachine.ts",
-    "line": 84,
+    "line": 94,
     "policy": "prose",
     "pattern": "io.print(`Wrote a record of this machine's terum-skills state to ${record}.`);"
   },
   {
     "file": "src/commands/uninstallMachine.ts",
-    "line": 96,
+    "line": 108,
     "policy": "not-a-hint",
-    "pattern": "catch (error) { return failure(`${message(error)}; the /terum-skills skill was left in place and nothing else was removed`); }"
+    "pattern": "catch (error) { return failure(`${message(error)}; removing the terum-skills skills stopped at ${skill.directory} and the teams were left in place`); }"
   },
   {
     "file": "src/commands/uninstallMachine.ts",
-    "line": 97,
+    "line": 110,
     "policy": "not-a-hint",
-    "pattern": "if (wrapperRemoved) io.print(`Removed the /terum-skills Claude Code skill from ${wrapperDir}.`);"
+    "pattern": "if (removed.length) io.print(`Removed the terum-skills skills from ${root.root}: ${removed.join(', ')}.`);"
   },
   {
     "file": "src/commands/update.ts",
@@ -545,12 +545,6 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
   },
   {
     "file": "src/lib/wrapper.ts",
-    "line": 31,
-    "policy": "not-a-hint",
-    "pattern": "return { roots, bundle: BUNDLED_SKILLS, skillsRoot: roots[0]!.root, source: join(BUNDLED_SKILLS, 'terum-skills', 'SKILL.md') };"
-  },
-  {
-    "file": "src/lib/wrapper.ts",
     "line": 130,
     "policy": "not-a-hint",
     "pattern": "if (presence.kind === 'foreign') throw new Error(`${directory} exists and is not a bundled terum-skills skill (${presence.why}); move it aside and re-run.`);"
@@ -596,24 +590,6 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "line": 185,
     "policy": "not-a-hint",
     "pattern": "io.print(`The terum-skills skills at ${roots.map((root) => root.root).join(' and ')} are current.`);"
-  },
-  {
-    "file": "src/lib/wrapper.ts",
-    "line": 227,
-    "policy": "not-a-hint",
-    "pattern": "/** @deprecated Task 5 removes this. */ export const WRAPPER_NAME = 'terum-skills';"
-  },
-  {
-    "file": "src/lib/wrapper.ts",
-    "line": 244,
-    "policy": "not-a-hint",
-    "pattern": "if (isMissing(error)) throw new Error(`The terum-skills skills are not bundled in this copy of terum-skills (expected under ${dirname(dirname(options.source))}).`);"
-  },
-  {
-    "file": "src/lib/wrapper.ts",
-    "line": 247,
-    "policy": "not-a-hint",
-    "pattern": "if (!isManagedSkill(raw)) throw new Error(`The terum-skills skills are not bundled in this copy of terum-skills (expected under ${dirname(dirname(options.source))}).`);"
   },
   {
     "file": "src/commands/app.ts",

@@ -10,7 +10,8 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createConfigStore } from '../lib/config.js';
 import { systemRunner } from '../lib/runner.js';
 import { installPushGuard } from '../lib/teamRepo.js';
-import { bareTeam, cloneWithIdentity, dashboardTeam, exists, git, pushFromSeed } from '../lib/__tests__/fixtures.js';
+import { readBundledSkills } from '../lib/wrapper.js';
+import { bareTeam, CANONICAL_SKILLS, cloneWithIdentity, dashboardTeam, exists, git, pushFromSeed } from '../lib/__tests__/fixtures.js';
 
 const run = promisify(execFile);
 const MINE = '11111111-1111-4111-8111-111111111111';
@@ -151,22 +152,29 @@ describe('the built bin (dist/index.js)', () => {
     expect(help.stdout).not.toContain('"t":"result"');
   });
 
-  it('the build bundles the canonical /terum-skills skill where the built wrapper module resolves it, byte for byte, marker intact', async () => {
+  it('the build bundles every marked canonical skill where the built wrapper module resolves it, byte for byte, markers intact', async () => {
     const bundle = await run(process.execPath, [resolve(root, 'scripts', 'bundle-skill.mjs'), '--out', resolve(out, 'dist')], { cwd: root });
-    const bundled = resolve(out, 'dist', 'claude', 'skills', 'terum-skills', 'SKILL.md');
+    const canonical = (await readBundledSkills(CANONICAL_SKILLS))!;
+    const names = [...canonical.keys()].sort();
+    const bundled = (name: string) => resolve(out, 'dist', 'claude', 'skills', name, 'SKILL.md');
     const bundledHook = resolve(out, 'dist', 'claude', 'hooks', 'terum-skills-edit.mjs');
     expect(bundle.stderr.trim().split('\n')).toEqual([
-      `Bundled ${resolve(root, '.claude', 'skills', 'terum-skills', 'SKILL.md')} -> ${bundled}`,
+      ...names.map((name) => `Bundled ${resolve(root, '.claude', 'skills', name, 'SKILL.md')} -> ${bundled(name)}`),
       `Bundled ${resolve(root, 'assets', 'claude', 'hooks', 'terum-skills-edit.mjs')} -> ${bundledHook}`,
     ]);
-    expect(await readFile(bundled, 'utf8')).toBe(await readFile(resolve(root, '.claude', 'skills', 'terum-skills', 'SKILL.md'), 'utf8'));
+    for (const name of names) expect(await readFile(bundled(name), 'utf8'), name).toBe(canonical.get(name));
     const wrapper = await import(pathToFileURL(resolve(out, 'dist', 'lib', 'wrapper.js')).href) as typeof import('../lib/wrapper.js');
-    expect(wrapper.BUNDLED_WRAPPER).toBe(bundled);
-    expect(wrapper.isManagedWrapper(await readFile(bundled, 'utf8'))).toBe(true);
-    const home = resolve(out, 'bundle-home');
-    expect(await wrapper.wrapperState(wrapper.defaultWrapperOptions(home))).toBe('absent');
-    expect(await wrapper.installWrapper(wrapper.defaultWrapperOptions(home))).toBe('installed');
-    expect(await readFile(resolve(home, '.claude', 'skills', 'terum-skills', 'SKILL.md'), 'utf8')).toBe(await readFile(bundled, 'utf8'));
+    expect(wrapper.BUNDLED_SKILLS).toBe(resolve(out, 'dist', 'claude', 'skills'));
+    const fromDist = await wrapper.readBundledSkills(wrapper.BUNDLED_SKILLS);
+    expect(fromDist && [...fromDist.keys()].sort()).toEqual(names);
+    const home = resolve(out, 'bundle-home'); await mkdir(resolve(home, '.codex'), { recursive: true });
+    const options = wrapper.defaultWrapperOptions(home, {});
+    expect(options.roots).toEqual([{ host: 'claude', root: resolve(home, '.claude', 'skills') }, { host: 'codex', root: resolve(home, '.codex', 'skills') }]);
+    expect(await wrapper.refreshManagedSkills(options)).toEqual([]);
+    for (const name of names) expect(await wrapper.installManagedSkill(options.roots[0]!.root, name, fromDist!.get(name)!)).toBe('installed');
+    for (const name of names) expect(await readFile(resolve(home, '.claude', 'skills', name, 'SKILL.md'), 'utf8')).toBe(canonical.get(name));
+    expect(await wrapper.refreshManagedSkills(options)).toEqual([]);
+    expect((await wrapper.listManagedSkills(options.roots[1]!.root))).toEqual([]);
 
     // The edit hook ships on the same contract, from assets/ rather than .claude/ (it is run, not loaded).
     expect(await readFile(bundledHook, 'utf8')).toBe(await readFile(resolve(root, 'assets', 'claude', 'hooks', 'terum-skills-edit.mjs'), 'utf8'));

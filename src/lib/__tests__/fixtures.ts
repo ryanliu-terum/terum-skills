@@ -36,7 +36,7 @@ export function editHookFor(storeRoot: string, settingsFile: string): { storeRoo
 /** Both managed roots under `home`, judged against canonical skills; env decides CODEX_HOME. */
 export function wrapperFor(home: string, env: NodeJS.ProcessEnv = {}): Required<WrapperOptions> {
   const roots = managedSkillRoots(home, env);
-  return { roots, bundle: CANONICAL_SKILLS, skillsRoot: roots[0]!.root, source: BUNDLED_SKILL_SOURCE };
+  return { roots, bundle: CANONICAL_SKILLS };
 }
 
 /**
