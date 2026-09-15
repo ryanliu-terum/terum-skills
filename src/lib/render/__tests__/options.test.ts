@@ -38,6 +38,8 @@ describe('the --format pre-parser (D1)', () => {
     [['--format', 'md', '--rows', 'ten'], '--rows must be a positive integer or all.'],
     [['--format', 'md', '--width', '39'], '--width must be an integer of at least 40.'],
     [['--format', 'md', '--width=abc'], '--width must be an integer of at least 40.'],
+    [['--format', 'md', '--width', '9'.repeat(400)], '--width must be an integer of at least 40.'], // digits that overflow to Infinity are not an integer
+    [['--format', 'md', '--rows', '9'.repeat(400)], '--rows must be a positive integer or all.'],
     [['--rows', '5', 'ls'], '--rows, --width, --host and --no-color need --format.'],
     [['--no-color', 'ls'], '--rows, --width, --host and --no-color need --format.'],
   ])('refuses %j with one line', (rest, error) => {

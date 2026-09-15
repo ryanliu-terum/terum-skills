@@ -87,7 +87,8 @@ if (argv[2] === 'serve') {
     process.exitCode = 1;
   }
   }
-} else if (argv[2] === 'sync' && hookRequested && render.formatGiven) {
+} else if (!frames && argv[2] === 'sync' && hookRequested && render.formatGiven) {
+  // Plain runs only: under --frames the channel below answers with the one result frame the protocol promises.
   stderrLine("sync --hook's stdout is the reload directive; drop --format.");
   process.exitCode = 1;
 } else {

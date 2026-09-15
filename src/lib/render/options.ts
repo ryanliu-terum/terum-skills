@@ -75,7 +75,7 @@ export function parseRenderOptions(argv: readonly string[], env: NodeJS.ProcessE
     if (token === '--width' || token.startsWith('--width=')) {
       othersGiven = true;
       const { value, next } = take('--width', index);
-      if (value === undefined || !/^[0-9]+$/.test(value) || Number(value) < 40) return { ok: false, error: WIDTH_ERROR };
+      if (value === undefined || !/^[0-9]+$/.test(value) || !Number.isSafeInteger(Number(value)) || Number(value) < 40) return { ok: false, error: WIDTH_ERROR };
       width = Number(value); index = next; continue;
     }
     if (token === '--no-color') { othersGiven = true; noColor = true; index += 1; continue; }

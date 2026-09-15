@@ -90,6 +90,14 @@ describe('the built bin (dist/index.js)', () => {
     expect(frames[0].t).toBe('hello');
     expect(frames.at(-1)).toMatchObject({ t: 'result', verb: 'status', ok: false, error: '--frames is already a machine format; drop --format.', exitCode: 1 });
   });
+  it('--frames sync --hook --format is the same framed refusal, never the plain stderr line', async () => {
+    const failed = await framedRun(['--frames', 'sync', '--hook', '--format', 'md']).then(() => { throw new Error('expected failure'); }, (error: { code: number; stdout: string; stderr: string }) => error);
+    expect(failed.code).toBe(1);
+    const frames = failed.stdout.trim().split('\n').map((l) => JSON.parse(l));
+    expect(frames[0].t).toBe('hello');
+    expect(frames.at(-1)).toMatchObject({ t: 'result', verb: 'sync', ok: false, error: '--frames is already a machine format; drop --format.', exitCode: 1 });
+    expect(failed.stderr).not.toContain("sync --hook's stdout is the reload directive");
+  });
   it('renders md and json boards for the read verbs against dashboardTeam()', async () => {
     const f = await dashboardTeam({ storeUnderHome: true, localRemote: true });
     const child = { ...env, HOME: f.home, USERPROFILE: f.home, GH_CONFIG_DIR: resolve(f.home, '.config', 'gh') };
