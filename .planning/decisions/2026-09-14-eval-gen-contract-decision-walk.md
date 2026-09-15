@@ -36,6 +36,13 @@ Run outcome (final, 7 of 9 evaluated): 7 receipts published to shared-skills, 3 
 no receipt (codex-spec — unsafe path; single-fix — generation timeout). 8 cases aborted at setup. Latent since IE5 — the 0.1.5 prompt was
 equally silent; the old sets happened to comply.
 
+## Shipped
+
+D1–D4 and D6 landed on `main` as PR #254 (merge `ab3bc1b`, 2026-09-15 05:53 UTC; branch
+`fix/eval-gen-runtime-contract`, commit `f73b25d`). CI: actionlint, gates, mirrors, package all green;
+local `npm test` 2283/2283. Not yet in a published npm release at time of writing — D7's regeneration
+runs against the released CLI, so it waits for the next release to carry this commit.
+
 ## Decision Ledger
 
 | # | Decision | Verdict | Rationale (plain) | Trigger / Pointer |
