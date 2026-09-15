@@ -43,11 +43,10 @@ it('renders recorded markdown, validation and the recorded frontmatter, omitting
   expect(screen.getByTestId('frontmatter').textContent).toBe(frontmatter);
   expect(screen.queryByText(/184 lines/)).toBeNull();
   expect(screen.queryByRole('button', { name: 'Favorite skill' })).toBeNull();
+  // The Quality panel is behind QUALITY_ACTIVITY_SHIPPED (SkillScreen.tsx); the recorded hygiene it used
+  // to show is asserted in skill-detail-screens.test.tsx, skipped until the tab ships.
   fireEvent.click(screen.getByRole('tab', { name: 'Quality' }));
-  expect(await screen.findByText('Hygiene checks · passed on connect · free, no model calls')).toBeVisible();
-  expect(screen.queryByText(/12 days ago/)).toBeNull();
-  expect(screen.queryByText('none')).toBeNull();
-  expect(screen.getByText('No tool grants requested')).toBeVisible();
+  expect(await within(screen.getByRole('region', { name: 'Quality' })).findByText('Coming soon')).toBeVisible();
   // `validate` is a session read verb: after the first hello it is a request over the `serve` child, not a spawn.
   expect(f.requests.find(request => request.argv[0] === 'validate')?.argv).toEqual(['validate', '--team', 'acme', '--', 'deploy-check']);
 });

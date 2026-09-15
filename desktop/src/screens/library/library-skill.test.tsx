@@ -139,8 +139,8 @@ it.each([
  ['#/library/global?__mock=empty','No skills in your global library'],
  ['#/library/global?__mock=error',"Couldn't read your library"],
  ['#/skill/deploy-check?__mock=error',"Couldn't read deploy-check"],
- ['#/skill/deploy-check?tab=quality','Tool grants'],
- ['#/skill/deploy-check?tab=activity','10 events'],
+ ['#/skill/deploy-check?tab=quality','Coming soon'],
+ ['#/skill/deploy-check?tab=activity','Coming soon'],
  ['#/skill/deploy-check?menu=files','3 files'],
  ['#/skill/deploy-check?tab=evals&rail=closed&full=1','Coverage and provenance'],
 ])('reaches the real board content at %s',async(route,text)=>{open(route);expect(await screen.findByText(text)).toBeInTheDocument();expect(screen.queryByText(/S1b builds this/)).toBeNull();await waitFor(()=>expect(document.documentElement.dataset.appReady).toBe('true'));});
@@ -362,10 +362,16 @@ it('the empty library degrades its primary to the marketplace link when the CLI 
  await waitFor(()=>expect(location.hash).toBe('#/marketplace'));
 });
 
-it('preserves the mock breadcrumb and fixture hygiene caption',async()=>{
+it('preserves the mock breadcrumb',async()=>{
  open('#/skill/deploy-check');
  await screen.findByRole('heading',{name:'deploy-check'});
  expect(document.querySelector('.detail-crumbs')?.textContent).toBe('Global/terum/infra/deploy-check');
+});
+// Skipped 2026-09-14: the Quality panel is behind QUALITY_ACTIVITY_SHIPPED (SkillScreen.tsx), so the
+// fixture's hygiene caption has nowhere to render. Un-skip when the tab ships.
+it.skip('shows the fixture hygiene caption on Quality',async()=>{
+ open('#/skill/deploy-check');
+ await screen.findByRole('heading',{name:'deploy-check'});
  fireEvent.click(screen.getByRole('tab',{name:'Quality'}));
  expect(screen.getByText('Hygiene checks · passed on connect, 12 days ago · free, no model calls')).toBeVisible();
 });
