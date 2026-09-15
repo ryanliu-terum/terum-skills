@@ -9,6 +9,7 @@ export type BulkRowState =
   | { kind: 'done'; text: string }
   | { kind: 'failed'; error: string }
   | { kind: 'cancelled' }
+  | { kind: 'abandoned' }
   | { kind: 'not-started' };
 
 export interface BulkRow { key: string; card: SkillCard; state: BulkRowState }
@@ -23,6 +24,7 @@ export function rowText(state: BulkRowState): string {
     case 'done': return state.text;
     case 'failed': return `Failed · ${state.error}`;
     case 'cancelled': return 'Cancelled';
+    case 'abandoned': return 'Stopped without confirming';
     case 'not-started': return 'Not started';
   }
 }
