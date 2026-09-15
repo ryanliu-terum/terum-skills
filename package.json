@@ -1,6 +1,6 @@
 {
   "name": "terum-skills",
-  "version": "0.19.0",
+  "version": "0.20.0",
   "description": "Share private Claude Code skills across a team through one private git repo. No server.",
   "license": "Apache-2.0",
   "type": "module",
