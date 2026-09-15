@@ -96,3 +96,41 @@ describe('resolveAgentCommand reads the shim when the conventional package path 
     expect(legacy.ok ? '' : legacy.error).toContain('native Windows installer');
   });
 });
+
+describe('resolveAgentCommand follows a shim to a native binary (Claude Code ≥ 2.1 ships bin\\claude.exe in the npm package)', () => {
+  // Teddy's machine, 2026-09-15: nvm-windows puts C:\nvm4w\nodejs first on PATH, whose claude.cmd is
+  //   "%dp0%\node_modules\@anthropic-ai\claude-code\bin\claude.exe"   %*
+  // There is no cli.js in that package any more, so every eval died at preflight in 13 ms.
+  const nvm = 'C:\\nvm4w\\nodejs';
+  const exe = `${nvm}\\node_modules\\@anthropic-ai\\claude-code\\bin\\claude.exe`;
+  const shim = '@ECHO off\r\nGOTO start\r\n:find_dp0\r\nSET dp0=%~dp0\r\nEXIT /b\r\n:start\r\nSETLOCAL\r\nCALL :find_dp0\r\n"%dp0%\\node_modules\\@anthropic-ai\\claude-code\\bin\\claude.exe"   %*\r\n';
+  const withShim = (files: readonly string[], env: NodeJS.ProcessEnv): AgentCommandEvidence => ({ ...evidence(files, env), readText: (path) => path.toLowerCase() === `${nvm}\\claude.cmd`.toLowerCase() ? shim : null });
+
+  it('launches the .exe the shim names directly, arguments untouched', () => {
+    expect(shimScripts(`${nvm}\\claude.cmd`, shim)).toEqual([exe]);
+    expect(resolveAgentCommand('claude', ARGS, withShim([`${nvm}\\claude.cmd`, exe], { PATH: `C:\\Windows;${nvm}` }))).toEqual({ ok: true, value: { file: exe, args: ARGS } });
+  });
+
+  it('still runs a script target on the current Node, and reports a named .exe that does not exist', () => {
+    const result = resolveAgentCommand('claude', ARGS, withShim([`${nvm}\\claude.cmd`], { PATH: nvm }));
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error('expected a failure');
+    expect(result.error).toContain(`It launches ${exe}, which does not exist.`);
+  });
+
+  it('falls back to the native installer\'s %USERPROFILE%\\.local\\bin\\claude.exe when the shim is opaque, but never ahead of PATH or for an explicit command', () => {
+    const home = 'C:\\Users\\teddy', native = `${home}\\.local\\bin\\claude.exe`;
+    const opaque = resolveAgentCommand('claude', ARGS, evidence(['C:\\volta\\bin\\claude.cmd', native], { PATH: 'C:\\volta\\bin', USERPROFILE: home }));
+    expect(opaque).toEqual({ ok: true, value: { file: native, args: ARGS } });
+    // PATH order still wins when the shim can be followed.
+    expect(resolveAgentCommand('claude', ARGS, withShim([`${nvm}\\claude.cmd`, exe, native], { PATH: nvm, USERPROFILE: home }))).toEqual({ ok: true, value: { file: exe, args: ARGS } });
+    // An explicit TERUM_SKILLS_AGENT_CMD shim that cannot be followed is reported, not silently swapped.
+    const explicit = resolveAgentCommand('C:\\volta\\bin\\claude.cmd', ARGS, evidence(['C:\\volta\\bin\\claude.cmd', native], { USERPROFILE: home }));
+    expect(explicit.ok).toBe(false);
+    // Nothing native installed: the original remedy stands.
+    const none = resolveAgentCommand('claude', ARGS, evidence(['C:\\volta\\bin\\claude.cmd'], { PATH: 'C:\\volta\\bin', USERPROFILE: home }));
+    expect(none.ok).toBe(false);
+    if (none.ok) throw new Error('expected a failure');
+    expect(none.error).toContain('native Windows installer');
+  });
+});

@@ -11,7 +11,12 @@ export interface EvalRunApi {
  startMany?(args:EvalManyArgs):void;
  isRunning?():boolean;
  startQueued?(item:EvalQueueItem):Promise<Result<EvalQueueResult>>;
- stop():Promise<void>;dismiss():void;show():void;
+ stop():Promise<void>;
+ /** Closes the run's dialog and nothing else: a settled run keeps its top-bar chip until `clear` (UI policy §5). */
+ dismiss():void;
+ /** Forgets a settled run (the chip's ✕). A running run is never cleared; Stop is the only way out of one. */
+ clear():void;
+ show():void;
 }
-export const EvalRunContext=createContext<EvalRunApi>({current:null,dialogOpen:false,start:()=>{},stop:async()=>{},dismiss:()=>{},show:()=>{}});
+export const EvalRunContext=createContext<EvalRunApi>({current:null,dialogOpen:false,start:()=>{},stop:async()=>{},dismiss:()=>{},clear:()=>{},show:()=>{}});
 export function useEvalRun(){return useContext(EvalRunContext);}

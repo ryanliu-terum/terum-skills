@@ -1,6 +1,7 @@
 import { QueryClientContext } from '@tanstack/react-query';
 import { useCallback, useContext, useState, useSyncExternalStore } from 'react';
 import { useEvalRun } from '../../app/eval-run-context';
+import { evalChip } from '../../app/eval-run-status';
 import { Button } from '../ui/Button';
 import { useBackend, usePreference } from '../../backend';
 import type { AppUpdateStatus, Result, Surfaces, Capabilities } from '../../backend/types';
@@ -12,7 +13,7 @@ import { TerumMark } from './TerumMark';
 import { WindowControls } from './WindowControls';
 export function TopBar({mode,controlsEnd=null,inboxAvailable=true,sidebarCollapsed=false,onShowSidebar}:{mode:Capabilities['windowChrome'];controlsEnd?:Capabilities['windowControlsEnd'];inboxAvailable?:boolean;sidebarCollapsed?:boolean;onShowSidebar?:()=>void}){
  const backend=useBackend(),[error,setError]=useState<string|null>(null);
- const {current,show,stop}=useEvalRun();
+ const {current,show,stop,clear}=useEvalRun(),chip=evalChip(current);
  // The bar is also usable before a query cache exists. Read only: Shell and the launch hook own these observations.
  const client=useContext(QueryClientContext);
  const subscribe=useCallback((notify:()=>void)=>client?.getQueryCache().subscribe(notify)??(()=>{}),[client]);
@@ -27,5 +28,5 @@ export function TopBar({mode,controlsEnd=null,inboxAvailable=true,sidebarCollaps
  <WindowControls mode={mode} controlsEnd={controlsEnd} {...drag}/>
  <div className="mark-slot"><TerumMark/></div><button className="icon-button" aria-label="Back" onClick={()=>history.back()}><Icon name="chevron-left"/></button><button className="icon-button" aria-label="Forward" onClick={()=>history.forward()}><Icon name="chevron-right"/></button>{sidebarCollapsed?<button type="button" className="icon-button" aria-label="Show sidebar" aria-expanded={false} onClick={onShowSidebar} style={{width:20,height:20,color:'var(--tk-text4)'}}><Icon name="panel-left" size={14}/></button>:null}
  </div><div className="search-slot" {...drag}><a className="shell-link search-box" href="#/search"><Icon name="search"/><span style={{flexGrow:1,whiteSpace:'nowrap'}}>Search skills, people, projects</span><Kbd>{searchShortcutLabel(mode)}</Kbd></a></div>
- <div className="topbar-right" {...drag}>{available?<button className="eval-chip update-chip" onClick={()=>{location.hash='/settings/updates?focus=app';}}><span style={{display:"inline-flex",verticalAlign:"middle"}}><Icon name="arrow-down-to-line" size={12}/></span> {stagedAppUpdate(status)!==null?'Update ready':'Update available'} · {status.latest}</button>:null}{current?.state==='running'?<><button className="eval-chip" title={`Eval running · ${current.name}`} onClick={show}>Eval running · {current.name}</button><Button kind="danger" height={24} onClick={()=>void stop()}>Stop</Button></>:null}{inboxAvailable?<a data-badge={badge||undefined} className="shell-link icon-button bell-button" aria-label="Inbox" href="#/inbox"><Icon name="bell"/></a>:null}{error?<span role="alert">{error}</span>:null}</div></header>;
+ <div className="topbar-right" {...drag}>{available?<button className="eval-chip update-chip" onClick={()=>{location.hash='/settings/updates?focus=app';}}><span style={{display:"inline-flex",verticalAlign:"middle"}}><Icon name="arrow-down-to-line" size={12}/></span> {stagedAppUpdate(status)!==null?'Update ready':'Update available'} · {status.latest}</button>:null}{chip?<><button className="eval-chip" data-tone={chip.tone} aria-label={chip.label} title={chip.title} onClick={show}>{chip.running?<span className="eval-dot" aria-hidden="true"/>:null}<span className="eval-chip-state">{chip.state}</span>{chip.subject===null?null:<span className="eval-chip-subject">{'\u00a0· '+chip.subject}</span>}</button>{chip.running?<Button kind="danger" height={24} iconOnly aria-label="Stop" title="Stop eval" onClick={()=>void stop()}><span className="stop-glyph" aria-hidden="true"/></Button>:<button className="icon-button" aria-label="Dismiss eval status" onClick={clear} style={{width:20,height:20}}><Icon name="x" size={12}/></button>}</>:null}{inboxAvailable?<a data-badge={badge||undefined} className="shell-link icon-button bell-button" aria-label="Inbox" href="#/inbox"><Icon name="bell"/></a>:null}{error?<span role="alert">{error}</span>:null}</div></header>;
 }

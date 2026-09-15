@@ -5,6 +5,7 @@ import { useLocation, useSearchParams } from 'react-router';
 import { useBackend } from '../backend';
 import type { Result, SkillDetail } from '../backend/types';
 import { useEvalRun } from './eval-run-context';
+import { runStatus } from './eval-run-status';
 import { RunEvalDialog } from '../screens/skill/RunEvalDialog';
 import { BulkEvalDialog, BulkEvalRunDialog } from '../components/domain/BulkEvalDialog';
 export function EvalRunDialogHost(){
@@ -26,7 +27,7 @@ export function EvalRunDialogHost(){
  const bulk=params.get('dialog')==='bulk-eval';
  function closeBulk(){setParams(p=>{p.delete('dialog');p.delete('ref');p.delete('pending');return p;},{replace:true});}
  if(bulk&&!(current!==null&&dialogOpen))return <BulkEvalDialog refs={params.getAll('ref')} pending={params.get('pending')==='1'} team={params.get('team')??undefined} onClose={closeBulk}/>;
- if(current?.queue)return dialogOpen?<WorkflowDialog title={`Queued eval · ${current.name}`} body="Running queued evals four at a time. Receipts are committed to the team." command="npx -y terum-skills@latest eval --drain --parallel 4" primary={null} close={dismiss} submit={()=>{}} busy={current.state==='running'} onStop={()=>void stop()} dismissKeepsRunning lines={current.lines} status={current.state==='running'?(current.progress?`${current.progress.done} of ${current.progress.total} evaluated`:'Running…'):current.state==='stopped'?'Stopped':current.result?.ok===false?current.result.error:'Finished'} closeLabel="Close"/>:null;
+ if(current?.queue)return dialogOpen?<WorkflowDialog title={`Queued eval · ${current.name}`} body="Running queued evals four at a time. Receipts are committed to the team." command="npx -y terum-skills@latest eval --drain --parallel 4" primary={null} close={dismiss} submit={()=>{}} busy={current.state==='running'} onStop={()=>void stop()} dismissKeepsRunning lines={current.lines} status={runStatus(current)} closeLabel="Close"/>:null;
  if(current?.many!==undefined)return dialogOpen?<BulkEvalRunDialog current={{...current,many:current.many}} onClose={dismiss} onStop={()=>void stop()}/>:null;
  return current&&skill?<RunEvalDialog key={current.startedAt} skill={skill} open={fromUrl} onClose={closeUrl}/>:null;
 }

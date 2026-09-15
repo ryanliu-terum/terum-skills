@@ -58,7 +58,11 @@ it('renders update advice verbatim from the DTO without opening a command in an 
  report.value.advice=['Running from a source checkout.','  custom build <command> & preserve spacing'];
  vi.spyOn(backend,'update').mockResolvedValue(report);const editor=vi.spyOn(backend,'openInEditor');
  open('#/settings/updates');fireEvent.click(await screen.findByRole('button',{name:'Show update command'}));
- const dialog=await screen.findByRole('dialog');await waitFor(()=>expect(dialog.querySelector('pre')?.textContent).toBe(report.value.advice.join('\n')));
+ // UI policy §1: the prose lines stay prose and each indented command becomes a copyable CliBox — the CLI's words verbatim, never re-derived.
+ const dialog=await screen.findByRole('dialog');await waitFor(()=>expect(dialog.querySelector('.advice-block')).not.toBeNull());
+ expect(dialog.querySelector('pre')).toBeNull();
+ expect(dialog).toHaveTextContent('Running from a source checkout.');
+ expect(dialog.querySelector('.cli-box .board-mono')).toHaveTextContent('custom build <command> & preserve spacing');
  expect(editor).not.toHaveBeenCalled();expect(location.hash).toContain('dialog=update');
  fireEvent.click(within(dialog).getByRole('button',{name:'Close'}));await waitFor(()=>expect(screen.queryByRole('dialog')).toBeNull());
 });
@@ -85,7 +89,9 @@ it('accepts machine removal once, renders the complete CLI outcome, and quits',a
  const run=uninstall.mock.results[0]!.value,answer=vi.spyOn(run,'answer');fireEvent.click(remove);
  const region=await screen.findByRole('region',{name:'terum-skills was removed from this machine'});
  expect(uninstall).toHaveBeenCalledExactlyOnceWith({});expect(answer).toHaveBeenCalledExactlyOnceWith(expect.any(String),true);
- for(const line of [`Left: ${design.TEAMS.map(t=>t.key).join(', ')}`,`Placed skills removed: ${design.PLACEMENTS_N}`,'Hook: removed','/terum-skills skill: removed','config.json: removed','Kept: ~/.terum/skills/backups','Record: ~/.terum/skills/backups/uninstall.2026-09-09T12-00-00-000Z.json',...MOCK_REMOVE_ADVICE])expect(within(region).getByText(line,{exact:true})).toBeInTheDocument();
+ for(const line of [`Left: ${design.TEAMS.map(t=>t.key).join(', ')}`,`Placed skills removed: ${design.PLACEMENTS_N}`,'Hook: removed','/terum-skills skill: removed','config.json: removed','Kept: ~/.terum/skills/backups','Record:',...MOCK_REMOVE_ADVICE])expect(within(region).getByText(line,{exact:true})).toBeInTheDocument();
+ // UI policy §2: the record path is a PathText — the full path lives in the title and on copy, never in prose.
+ expect(screen.getByTitle('~/.terum/skills/backups/uninstall.2026-09-09T12-00-00-000Z.json')).toBeInTheDocument();
  const lines=["Wrote a record of this machine's terum-skills state to ~/.terum/skills/backups/uninstall.2026-09-09T12-00-00-000Z.json.",...design.TEAMS.flatMap(t=>[`Leaving ${t.key}…`,`Left ${t.key}.`])];
  expect(within(region).getByRole('log').textContent).toBe(lines.join('\n'));
  fireEvent.click(within(region).getByRole('button',{name:'Show in Finder'}));expect(reveal).toHaveBeenCalledWith('~/.terum/skills/backups/uninstall.2026-09-09T12-00-00-000Z.json');
@@ -104,7 +110,7 @@ it('renders a partial removal failure and allows closing it',async()=>{
 });
 it('refuses removal while an eval is running and offers to show it',async()=>{
  const uninstall=vi.spyOn(backend,'uninstallMachine'),show=vi.fn();
- open('#/settings/advanced',{current:{state:'running',ref:'deploy-check',name:'deploy-check',team:undefined,run:createRun(async()=>({ok:true,value:{name:'deploy-check',runDir:'/eval',executionStatus:'complete',team:null,id:null,shareHint:true}})),lines:[],startedAt:0},dialogOpen:false,start:()=>{},stop:async()=>{},dismiss:()=>{},show});
+ open('#/settings/advanced',{current:{state:'running',ref:'deploy-check',name:'deploy-check',team:undefined,run:createRun(async()=>({ok:true,value:{name:'deploy-check',runDir:'/eval',executionStatus:'complete',team:null,id:null,shareHint:true}})),lines:[],startedAt:0},dialogOpen:false,start:()=>{},stop:async()=>{},dismiss:()=>{},clear:()=>{},show});
  fireEvent.click(await screen.findByRole('button',{name:'Remove…'}));
  const dialog=await screen.findByRole('dialog',{name:'Stop the running eval first'});expect(uninstall).not.toHaveBeenCalled();
  fireEvent.click(within(dialog).getByRole('button',{name:'Show eval'}));expect(show).toHaveBeenCalledOnce();
@@ -135,7 +141,7 @@ it('shows an update failure without substituting fixture advice',async()=>{
  open('#/settings/updates?dialog=update');const dialog=await screen.findByRole('dialog');
  await waitFor(()=>expect(dialog).toHaveTextContent('Cannot read release state.'));
  expect(within(dialog).getByRole('alert')).toHaveTextContent('Cannot read release state.');
- expect((await screen.findByRole('dialog')).querySelector('pre')).toBeNull();
+ expect((await screen.findByRole('dialog')).querySelector('.advice-block')).toBeNull();
 });
 
 it('waits for update data before declaring the Updates board ready',async()=>{
@@ -315,7 +321,9 @@ it('runs diagnostics once in a Status dialog and never opens a command path',asy
 it('routes About Check to the Updates dialog with verbatim advice and preserves mock mode',async()=>{
  const report=await backend.update();if(!report.ok)throw new Error(report.error);
  vi.spyOn(backend,'update').mockResolvedValue(report);open('#/settings/about?__mock=empty');fireEvent.click(await screen.findByRole('button',{name:'Check'}));
- const dialog=await screen.findByRole('dialog');await waitFor(()=>expect(dialog.querySelector('pre')?.textContent).toBe(report.value.advice.join('\n')));
+ const dialog=await screen.findByRole('dialog');await waitFor(()=>expect(dialog.querySelector('.advice-block')).not.toBeNull());
+ for(const line of report.value.advice)expect(dialog).toHaveTextContent(line.trim());
+ expect(dialog.querySelector('.cli-box .board-mono')).toHaveTextContent('npx -y terum-skills@latest <command>');
  expect(location.hash).toContain('/settings/updates?dialog=update&__mock=empty');
 });
 it('names the known latest CLI release on About',async()=>{
