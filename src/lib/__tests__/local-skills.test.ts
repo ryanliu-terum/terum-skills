@@ -229,16 +229,17 @@ describe('project local discovery (Ryan 2026-09-06)', () => {
   });
 });
 
-describe('the bundled /terum-skills Claude Code skill is not a team skill', () => {
+describe('a bundled terum-skills skill is not a team skill', () => {
   it('discovery rejects it with its own reason under any folder name, and connect refuses it', async () => {
     const root = await temporaryDirectory();
     const bundled = await readFile(BUNDLED_SKILL_SOURCE, 'utf8');
     await candidate(root, 'terum-skills', bundled);
     await candidate(root, 'renamed-copy', bundled);
+    await candidate(root, 'list-skills', '---\nname: list-skills\ndescription: a marked copy\nmetadata:\n  managed-by: terum-skills\n---\n');
     await candidate(root, 'plain');
     const inventory = await localSkills(root, emptyConfig(), { scope: 'global', stateRoot: join(root, '.state') });
-    const rejected = { kind: 'rejected', reason: 'managed-wrapper', detail: 'the /terum-skills Claude Code skill that ships with terum-skills; not a team skill' };
-    for (const name of ['terum-skills', 'renamed-copy']) {
+    const rejected = { kind: 'rejected', reason: 'managed-wrapper', detail: 'a terum-skills skill that ships with terum-skills; not a team skill' };
+    for (const name of ['terum-skills', 'renamed-copy', 'list-skills']) {
       const inspection = inventory.entries.find((entry) => entry.name === name)?.inspection;
       expect(inspection).toMatchObject(rejected);
       // Refused for connect, still readable: the wrapper's frontmatter parsed, so the description
@@ -246,7 +247,7 @@ describe('the bundled /terum-skills Claude Code skill is not a team skill', () =
       expect(inspection?.kind === 'rejected' && inspection.description).toBeTruthy();
     }
     expect(candidatesOf(inventory, true).map((entry) => entry.name)).toEqual(['plain']);
-    expect(() => assertSkillSource(bundled, 'terum-skills')).toThrow('This folder is the /terum-skills Claude Code skill that ships with terum-skills and is placed by setup; it cannot be connected to a team.');
+    expect(() => assertSkillSource(bundled, 'terum-skills')).toThrow('This folder is a terum-skills skill that ships with terum-skills and is placed by setup; it cannot be connected to a team.');
   });
 });
 

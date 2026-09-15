@@ -475,13 +475,13 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "file": "src/lib/skill-source.ts",
     "line": 58,
     "policy": "prose",
-    "pattern": "// The /terum-skills Claude Code skill ships inside this package and is placed by setup; it is not a"
+    "pattern": "// The terum-skills skills ship inside this package and are placed by setup; none is a team skill,"
   },
   {
     "file": "src/lib/skill-source.ts",
     "line": 60,
     "policy": "not-a-hint",
-    "pattern": "if (isManagedFrontmatter(parsed)) return reject('managed-wrapper', 'the /terum-skills Claude Code skill that ships with terum-skills; not a team skill', 'This folder is the /terum-skills Claude Code skill that ships with terum-skills and is placed by setup; it cannot be connected to a team.');"
+    "pattern": "if (isManagedFrontmatter(parsed)) return reject('managed-wrapper', 'a terum-skills skill that ships with terum-skills; not a team skill', 'This folder is a terum-skills skill that ships with terum-skills and is placed by setup; it cannot be connected to a team.');"
   },
   {
     "file": "src/lib/teamRepo.ts",
