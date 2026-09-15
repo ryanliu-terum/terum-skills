@@ -539,105 +539,81 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
   },
   {
     "file": "src/lib/wrapper.ts",
-    "line": 13,
-    "policy": "prose",
-    "pattern": "* The `/terum-skills` Claude Code skill: the SKILL.md that teaches Claude Code which verbs it may"
-  },
-  {
-    "file": "src/lib/wrapper.ts",
-    "line": 15,
-    "policy": "prose",
-    "pattern": "* `scripts/bundle-skill.mjs` into dist/claude/skills/terum-skills/SKILL.md at build time, from the"
-  },
-  {
-    "file": "src/lib/wrapper.ts",
-    "line": 16,
-    "policy": "prose",
-    "pattern": "* one canonical copy at .claude/skills/terum-skills/SKILL.md) and is placed under the user's global"
-  },
-  {
-    "file": "src/lib/wrapper.ts",
-    "line": 22,
-    "policy": "not-a-hint",
-    "pattern": "export const WRAPPER_NAME = 'terum-skills';"
-  },
-  {
-    "file": "src/lib/wrapper.ts",
-    "line": 23,
+    "line": 12,
     "policy": "not-a-hint",
     "pattern": "export const MANAGED_BY = 'terum-skills';"
   },
   {
     "file": "src/lib/wrapper.ts",
-    "line": 25,
+    "line": 31,
     "policy": "not-a-hint",
-    "pattern": "export const BUNDLED_WRAPPER = join(packageRoot() ?? fileURLToPath(new URL('../../', import.meta.url)), 'dist', 'claude', 'skills', 'terum-skills', 'SKILL.md');"
+    "pattern": "return { roots, bundle: BUNDLED_SKILLS, skillsRoot: roots[0]!.root, source: join(BUNDLED_SKILLS, 'terum-skills', 'SKILL.md') };"
   },
   {
     "file": "src/lib/wrapper.ts",
-    "line": 35,
-    "policy": "prose",
-    "pattern": "/** The idempotency key on parsed frontmatter: `name: terum-skills` plus `metadata.managed-by: terum-skills`. */"
-  },
-  {
-    "file": "src/lib/wrapper.ts",
-    "line": 55,
-    "policy": "prose",
-    "pattern": "* What sits at `<skillsRoot>/terum-skills`. Judged without following links (the repo's rule for"
-  },
-  {
-    "file": "src/lib/wrapper.ts",
-    "line": 94,
+    "line": 130,
     "policy": "not-a-hint",
-    "pattern": "if (bundled === null) throw new Error(`The /terum-skills Claude Code skill is not bundled in this copy of terum-skills (expected at ${options.source}).`);"
+    "pattern": "if (presence.kind === 'foreign') throw new Error(`${directory} exists and is not a bundled terum-skills skill (${presence.why}); move it aside and re-run.`);"
   },
   {
     "file": "src/lib/wrapper.ts",
-    "line": 97,
+    "line": 155,
     "policy": "not-a-hint",
-    "pattern": "if (presence.kind === 'foreign') throw new Error(`${directory} exists and is not the bundled /terum-skills skill (${presence.why}); move it aside and re-run.`);"
+    "pattern": "if (states.kind === 'unavailable') { io.print(`The terum-skills skills are not bundled in this copy of terum-skills (expected under ${states.bundle}); skipped.`); return 'unavailable'; }"
   },
   {
     "file": "src/lib/wrapper.ts",
-    "line": 132,
+    "line": 158,
     "policy": "not-a-hint",
-    "pattern": "if (state === 'unavailable') { io.print(`The /terum-skills Claude Code skill is not bundled in this copy of terum-skills (expected at ${options.source}); skipped.`); return 'unavailable'; }"
+    "pattern": "for (const root of roots) for (const skill of root.skills) if (skill.state === 'foreign') io.print(`${skill.directory} exists and is not a bundled terum-skills skill (${skill.why}); left alone. Move it aside and re-run setup to install the bundled one.`);"
   },
   {
     "file": "src/lib/wrapper.ts",
-    "line": 133,
+    "line": 165,
     "policy": "not-a-hint",
-    "pattern": "if (state === 'foreign') { io.print(`${directory} exists and is not the bundled /terum-skills skill; left alone. Move it aside and re-run setup to install the bundled one.`); return 'foreign'; }"
+    "pattern": "if (!(await io.confirm(`Install the terum-skills skills for ${hosts} so ${targets.length > 1 ? 'they' : 'it'} can run terum-skills for you? (writes ${where})`))) {"
   },
   {
     "file": "src/lib/wrapper.ts",
-    "line": 134,
+    "line": 166,
     "policy": "not-a-hint",
-    "pattern": "if (state === 'current') { io.print(`The /terum-skills Claude Code skill at ${directory} is current.`); return 'present'; }"
+    "pattern": "io.print('Skipped the terum-skills skills; re-run setup to install them later.');"
   },
   {
     "file": "src/lib/wrapper.ts",
-    "line": 135,
+    "line": 179,
     "policy": "not-a-hint",
-    "pattern": "if (state === 'outdated') { await installWrapper(options); io.print(`Updated the /terum-skills Claude Code skill at ${directory}.`); return 'replaced'; }"
+    "pattern": "if (written.length) io.print(`Installed the terum-skills skills at ${root.root}: ${listNames(written)}.`);"
   },
   {
     "file": "src/lib/wrapper.ts",
-    "line": 136,
+    "line": 180,
     "policy": "not-a-hint",
-    "pattern": "if (!(await io.confirm(`Install the /terum-skills Claude Code skill so Claude can run terum-skills for you? (writes ${directory})`))) {"
+    "pattern": "if (refreshed.length) io.print(`Updated the terum-skills skills at ${root.root}: ${listNames(refreshed)}.`);"
   },
   {
     "file": "src/lib/wrapper.ts",
-    "line": 137,
+    "line": 185,
     "policy": "not-a-hint",
-    "pattern": "io.print('Skipped the /terum-skills skill; re-run setup to install it later.');"
+    "pattern": "io.print(`The terum-skills skills at ${roots.map((root) => root.root).join(' and ')} are current.`);"
   },
   {
     "file": "src/lib/wrapper.ts",
-    "line": 141,
+    "line": 227,
     "policy": "not-a-hint",
-    "pattern": "io.print(`Installed the /terum-skills Claude Code skill at ${directory}.`);"
+    "pattern": "/** @deprecated Task 5 removes this. */ export const WRAPPER_NAME = 'terum-skills';"
+  },
+  {
+    "file": "src/lib/wrapper.ts",
+    "line": 244,
+    "policy": "not-a-hint",
+    "pattern": "if (isMissing(error)) throw new Error(`The terum-skills skills are not bundled in this copy of terum-skills (expected under ${dirname(dirname(options.source))}).`);"
+  },
+  {
+    "file": "src/lib/wrapper.ts",
+    "line": 247,
+    "policy": "not-a-hint",
+    "pattern": "if (!isManagedSkill(raw)) throw new Error(`The terum-skills skills are not bundled in this copy of terum-skills (expected under ${dirname(dirname(options.source))}).`);"
   },
   {
     "file": "src/commands/app.ts",
