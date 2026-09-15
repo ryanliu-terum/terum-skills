@@ -30,3 +30,10 @@
 
 /* The OS-drag overlay (2026-09-14): shown only while a folder hovers the window, so no board draws it. */
 .library-drop{position:fixed;inset:12px;z-index:40;display:flex;align-items:center;justify-content:center;border:2px dashed var(--tk-accent);border-radius:10px;background:color-mix(in srgb,var(--tk-accent) 10%,var(--tk-chrome));color:var(--tk-text1);font-size:14px;font-weight:510;pointer-events:none}
+
+/* Left out of the eval (UI policy §6): one line collapsed, grouped chips expanded. */
+.left-out-summary{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
+.left-out-groups{display:flex;flex-direction:column;gap:8px;margin-top:8px}
+.left-out-group{display:flex;flex-direction:column;gap:4px}
+.left-out-heading{font-family:var(--font-mono);font-size:11px;line-height:16px;color:var(--tk-text3);user-select:text;-webkit-user-select:text}
+.left-out-names{display:flex;flex-wrap:wrap;gap:4px}

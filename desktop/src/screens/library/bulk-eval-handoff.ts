@@ -35,3 +35,30 @@ export function leftOutText(leftOut: readonly { name: string; reason: string }[]
   for (const { name, reason } of leftOut) groups.set(reason, [...(groups.get(reason) ?? []), name]);
   return 'Left out of the eval · ' + [...groups].map(([reason, names]) => `${names.join(', ')}: ${reason}`).join(' · ');
 }
+
+/**
+ * The CLI's reason with its instance-specific tail removed, so folders that failed the same way share one heading
+ * (UI policy §6): quoted paths become `'…'`, a YAML parser's line/column and its echoed source are dropped. The full
+ * reason stays on each name (hover and copy); the heading is for grouping and reading.
+ */
+export function reasonHeading(reason: string): string {
+  return reason
+    .replace(/'[^']*'/g, "'…'")
+    .replace(/\s+at line \d+, column \d+:.*$/s, '')
+    .replace(/:\s*Nested mappings.*$/s, ': nested mappings are not allowed in compact mappings')
+    .trim();
+}
+
+export interface LeftOutGroup { heading: string; rows: { name: string; reason: string }[] }
+
+/** The left-out folders grouped under their shared heading, largest group first, names in the selection's order. */
+export function groupLeftOut(leftOut: readonly { name: string; reason: string }[]): LeftOutGroup[] {
+  const groups = new Map<string, LeftOutGroup>();
+  for (const row of leftOut) {
+    const heading = reasonHeading(row.reason);
+    const group = groups.get(heading) ?? { heading, rows: [] };
+    group.rows.push(row);
+    groups.set(heading, group);
+  }
+  return [...groups.values()].sort((a, b) => b.rows.length - a.rows.length);
+}

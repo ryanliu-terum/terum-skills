@@ -33,7 +33,11 @@ const isLaunchable = (ext: string): ext is Launchable => (LAUNCHABLE as readonly
 /** Where npm's `claude.cmd` shim conventionally points: the package beside it. */
 const SHIM_TARGET = ['node_modules', '@anthropic-ai', 'claude-code', 'cli.js'];
 /** A JavaScript file a shim launches, relative to the shim's own folder (`%~dp0` / `%dp0%`), quoted or bare. */
-const SHIM_SCRIPT = /"([^"\r\n]*%~?dp0%?[^"\r\n]*?\.(?:[cm]?js))"|(?:^|\s)((?:%~?dp0%?)[^\s"]*?\.(?:[cm]?js))(?=\s|$)/gim;
+// What a shim may launch: a Node script (run on the current Node) or a native binary (run as is). Claude Code ≥ 2.1
+// ships `bin\claude.exe` inside the npm package and its shim runs that, so a `.js`-only pattern saw nothing there.
+const SHIM_TARGET_EXT = '(?:[cm]?js|exe|com)';
+const SHIM_SCRIPT = new RegExp(`"([^"\\r\\n]*%~?dp0%?[^"\\r\\n]*?\\.${SHIM_TARGET_EXT})"|(?:^|\\s)((?:%~?dp0%?)[^\\s"]*?\\.${SHIM_TARGET_EXT})(?=\\s|$)`, 'gim');
+const isNativeTarget = (path: string): boolean => ['.exe', '.com'].includes(winPath.extname(path).toLowerCase());
 
 function envValue(env: NodeJS.ProcessEnv, name: string): string | undefined {
   // Windows environment names are case-insensitive; a plain object (tests, some launchers) is not.
@@ -49,6 +53,12 @@ function launchableExtensions(env: NodeJS.ProcessEnv): Launchable[] {
 
 function pathEntries(env: NodeJS.ProcessEnv): string[] {
   return (envValue(env, 'PATH') ?? '').split(';').map((entry) => entry.trim().replace(/^"(.*)"$/, '$1')).filter((entry) => entry.length > 0);
+}
+
+/** Where Claude Code's native Windows installer puts `claude.exe`; a last resort after PATH, never ahead of it. */
+function nativeInstallDir(env: NodeJS.ProcessEnv): string | undefined {
+  const profile = envValue(env, 'USERPROFILE');
+  return profile === undefined || profile.trim() === '' ? undefined : winPath.join(profile.trim(), '.local', 'bin');
 }
 
 /** Every file a Windows shell would try for `command`, in the order it would try them. */
@@ -88,7 +98,13 @@ export function resolveAgentCommand(command: string, args: readonly string[], ev
   const text = evidence.readText?.(found) ?? null;
   const fromShim = text === null ? [] : shimScripts(found, text);
   const script = fromShim.find((candidate) => evidence.isFile(candidate));
-  if (script !== undefined) return success({ file: evidence.execPath, args: [script, ...args] });
+  if (script !== undefined) return isNativeTarget(script) ? success({ file: script, args: [...args] }) : success({ file: evidence.execPath, args: [script, ...args] });
+  // The shim is opaque (or names nothing that exists): the native installer's own claude.exe, when present and not
+  // already on PATH ahead of the shim, is the right thing to run — that is what the remedy below would tell the
+  // person to install, and it is already there.
+  const nativeDir = nativeInstallDir(evidence.env);
+  const native = nativeDir === undefined || explicit ? undefined : [winPath.join(nativeDir, 'claude.exe')].find((candidate) => evidence.isFile(candidate));
+  if (native !== undefined) return success({ file: native, args: [...args] });
   const looked = fromShim.length > 0 ? ` It launches ${fromShim.join(', ')}, which does not exist.` : text === null ? ' The shim could not be read.' : ' The shim names no script this tool can launch.';
   return failure(`\`${command}\` resolves to the batch shim ${found}, which cannot be launched without a shell.${looked} Install Claude Code with the native Windows installer, or point TERUM_SKILLS_AGENT_CMD at claude.exe.`);
 }
