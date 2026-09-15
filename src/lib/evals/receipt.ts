@@ -104,6 +104,10 @@ export const receiptSchema = z.object({
   // Rev 8: cases skipped for missing host tools (case → missing requirements). Optional for
   // forward-compat with receipts written before rev 8.
   environment_skips: z.record(z.string(), z.array(z.string())).optional(),
+  // Eval-gen D4: cases that never started (case → { kind, detail }). `kind` is `setup` (hook exited
+  // nonzero) or `staging` (files/fixture could not be placed). Optional: receipts written before
+  // D4 recorded the hole only as scored < expected.
+  dropped_cases: z.record(z.string(), z.object({ kind: z.enum(['setup', 'staging']), detail: z.string() }).passthrough()).optional(),
   // Rev 20: per-(case × rep) check verdicts and the passed-case-runs tally per arm — what the
   // desktop's Quality figure and case table read. Optional: receipts written before rev 20 have
   // neither, and a surface says so instead of deriving them.
@@ -155,6 +159,17 @@ function redactCaseRuns(perCase: unknown, secrets: readonly string[]): { per_cas
   };
 }
 
+/** D4: `detail` is a setup hook's stderr tail — free text from inside the sandbox, so it crosses the boundary redacted. */
+function redactDroppedCases(dropped: unknown, secrets: readonly string[]): { dropped_cases?: unknown } {
+  if (dropped === null || typeof dropped !== 'object' || Array.isArray(dropped)) return {};
+  return {
+    dropped_cases: Object.fromEntries(Object.entries(dropped as Record<string, unknown>).map(([caseName, value]) => {
+      if (value === null || typeof value !== 'object' || typeof (value as { detail?: unknown }).detail !== 'string') return [caseName, value];
+      return [caseName, { ...(value as object), detail: redact((value as { detail: string }).detail, secrets) }];
+    })),
+  };
+}
+
 /** Rev 5: append-only — one immutable file per committed run, grouped by version. */
 export function receiptPath(skillId: string, version: string, runId: string): string {
   return `evals/${skillId}/${version}/${runId}.json`;
@@ -166,7 +181,7 @@ export function receiptPath(skillId: string, version: string, runId: string): st
  * before the receipt exists; numbers and enums cannot carry secrets.
  */
 export function buildReceipt(raw: Record<string, unknown>, secrets: readonly string[] = []): Result<Receipt> {
-  const candidate = { ...raw, schema_version: RECEIPT_SCHEMA_VERSION, attribution: redact(String(raw['attribution'] ?? ''), secrets), ...redactCaseRuns(raw['per_case'], secrets) };
+  const candidate = { ...raw, schema_version: RECEIPT_SCHEMA_VERSION, attribution: redact(String(raw['attribution'] ?? ''), secrets), ...redactCaseRuns(raw['per_case'], secrets), ...redactDroppedCases(raw['dropped_cases'], secrets) };
   const parsed = receiptSchema.safeParse(candidate);
   if (!parsed.success) return failure(`invalid receipt: ${describeIssues(parsed.error)}`);
   return success(parsed.data);

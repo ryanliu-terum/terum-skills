@@ -5,7 +5,7 @@
  */
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { Arm, ArmSample, ComparisonRow, Outcome } from './execution.js';
+import type { Arm, ArmSample, ComparisonRow, DroppedCase, Outcome } from './execution.js';
 import type { TriggerSummary } from './triggers.js';
 import { netLift, signTest, summarize, verdictBand, type Verdict } from './stats.js';
 
@@ -60,6 +60,8 @@ export interface Aggregate {
   efficiency: Record<string, EfficiencySummary>;
   /** Rev 8: cases skipped for missing host tools, case → missing requirements. Never scored, always visible. */
   environment_skips: Record<string, string[]>;
+  /** Eval-gen D4: cases that never started (setup exited nonzero, files could not be staged), case → why. Never scored, always visible. */
+  dropped_cases: Record<string, DroppedCase>;
   /** §5.3 rev 20: per-(case × rep) rows, in execution order. Display only — no statistic reads them. */
   per_case: CaseRun[];
   /** §5.3 rev 20: passed case-runs per arm, the card's Quality number. Same keys as `arm_scores`. */
@@ -70,7 +72,7 @@ export interface Aggregate {
  * Roll rows and arm samples up into receipt numbers. `expectedRows` is k × opponents × cases;
  * a row decided by `both-arms-failed` is an unscored hole, and holes grey the verdict (§5.4).
  */
-export function aggregate(rows: readonly ComparisonRow[], arms: readonly ArmSample[], expectedRows: number, environmentSkips: Record<string, string[]> = {}): Aggregate {
+export function aggregate(rows: readonly ComparisonRow[], arms: readonly ArmSample[], expectedRows: number, environmentSkips: Record<string, string[]> = {}, droppedCases: Record<string, DroppedCase> = {}): Aggregate {
   const comparisons: Record<string, ComparisonSummary> = {};
   const counts = new Map<string, { win: number; loss: number; tie: number }>();
   for (const row of rows) {
@@ -110,6 +112,7 @@ export function aggregate(rows: readonly ComparisonRow[], arms: readonly ArmSamp
     arm_scores: armScores,
     efficiency,
     environment_skips: environmentSkips,
+    dropped_cases: droppedCases,
     per_case: perCase,
     case_runs: caseRunTally(perCase, Object.keys(armScores)),
   };
@@ -189,6 +192,9 @@ export function renderReport(aggregateResult: Aggregate, triggers: TriggerSummar
   lines.push(`why: ${aggregateResult.attribution}`);
   for (const [caseName, missing] of Object.entries(aggregateResult.environment_skips)) {
     lines.push(`skipped (environment): ${caseName} — missing ${missing.join(', ')}`);
+  }
+  for (const [caseName, dropped] of Object.entries(aggregateResult.dropped_cases)) {
+    lines.push(`dropped (${dropped.kind}): ${caseName} — ${dropped.detail}`);
   }
   for (const [comparison, summary] of Object.entries(aggregateResult.comparisons)) {
     lines.push(`${comparison}: ${summarize(summary.win, summary.loss, summary.tie)}`);

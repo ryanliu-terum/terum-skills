@@ -57,6 +57,19 @@ describe('redaction (§8, VE4)', () => {
   });
 });
 
+describe('dropped cases on the receipt (eval-gen D4)', () => {
+  it('carries case → { kind, detail } with the detail redacted, and stays optional for older receipts', () => {
+    const built = buildReceipt({ ...valid(), execution_status: 'partial', scored_rows: 6, dropped_cases: { 'quota-gate': { kind: 'setup', detail: `setup failed (rc=1): token ghp_${'q'.repeat(36)} rejected` } } });
+    expect(built).toMatchObject({ ok: true });
+    if (!built.ok) return;
+    expect(built.value.dropped_cases).toEqual({ 'quota-gate': { kind: 'setup', detail: 'setup failed (rc=1): token [redacted] rejected' } });
+    const older = buildReceipt(valid());
+    expect(older.ok).toBe(true);
+    if (older.ok) expect(older.value).not.toHaveProperty('dropped_cases');
+    expect(buildReceipt({ ...valid(), dropped_cases: { x: { kind: 'vanished', detail: '' } } }).ok).toBe(false);
+  });
+});
+
 describe('receipt schema and build (§5.3)', () => {
   it('accepts the annotated shape and builds with redacted attribution', () => {
     const built = buildReceipt({ ...valid(), attribution: `leaked ghp_${'c'.repeat(36)} via team-tok-9` }, ['team-tok-9']);

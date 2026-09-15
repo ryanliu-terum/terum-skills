@@ -1,10 +1,14 @@
 /**
  * IE5 eval-gen: pure model orchestration for reviewable local eval assets.  This module never
- * starts Claude itself; `agent.ts` remains the sole process boundary.
+ * starts Claude itself; `agent.ts` remains the sole process boundary. The one subprocess it causes
+ * is the dry-run of a generated case's `setup` hook, through `execution.ts`'s own seeding path.
  */
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import YAML from 'yaml';
-import type { AgentApi } from './agent.js';
-import { loadCase } from './execution.js';
+import { AgentRunError, type AgentApi } from './agent.js';
+import { casePathViolation, dryRunCase, loadCase } from './execution.js';
 import { parseTriggers } from './triggers.js';
 import { failure, success, type Result } from '../result.js';
 
@@ -19,6 +23,12 @@ const CASE_NAME = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
  */
 const MIN_CASES = 3;
 const MAX_CASES = 7;
+/**
+ * Eval-gen D6 (2026-09-14): `askJson`'s 120 s default was sized for exactly three cases. Rev 3 asks
+ * for up to seven and D1 asks each to carry a tool stub, and a 34 KB SKILL.md (single-fix) did not
+ * finish in 120 s — three silent timeouts, no receipt. Arm runs get 600 s; generation gets half.
+ */
+export const GENERATION_TIMEOUT_MS = 300_000;
 
 export interface GeneratedCases {
   files: Record<string, string>;
@@ -43,19 +53,28 @@ export interface GenerateOptions {
   now: Date;
   cases?: boolean;
   triggers?: boolean;
+  /** Where D3's dry-run sandboxes live; a private temp dir, removed afterwards, when omitted. */
+  scratch?: string;
 }
 
 /** Generate each requested asset kind with at most two validation-correction re-asks. */
 export async function generate(options: GenerateOptions): Promise<Result<GeneratedAssets>> {
   const header = `${HEADER}\n# model: ${options.model} · engine: ${options.engineVersion} · ${options.now.toISOString()}\n`;
+  const skillBytes = Buffer.byteLength(options.skill, 'utf8');
   const out: GeneratedAssets = {};
   if (options.triggers) {
-    const generated = await askWithValidation(options.agent, triggerPrompt(options), options.model, validateTriggers);
+    const generated = await askWithValidation(options.agent, triggerPrompt(options), options.model, skillBytes, async (raw) => validateTriggers(raw));
     if (!generated.ok) return failure(`Could not generate triggers: ${generated.error}. Retry the command or pass --no-gen.`);
     out.triggers = header + YAML.stringify(generated.value);
   }
   if (options.cases) {
-    const generated = await askWithValidation(options.agent, casePrompt(options), options.model, validateCases);
+    const scratch = options.scratch ?? await mkdtemp(join(tmpdir(), 'terum-eval-gen-'));
+    let generated: Result<Record<string, Record<string, unknown>>>;
+    try {
+      generated = await askWithValidation(options.agent, casePrompt(options), options.model, skillBytes, (raw) => validateCases(raw, scratch));
+    } finally {
+      if (options.scratch === undefined) await rm(scratch, { recursive: true, force: true });
+    }
     if (!generated.ok) return failure(`Could not generate execution cases: ${generated.error}. Retry the command or pass --no-gen.`);
     const files: Record<string, string> = {};
     for (const [name, value] of Object.entries(generated.value)) files[`${name}.yaml`] = header + YAML.stringify(value);
@@ -64,17 +83,29 @@ export async function generate(options: GenerateOptions): Promise<Result<Generat
   return success(out);
 }
 
-async function askWithValidation<T>(agent: AgentApi, prompt: string, model: string, validate: (raw: Record<string, unknown>) => Result<T>): Promise<Result<T>> {
+/**
+ * Up to three model calls. A validation failure is the model's to fix and goes back as a correction;
+ * an `AgentRunError` (timeout, non-zero exit) is infrastructure, so it is retried once with the
+ * prompt UNCHANGED and then reported as itself — before D6 a timeout was appended as "your previous
+ * response could not be used: model call timed out", which no model can act on.
+ */
+async function askWithValidation<T>(agent: AgentApi, prompt: string, model: string, skillBytes: number, validate: (raw: Record<string, unknown>) => Promise<Result<T>>): Promise<Result<T>> {
   let correction = '';
   let lastError = 'model returned no usable response';
+  let infrastructureFailures = 0;
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
-      const raw = await agent.askJson(prompt + correction, { model });
-      const parsed = validate(raw);
+      const raw = await agent.askJson(prompt + correction, { model, timeoutMs: GENERATION_TIMEOUT_MS });
+      const parsed = await validate(raw);
       if (parsed.ok) return parsed;
       lastError = parsed.error;
     } catch (error) {
       lastError = error instanceof Error ? error.message : String(error);
+      if (error instanceof AgentRunError) {
+        infrastructureFailures += 1;
+        if (infrastructureFailures >= 2) return failure(`${lastError} (twice, generating from a ${skillBytes}-byte SKILL.md)`);
+        continue;
+      }
     }
     correction = `\n\nYour previous response could not be used: ${lastError}\nReturn a corrected JSON object only, following every required shape and count.`;
   }
@@ -91,7 +122,13 @@ function validateTriggers(raw: Record<string, unknown>): Result<Record<string, u
   return success({ should_trigger: parsed.value.shouldTrigger, should_not_trigger: parsed.value.shouldNotTrigger });
 }
 
-function validateCases(raw: Record<string, unknown>): Result<Record<string, Record<string, unknown>>> {
+/**
+ * Shape first, then the runtime contract: every `files` key passes the same path predicate
+ * `seedSandbox` applies (D2), and every case is seeded once in a throwaway sandbox so its `setup`
+ * has provably started before it is written into the skill (D3). Both used to surface only at
+ * run time — one as a silently dropped case, the other as a dead eval.
+ */
+async function validateCases(raw: Record<string, unknown>, scratch: string): Promise<Result<Record<string, Record<string, unknown>>>> {
   const supplied = raw['cases'];
   if (!Array.isArray(supplied)) return failure("generated cases need a 'cases' array");
   if (supplied.length < MIN_CASES || supplied.length > MAX_CASES) return failure(`generated cases need between ${MIN_CASES} and ${MAX_CASES} cases (got ${supplied.length})`);
@@ -114,6 +151,12 @@ function validateCases(raw: Record<string, unknown>): Result<Record<string, Reco
     const body = Object.fromEntries(Object.entries(record).filter(([key]) => key !== 'name'));
     const parsed = loadCase(YAML.stringify(body), name);
     if (!parsed.ok) return failure(parsed.error);
+    for (const rel of Object.keys(parsed.value.files)) {
+      const violation = casePathViolation(rel);
+      if (violation !== null) return failure(`generated case '${name}': ${violation} — keys in files are sandbox-relative paths`);
+    }
+    const cannotStart = await dryRunCase(parsed.value, scratch);
+    if (cannotStart !== null) return failure(`generated ${cannotStart} — setup is executed by /bin/sh -ce in the case sandbox; it must be shell that builds the precondition, not a description of it`);
     files[name] = body;
   }
   if (!Object.values(files).some((entry) => entry['bucket'] === 'adversarial')) return failure('generated cases need at least one adversarial bucket');
@@ -127,7 +170,16 @@ function validateCases(raw: Record<string, unknown>): Result<Record<string, Reco
  * that only surfaced on a later command. `inspectContent` enforces this before the write-back; this
  * sentence is what keeps the model from hitting that refusal in the first place.
  */
-const FIXTURE_RULE = 'Any email address you write must use a reserved domain (example.com, example.org, or a .test/.invalid name) \u2014 never a real or real-looking one. Never include anything shaped like a credential: no API keys, tokens, passwords, or private keys, real or fake.';
+const FIXTURE_RULE = 'Any email address you write must use a reserved domain (example.com, example.org, or a .test/.invalid name) — never a real or real-looking one. Never include anything shaped like a credential: no API keys, tokens, passwords, or private keys, real or fake.';
+
+/**
+ * Eval-gen D1 (2026-09-14): the runtime contract `execution.ts` enforces, stated where the model can
+ * read it. Without this the model filled `setup` with prose ("Assume codex is logged in") that
+ * `/bin/sh` ran as a command — rc=127, case dropped — and put files at `/tmp/...`, which the
+ * sandbox guard refused. Preconditions are built, then stubbed, then stated; never a reason to
+ * drop the case, since the external-state branches are the ones most worth testing.
+ */
+const SETUP_RULE = 'setup is a POSIX shell script executed by /bin/sh -ce inside the case sandbox (cwd), with a 60-second cap; a non-zero exit drops the case. It must CREATE the precondition, never describe it: no prose, no "Assume ...". If a precondition is the state of an external tool (logged in, quota nearly used, a prior run\'s output), stub that tool: put a small executable script at bin/<tool> in files that answers exactly the invocations the skill makes, and have setup run chmod +x bin/<tool> and export PATH="$PWD/bin:$PATH". If even a stub is impossible, state the assumption inside the task text as something the user tells the agent and leave setup empty. Keys in files are sandbox-relative paths: never absolute, never containing "..", never under .claude/.';
 
 function context(options: GenerateOptions): string {
   return `SKILL.md:\n${options.skill}\n\nCANDIDATE FILE LISTING (names only):\n${options.files.join('\n')}`;
@@ -138,5 +190,5 @@ function triggerPrompt(options: GenerateOptions): string {
 }
 
 function casePrompt(options: GenerateOptions): string {
-  return `Generate headlessly answerable execution evaluation cases for this Claude Code skill. Return ONLY JSON: {"cases":[{"name":"lowercase-hyphenated-stem","task":"...","files":{},"setup":"optional","checks":[{"transcript_mentions":"..."}],"bucket":"explicit"}]}.\nChoose how many cases this skill needs, between ${MIN_CASES} and ${MAX_CASES} inclusive, from its own complexity: a skill with one behaviour and one way to get it wrong wants ${MIN_CASES}; a skill with several distinct surfaces, decision branches, or refusal modes wants more, one case per thing that can independently go wrong. Do not pad — a case that tests nothing the others do not is worse than no case.\nEvery case needs a bucket from explicit, implicit, contextual, negative, adversarial; at least one must be adversarial, and a set larger than ${MIN_CASES} should spread across several buckets rather than repeat one. Do not include fixture. Checks may use ONLY transcript_mentions, command_matching, no_command_matching, file_exists, file_absent. Do not use command_succeeds. Tasks must not demand magic-string incantations and must be answerable without human follow-up.\n${FIXTURE_RULE}\n\n${context(options)}`;
+  return `Generate headlessly answerable execution evaluation cases for this Claude Code skill. Return ONLY JSON: {"cases":[{"name":"lowercase-hyphenated-stem","task":"...","files":{},"setup":"optional shell","checks":[{"transcript_mentions":"..."}],"bucket":"explicit"}]}.\nChoose how many cases this skill needs, between ${MIN_CASES} and ${MAX_CASES} inclusive, from its own complexity: a skill with one behaviour and one way to get it wrong wants ${MIN_CASES}; a skill with several distinct surfaces, decision branches, or refusal modes wants more, one case per thing that can independently go wrong. Do not pad — a case that tests nothing the others do not is worse than no case.\nEvery case needs a bucket from explicit, implicit, contextual, negative, adversarial; at least one must be adversarial, and a set larger than ${MIN_CASES} should spread across several buckets rather than repeat one. Do not include fixture. Checks may use ONLY transcript_mentions, command_matching, no_command_matching, file_exists, file_absent. Do not use command_succeeds. Tasks must not demand magic-string incantations and must be answerable without human follow-up.\n${SETUP_RULE}\n${FIXTURE_RULE}\n\n${context(options)}`;
 }
