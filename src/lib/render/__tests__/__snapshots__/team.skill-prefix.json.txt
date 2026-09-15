@@ -106,7 +106,8 @@
     "selection": {
       "kind": "skill",
       "name": "diagnose",
-      "source": "team"
+      "source": "team",
+      "path": "<ROOT>/proj/.claude/skills/diagnose"
     }
   },
   "lines": [

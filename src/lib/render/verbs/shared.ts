@@ -78,7 +78,7 @@ export function receiptSections(receipt: unknown, triggers: unknown, ctx: Render
   const efficiency = Object.entries(asRecord(r['efficiency']));
   if (efficiency.length) {
     sections.push(table([{ key: 'arm', label: 'Arm', priority: 1 }, { key: 'turns', label: 'Turns', priority: 2, align: 'right' }, { key: 'time', label: 'Time', priority: 1 }, { key: 'cost', label: 'Cost', priority: 1 }],
-      efficiency.map(([arm, value]) => { const e = asRecord(value); const turns = num(e['turns']); const ms = num(e['duration_ms']); const cost = num(e['cost_usd']); return { arm: text(arm), turns: text(turns === null ? null : turns.toFixed(1)), time: text(ms === null ? null : `${(ms / 1000).toFixed(1)}s`), cost: text(cost === null ? null : `$${cost.toFixed(2)}`) }; }),
+      efficiency.map(([arm, value]) => { const e = asRecord(value); const turns = num(e['turns']); const ms = num(e['duration_ms']); const cost = num(e['cost_usd']); return { arm: text(arm), turns: text(turns === null ? null : turns.toFixed(1), 'right'), time: text(ms === null ? null : `${(ms / 1000).toFixed(1)}s`), cost: text(cost === null ? null : `$${cost.toFixed(2)}`) }; }),
       { title: 'Efficiency' }));
     const candidate = num(asRecord(asRecord(r['efficiency'])['candidate'])['cost_usd']); const baseline = num(asRecord(asRecord(r['efficiency'])['baseline'])['cost_usd']);
     const roi = roiFractions(candidate, baseline);

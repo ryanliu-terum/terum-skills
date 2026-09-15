@@ -128,13 +128,15 @@ export const covered: RegExp[] = [
   /^[✓✗] /,
 ];
 
-const RUN_DETAIL_LINES = [/^── .+ ──$/, /^verdict: /, /^[✓✗] /];
+const RUN_DETAIL_LINES = [/^── .+ ──$/, /^verdict: /];
+const OUTCOME_LINE = /^[✓✗] /;
 
-/** A buffered drain or batch sub-run is not the enclosing board's own receipt, so keep its framing, verdict, and outcome lines as notes. */
+/** A buffered sub-run is not the enclosing board's own receipt, so keep its framing and verdict as notes; batch results also need their outcome lines. */
 export const uncovered = (lines: readonly string[], raw: unknown): string[] => {
   const value = asRecord(raw);
-  const hasSubRuns = (Array.isArray(value['items']) && num(value['attempted']) !== null) || str(value['mode']) !== null;
-  return lines.filter((line) => (hasSubRuns && RUN_DETAIL_LINES.some((pattern) => pattern.test(line))) || !covered.some((pattern) => pattern.test(line)));
+  const hasBatchRuns = str(value['mode']) !== null;
+  const hasSubRuns = (Array.isArray(value['items']) && num(value['attempted']) !== null) || hasBatchRuns;
+  return lines.filter((line) => (hasSubRuns && RUN_DETAIL_LINES.some((pattern) => pattern.test(line))) || (hasBatchRuns && OUTCOME_LINE.test(line)) || !covered.some((pattern) => pattern.test(line)));
 };
 
 export const renderer: Renderer = { render, covered, uncovered };

@@ -102,7 +102,7 @@ export interface LsPerson {
   local_skills: number | null;
 }
 /** D11: which narrowed read produced this value — a shell cannot tell a project view from the whole team by shape alone. */
-export type LsSelection = { kind: 'member'; handle: string } | { kind: 'project'; name: string } | { kind: 'skill'; name: string; source: 'team' | 'library' };
+export type LsSelection = { kind: 'member'; handle: string } | { kind: 'project'; name: string } | { kind: 'skill'; name: string; source: 'team' | 'library'; path?: string };
 export interface LsMember { handle: string; displayName: string; role: string | null; projects: readonly string[]; installed: { id: string; name: string | null; version: string | null; scope: Person['installed'][number]['scope']; since: string }[]; profile: { id: string; name: string; version: string; added: string; via: 'publish' | 'install' }[]; }
 export interface LsResult { local?: LocalSection[]; roster: readonly { handle: string; active: boolean; role: string | null; projects: readonly string[] }[]; skills: readonly LsSkill[]; problems: readonly { source: string; message: string }[];
   /** §8.4: emitted on the `kind:'all'` team read only; `member?` still serves the single-member view. */
@@ -247,6 +247,10 @@ async function showProject(projectName: string | undefined, team: ReturnType<typ
   return success({ roster, skills: selected, projects, problems, viewer, selection: { kind: 'project', name: projectName } });
 }
 
+function skillSelection(name: string, source: 'team' | 'library', row: LocalSection['rows'][number] | undefined): LsSelection {
+  return { kind: 'skill', name, source, ...(row === undefined ? {} : { path: row.path }) };
+}
+
 /** D10: one skill, whole — from the team record when the name is a team skill, else from the Library row. Resolution through §6.1, rungs 0–4. */
 async function showSkill(args: LsArgs, store: ConfigStore, io: Prompter, runner: Runner): Promise<Result<LsResult>> {
   const config = await store.read();
@@ -280,15 +284,15 @@ async function showSkill(args: LsArgs, store: ConfigStore, io: Prompter, runner:
       io.print(format(record));
       io.print(record.description);
       if (record.body !== null && record.body.trim() !== '') io.print(record.body.trimEnd());
-      return success({ roster, skills: [record], projects, problems, local, viewer, selection: { kind: 'skill', name, source: 'team' } });
+      return success({ roster, skills: [record], projects, problems, local, viewer, selection: skillSelection(name, 'team', row) });
     }
     if (row === undefined) return failure(`No skill named ${args.value ?? name}.`);
     printLibraryDetail(io, row);
-    return success({ roster, skills: [], projects: [], problems, local, viewer, selection: { kind: 'skill', name, source: 'library' } });
+    return success({ roster, skills: [], projects: [], problems, local, viewer, selection: skillSelection(name, 'library', row) });
   }
   if (row === undefined) return failure(`No skill named ${args.value ?? name}.`);
   printLibraryDetail(io, row);
-  return success({ roster: [], skills: [], problems: [], local, viewer, selection: { kind: 'skill', name, source: 'library' } });
+  return success({ roster: [], skills: [], problems: [], local, viewer, selection: skillSelection(name, 'library', row) });
 }
 
 function printLibraryDetail(io: Prompter, row: LocalSection['rows'][number]): void {

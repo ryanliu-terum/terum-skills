@@ -19,8 +19,6 @@
 **Notes**
 - ── tdd ──
 - verdict: PASS
-- ✓ tdd
-- ✗ notes: probe failed
 
 **Next:** `/eval-report tdd` · `/eval --drain`
 

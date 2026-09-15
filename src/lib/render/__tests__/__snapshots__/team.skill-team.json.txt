@@ -302,7 +302,8 @@
     "selection": {
       "kind": "skill",
       "name": "deploy-check",
-      "source": "team"
+      "source": "team",
+      "path": "<HOME>/.claude/skills/deploy-check"
     }
   },
   "lines": [

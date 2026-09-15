@@ -77,7 +77,8 @@
     "selection": {
       "kind": "skill",
       "name": "notes",
-      "source": "library"
+      "source": "library",
+      "path": "<HOME>/.claude/skills/notes"
     }
   },
   "lines": [

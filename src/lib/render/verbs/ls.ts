@@ -105,7 +105,7 @@ function library(value: Record<string, unknown>, ctx: RenderContext): Board {
         ? table([
           { key: 'reason', label: 'Reason', priority: 1 },
           { key: 'n', label: 'Folders', priority: 1, align: 'right' },
-        ], grouped.groups.map((group) => ({ reason: text(group.reason), n: text(`×${group.count}`) })), { title: 'Cannot be connected' })
+        ], grouped.groups.map((group) => ({ reason: text(group.reason), n: text(`×${group.count}`, 'right') })), { title: 'Cannot be connected' })
         : table([
           { key: 'skill', label: 'Skill', priority: 1 },
           { key: 'reason', label: 'Reason', priority: 1 },
@@ -262,13 +262,20 @@ function project(value: Record<string, unknown>, ctx: RenderContext): Board {
   return b;
 }
 
+function selectedDetailRow(value: Record<string, unknown>, selection: Record<string, unknown>): Record<string, unknown> | undefined {
+  const name = str(selection['name']);
+  if (name === null) return undefined;
+  const rows = asArray(value['local']).map(asRecord).flatMap((section) => asArray(section['rows']).map(asRecord));
+  const namedRows = rows.filter((row) => str(row['name']) === name);
+  const selectedPath = str(selection['path']);
+  return (selectedPath === null ? undefined : namedRows.find((row) => str(row['path']) === selectedPath)) ?? namedRows[0];
+}
+
 function detail(value: Record<string, unknown>, ctx: RenderContext): Board {
   const selection = asRecord(value['selection']);
   const name = str(selection['name']) ?? '—';
   const skill = asArray(value['skills']).map(asRecord)[0];
-  const row = asArray(value['local']).map(asRecord)
-    .flatMap((s) => asArray(s['rows']).map(asRecord))
-    .find((r) => str(r['name']) === name);
+  const row = selectedDetailRow(value, selection);
   const b = board(name);
   const sections: Section[] = [];
   const body = str(skill?.['body'] ?? row?.['body']);
@@ -369,9 +376,10 @@ export const covered: RegExp[] = [
 /** The detail prints its description and body verbatim: those lines are the board, not notes. */
 export function uncovered(lines: readonly string[], raw: unknown): string[] {
   const value = asRecord(raw);
-  if (asRecord(value['selection'])['kind'] !== 'skill') return lines.filter((line) => !covered.some((pattern) => pattern.test(line)));
+  const selection = asRecord(value['selection']);
+  if (selection['kind'] !== 'skill') return lines.filter((line) => !covered.some((pattern) => pattern.test(line)));
   const skill = asArray(value['skills']).map(asRecord)[0];
-  const row = asArray(value['local']).map(asRecord).flatMap((s) => asArray(s['rows']).map(asRecord))[0];
+  const row = selectedDetailRow(value, selection);
   const shown = new Set<string>();
   const body = str(skill?.['body'] ?? row?.['body']);
   if (body !== null) for (const line of body.trimEnd().split('\n')) shown.add(line);

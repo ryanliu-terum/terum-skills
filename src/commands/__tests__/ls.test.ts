@@ -662,7 +662,7 @@ describe('ls skill (D10)', () => {
     const io = new ScriptedPrompter();
     const result = await run({ kind: 'skill', value: 'deploy-check', config: store, home, cwd: home }, io);
     if (!result.ok) throw new Error(result.error);
-    expect(result.value.selection).toEqual({ kind: 'skill', name: 'deploy-check', source: 'team' });
+    expect(result.value.selection).toEqual({ kind: 'skill', name: 'deploy-check', source: 'team', path: placed });
     expect(result.value.viewer).toEqual({ handle: 'seed', team: 'team' });
     expect(result.value.skills.map((skill) => skill.name)).toEqual(['deploy-check']);
     expect(result.value.skills[0]!.installedBy).toEqual([{ handle: 'seed', displayName: 'seed', scope: { kind: 'global' }, since: '2026-08-01', version: 'v1' }]);
@@ -670,13 +670,19 @@ describe('ls skill (D10)', () => {
     expect(result.value.local?.flatMap((section) => section.rows.map((row) => row.path))).toEqual([placed]);
     expect(result.value.people).toBeUndefined();
     expect(io.lines).toEqual([format(result.value.skills[0]!), 'A description with <tags> and  spaces', '# Real body']);
+
+    await rm(placed, { recursive: true, force: true });
+    const withoutLocalRow = await run({ kind: 'skill', value: 'deploy-check', config: store, home, cwd: home }, new ScriptedPrompter());
+    if (!withoutLocalRow.ok) throw new Error(withoutLocalRow.error);
+    expect(withoutLocalRow.value.selection).toEqual({ kind: 'skill', name: 'deploy-check', source: 'team' });
+    expect(Object.hasOwn(withoutLocalRow.value.selection ?? {}, 'path')).toBe(false);
   });
   it('answers from the Library alone for a folder the team has never seen, and on a team-less machine', async () => {
     const { store, home } = await teamAndLibrary();
     const io = new ScriptedPrompter();
     const result = await run({ kind: 'skill', value: 'notes', config: store, home, cwd: home }, io);
     if (!result.ok) throw new Error(result.error);
-    expect(result.value.selection).toEqual({ kind: 'skill', name: 'notes', source: 'library' });
+    expect(result.value.selection).toEqual({ kind: 'skill', name: 'notes', source: 'library', path: join(home, '.claude', 'skills', 'notes') });
     expect(result.value.skills).toEqual([]);
     expect(result.value.local?.flatMap((section) => section.rows.map((row) => row.name))).toEqual(['notes']);
     expect(io.lines).toEqual([`  notes — untracked locally; path: ${join(home, '.claude', 'skills', 'notes')}`, 'Only here.', '# Notes body']);
@@ -700,13 +706,34 @@ describe('ls skill (D10)', () => {
     };
 
     const withDecoy = await read();
-    expect(withDecoy.result.value.selection).toEqual({ kind: 'skill', name: 'deploy', source: 'library' });
+    expect(withDecoy.result.value.selection).toEqual({ kind: 'skill', name: 'deploy', source: 'library', path: selected });
     expect(withDecoy.result.value.local?.flatMap((section) => section.rows).map((row) => row.path)).toEqual([selected]);
     expect(withDecoy.result.value.local?.flatMap((section) => section.notOffered).map((entry) => entry.path)).toEqual([decoy]);
     expect(withDecoy.lines).toEqual([`  deploy — untracked locally; path: ${selected}`, 'Project deploy.', '# Project deploy']);
 
     await rm(decoy, { recursive: true, force: true });
     expect((await read()).lines).toEqual(withDecoy.lines);
+  });
+  it('uses the cwd-resolved project row when Global has another valid folder with the same name', async () => {
+    const home = await temporaryDirectory();
+    const project = join(home, 'project');
+    await mkdir(join(project, '.git'), { recursive: true });
+    const store = await withProject(join(home, 'state'), project);
+    const global = await localSource(home, 'deploy', '---\nname: deploy\ndescription: Global deploy.\n---\n# Global deploy\n');
+    const selected = await localSource(project, 'deploy', '---\nname: deploy\ndescription: Project deploy.\n---\n# Project deploy\n');
+    const io = new ScriptedPrompter();
+    const runner: Runner = { run: async () => ({ code: 1, stdout: '', stderr: '' }) };
+    const result = await run({ kind: 'skill', config: store, home, cwd: selected, runner }, io);
+    if (!result.ok) throw new Error(result.error);
+
+    expect(result.value.local?.flatMap((section) => section.rows).map((row) => row.path)).toEqual([global, selected]);
+    expect(result.value.selection).toEqual({ kind: 'skill', name: 'deploy', source: 'library', path: selected });
+    expect(io.lines).toEqual([
+      `${RESOLVED_PREFIX}deploy from the working directory`,
+      `  deploy — untracked locally; path: ${selected}`,
+      'Project deploy.',
+      '# Project deploy',
+    ]);
   });
   it('autofills through the ladder, prints the resolved line, and fails a miss with one sentence', async () => {
     const { store, home } = await teamAndLibrary();

@@ -8,10 +8,13 @@ import type { ResultOutcome } from '../../frames.js';
 import type { Prompter } from '../../prompt.js';
 import type { Result } from '../../result.js';
 import { DASHBOARD_IDS, DASHBOARD_NOW, dashboardReceipt, dashboardTeam, emptyMachine, redact, type DashboardFixture } from '../../__tests__/fixtures.js';
-import type { RenderContext } from '../board.js';
+import { board, type RenderContext } from '../board.js';
+import { renderMd } from '../md.js';
 import type { RenderOptions } from '../options.js';
+import { renderPretty } from '../pretty.js';
+import { renderBoard } from '../registry.js';
 import { createBoardSink } from '../sink.js';
-import { render as renderLs } from '../verbs/ls.js';
+import { render as renderLs, uncovered as uncoveredLs } from '../verbs/ls.js';
 import { renderer as searchRenderer } from '../verbs/search.js';
 import { renderer as evalReportRenderer } from '../verbs/eval-report.js';
 import { renderer as evalRenderer } from '../verbs/eval.js';
@@ -74,6 +77,9 @@ describe('shared renderer helpers', () => {
     expect(receiptSections(receipt, receipt.triggers, RENDER_CTX).map((section) => section.title)).toEqual([
       'Comparisons', 'Arm scores', 'Efficiency', 'Cost, over the costlier arm', 'Triggers', 'Provenance',
     ]);
+    const pretty = renderPretty(board('Receipt', { sections: receiptSections(receipt, receipt.triggers, RENDER_CTX) }), { ...RENDER_CTX, format: 'pretty' });
+    expect(pretty).toContain('│ Arm       │ Turns │ Time  │ Cost  │');
+    expect(pretty).toContain('│ candidate │   6.5 │ 30.0s │ $0.40 │');
     expect(versionText('v3')).toBe('Version 3');
     expect(versionText('3')).toBe('—');
     expect(escapeRegExp('a+b[c]')).toBe('a\\+b\\[c\\]');
@@ -120,6 +126,47 @@ describe('ls boards', () => {
     for (const value of [null, {}, { selection: { kind: 'member' }, member: null }, { selection: { kind: 'project' }, projects: null }, { selection: { kind: 'skill' }, skills: null, local: null }, { local: [null] }]) {
       expect(() => renderLs(value, RENDER_CTX)).not.toThrow();
     }
+  });
+
+  it('uses selection.path for Library detail and coverage, with first-by-name fallback when it is absent or stale', () => {
+    const globalPath = '/home/seed/.claude/skills/deploy';
+    const projectPath = '/home/seed/work/app/.claude/skills/deploy';
+    const globalRow = { name: 'deploy', path: globalPath, state: 'untracked locally', description: 'Global deploy.', body: '# Global deploy', health: 'unknown', edited: false, tracked: false };
+    const projectRow = { name: 'deploy', path: projectPath, state: 'placement recorded from team (Version 2)', description: 'Project deploy.', body: '# Project deploy', health: 'local-changed', edited: true, tracked: true, skillId: '22222222-2222-4222-8222-222222222222', placement: { version: 'v2' } };
+    const local = [
+      { root: '/home/seed/.claude/skills', label: 'Global', rootState: 'scanned', registered: false, rows: [globalRow], notOffered: [] },
+      { root: '/home/seed/work/app/.claude/skills', label: 'app', rootState: 'scanned', registered: true, rows: [projectRow], notOffered: [] },
+    ];
+    const selectedValue = { selection: { kind: 'skill', name: 'deploy', source: 'library', path: projectPath }, skills: [], local };
+    const selected = renderLs(selectedValue, RENDER_CTX);
+    const selectedDetails = selected.sections.find((section) => section.kind === 'kv');
+    if (selectedDetails === undefined || selectedDetails.kind !== 'kv') throw new Error('Expected Library detail key/value rows.');
+    expect(selectedDetails.rows).toContainEqual(['state', { kind: 'text', text: 'edited ✎' }]);
+    expect(selectedDetails.rows).toContainEqual(['path', { kind: 'path', path: projectPath }]);
+    expect(selectedDetails.rows).toContainEqual(['health', { kind: 'status', tone: 'warn', text: 'edited since placement' }]);
+    expect(uncoveredLs([`  deploy — ${projectRow.state}; path: ${projectPath}`, projectRow.description, projectRow.body], selectedValue)).toEqual([]);
+
+    for (const path of [undefined, '/stale/path']) {
+      const selection = { kind: 'skill', name: 'deploy', source: 'library', ...(path === undefined ? {} : { path }) };
+      const fallbackValue = { selection, skills: [], local };
+      const fallback = renderLs(fallbackValue, RENDER_CTX);
+      const fallbackDetails = fallback.sections.find((section) => section.kind === 'kv');
+      if (fallbackDetails === undefined || fallbackDetails.kind !== 'kv') throw new Error('Expected fallback Library detail key/value rows.');
+      expect(fallbackDetails.rows).toContainEqual(['path', { kind: 'path', path: globalPath }]);
+      expect(uncoveredLs([`  deploy — ${globalRow.state}; path: ${globalPath}`, globalRow.description, globalRow.body], fallbackValue)).toEqual([]);
+    }
+  });
+
+  it('right-aligns the grouped Cannot be connected folder count in pretty output', () => {
+    const value = {
+      local: [{
+        root: '/home/seed/.claude/skills', label: 'Global', rootState: 'scanned', registered: false, rows: [],
+        notOffered: Array.from({ length: 6 }, (_, index) => ({ name: `bad-${index}`, reason: 'failed', detail: 'failed', path: `/home/seed/.claude/skills/bad-${index}` })),
+      }],
+    };
+    const pretty = renderPretty(renderLs(value, RENDER_CTX), { ...RENDER_CTX, format: 'pretty' });
+    expect(pretty).toContain('│ Reason │ Folders │');
+    expect(pretty).toContain('│ failed │      ×6 │');
   });
 
   for (const backend of Object.keys(BACKENDS)) {
@@ -329,13 +376,19 @@ describe('search, eval-report, eval boards', () => {
     expect(text).not.toContain('**Next:**');
   });
 
-  it('caps drain outcomes at the requested row count and reports the remainder', () => {
+  it('caps drain outcomes and does not repeat their covered outcome lines as notes', () => {
     const value = { items: [], attempted: 3, outcomes: [{ skill: 'one', ok: true }, { skill: 'two', ok: false, error: 'failed' }, { skill: 'three', ok: true }] };
-    const rendered = evalRenderer.render(value, { ...RENDER_CTX, rows: 2 });
+    const ctx = { ...RENDER_CTX, rows: 2, argv: ['eval', '--drain'], command: 'npx -y terum-skills@latest eval --drain --format md', rowsAllCommand: 'npx -y terum-skills@latest eval --drain --format md --rows all' };
+    const lines = ['Evaluating 3 skills, 4 at a time…', '── one ──', 'verdict: PASS', '✓ one', '✗ two: failed', '✓ three', 'Evaluated 2 of 3; 1 failed.'];
+    const rendered = renderBoard({ verb: 'eval', ok: false, error: '1 queued eval failed; it remains queued.', value, exitCode: 1 }, lines, [], ctx);
     const outcomes = rendered.sections.find((section) => section.kind === 'table' && section.title === 'Outcomes');
     if (outcomes === undefined || outcomes.kind !== 'table') throw new Error('Expected the Outcomes table.');
     expect(outcomes.rows).toHaveLength(2);
     expect(outcomes.more).toEqual({ count: 1 });
+    expect(rendered.notes).toEqual(['── one ──', 'verdict: PASS']);
+    const output = renderMd(rendered, ctx);
+    expect(output).toContain('… and 1 more — run `npx -y terum-skills@latest eval --drain --format md --rows all`');
+    expect(output).not.toMatch(/^- [✓✗] /m);
   });
 
   // Fix round 1, R4: the batch headline is the exact printed sentence (ok, not ok+failed).
@@ -345,6 +398,8 @@ describe('search, eval-report, eval boards', () => {
     const text = await typed('eval', ['eval', 'tdd', 'notes'], 'md', { ok: false, error: '1 of 2 evals failed.', value, exitCode: 1 }, lines);
     expect(text).toContain('**Evaluated 1 of 2; 1 failed.**');
     expect(text).toContain('Stopped after 1 of 2: a declined "Continue?" queued the rest for later.');
+    expect(text).toContain('- ✓ tdd');
+    expect(text).toContain('- ✗ notes: judge failed');
     expect(text).toContain('/eval-report tdd');
     await expect(text).toMatchFileSnapshot(snapshot('typed.eval-many', 'md'));
   });
