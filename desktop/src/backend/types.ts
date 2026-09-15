@@ -134,14 +134,14 @@ export interface InstalledResult {id:string;name:string;scope:Scope;path:string|
 export interface UninstallArgs {from?:string;team?:string;ref:string;kind?:'skill'|'member'|'project';member?:string;project?:string}
 export interface UninstalledResult {id:string;name:string}
 export interface MachineUninstallResult {removed:string[];removedPlacements:number;hookRemoved:boolean;wrapperRemoved:boolean;configRemoved:boolean;kept:string[];record:string;advice:string[]}
-export interface PublishArgs {team?:string;ref:string;message?:string;/** Endorse into `team.json projects[<project>].skills` instead of the global list. */project?:string;/** The skill's terum-category (`--category`): skips the CLI's model suggestion. A declared category in SKILL.md still wins. */category?:string}
+export interface PublishArgs {team?:string;ref:string;message?:string;/** ALSO list the skill in `team.json projects[<project>].skills`; publishing itself goes to the marketplace. */project?:string;/** The skill's terum-category (`--category`): skips the CLI's model suggestion. A declared category in SKILL.md still wins. */category?:string}
 /**
  * §5.3. `version` is the `v<N>` this publish minted, or — when the bytes were byte-identical to a
  * version already in the repo — the one it matched, which `identicalTo` names. `created` is the
  * honest "did anything new land" flag, and it is deliberately not the same question as "did
  * anything change": a publish can add the skill to a project without minting a version.
  */
-export interface PublishResult {name:string;project:string;version:string|null;created:boolean;identicalTo:string|null;attachedEvals:number;evalAssets:number;profileAdded:boolean;projectAdded:boolean}
+export interface PublishResult {name:string;/** The project also listed, or null — the marketplace alone. */project:string|null;version:string|null;created:boolean;identicalTo:string|null;attachedEvals:number;evalAssets:number;profileAdded:boolean;projectAdded:boolean}
 export interface SyncArgs {team?:string}
 // The fetch-only sync result (§10). `detail` is the CLI's own reason for a state other than 'refreshed';
 // it is spelled the same here as in the CLI so the popup can render it.

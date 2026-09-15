@@ -33,7 +33,7 @@ import { Menu,MenuTrigger,MenuPopup,MenuItem } from '../../components/ui/Menu';
 import { RadioGroup,RadioRow } from '../../components/ui/RadioGroup';
 import { SkillMarkdown } from './SkillMarkdown';
 import { PublishOptions } from './PublishOptions';
-import { GLOBAL_LIST, TARGET_ASK, publishFlags, usePublishDefaults } from './publish-defaults';
+import { publishFlags, usePublishDefaults } from './publish-defaults';
 import { CopyValue } from '../../components/domain/ContextMenu';
 import { useContextMenu, useCopy, useHostReveal } from '../../components/domain/context-menu';
 import type { ContextMenuItem } from '../../components/domain/context-menu';
@@ -120,8 +120,8 @@ function SkillPage(){const evalRun=useEvalRun(),queryClient=useQueryClient();
    if(activeRun.current!==run)return;
    activeRun.current=null;setBusy(false);setProgressLabel(null);param('dialog',null);
    if(!result.ok){if(!result.cancelled)setActionError(result.error);return;}
-   // §5.2: a publish lands on main. What varies is whether it MINTED a version, matched one that
-   // already existed, or only added the skill to a project — three different things to have done.
+   // §5.2: a publish lands on main, in the marketplace. What varies is whether it MINTED a version,
+   // matched one that already existed, or only added the skill to a project — three things to have done.
    // The sentence lives in publish-outcome.ts, shared with the Library's bulk dialog (batch E, 2026-09-13).
    setNotice({text:publishOutcomeText(s.name,result.value),url:null});
    void query.refetch();
@@ -131,7 +131,7 @@ function SkillPage(){const evalRun=useEvalRun(),queryClient=useQueryClient();
  // A separate CLI consent prompt can take focus; outside/focus dismissal must not cancel the parent run.
   async function execute(kind:string){if(busy||activeRun.current)return;setBusy(true);setProgressLabel(null);if(kind==='publish')return void publish();try{const run=kind==='install'?backend.install({ref,scope:features?.installScope?scope:'Global',...(s?.team?{team:s.team}:{})}):kind==='remove'?backend.uninstallSkill({ref:localPath!==null?s!.name:ref,...(s?.team?{team:s.team}:{}),...(localPath!==null?{}:removeFrom(s!))}):backend.sync({... (s?.team?{team:s.team}:{})});activeRun.current=run;const result=await driveRun<unknown>(run,{[`Remove ${localPath!==null?s!.name:ref}?`]:true},unexpected,print,frame=>setProgressLabel(frame.label??null));if(activeRun.current!==run)return;activeRun.current=null;setBusy(false);setProgressLabel(null);if(!result.ok){setActionError(result.error);param('dialog',null);return;}if(kind==='remove')navigate(backTo);else if(kind==='install')navigate('/skill/'+encodeURIComponent(ref)+(marketplace?'?root=marketplace':scopeRoot!==null?'?root='+encodeURIComponent(scopeRoot):''));else if(kind==='sync'){setActionError(null);void query.refetch();}else param('dialog',null);}catch(e){activeRun.current=null;setBusy(false);setProgressLabel(null);setActionError(e instanceof Error?e.message:'Operation failed.');param('dialog',null);}}
  const failureReason=!actionError&&query.data?.ok===false?query.data.reason:undefined;
- const copy=dialog&&s?dialogCopy(dialog,s,{installScope:features?.installScope??false}):null; const publishTarget=targetChoice??(publishDefaults.target===TARGET_ASK?GLOBAL_LIST:publishDefaults.target),publishFlagsNow=publishFlags(publishTarget,categoryChoice),publishCommand=s?`npx -y terum-skills@latest publish ${s.name}${publishFlagsNow.project?` --project ${publishFlagsNow.project}`:''}${publishFlagsNow.category?` --category ${publishFlagsNow.category}`:''}`:'';
+ const copy=dialog&&s?dialogCopy(dialog,s,{installScope:features?.installScope??false}):null; const publishTarget=targetChoice??publishDefaults.target,publishFlagsNow=publishFlags(publishTarget,categoryChoice),publishCommand=s?`npx -y terum-skills@latest publish ${s.name}${publishFlagsNow.project?` --project ${publishFlagsNow.project}`:''}${publishFlagsNow.category?` --category ${publishFlagsNow.category}`:''}`:'';
  // The rail's “Manage with Terum…” opens the card's own ⋯ menu, so a folder Terum did not place has one
  // list of everything it can do — the page used to offer publish alone (Ryan, 2026-09-14). `open` is
  // dropped: this IS the page it opens.

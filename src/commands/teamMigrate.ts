@@ -4,7 +4,7 @@ import type { WithForm } from '../lib/invocation.js';
 import type { Prompter } from '../lib/prompt.js';
 import { fromError, Result, success } from '../lib/result.js';
 import { Runner, systemRunner } from '../lib/runner.js';
-import { anyLayoutTeamSchema, GLOBAL_PROJECT, installedSchema, isSkillName, LEGACY_TREE_HASH, parseJson, parseOrExplain, parseSkillFrontmatter, personSchema, teamSchema } from '../lib/schema.js';
+import { anyLayoutTeamSchema, installedSchema, isSkillName, LEGACY_TREE_HASH, parseJson, parseOrExplain, parseSkillFrontmatter, personSchema, teamSchema } from '../lib/schema.js';
 import { ignoredByDigest, skillContentDigest } from '../lib/skills.js';
 import { installPushGuard, lockWait, MutableTree, openTeamRepo, SafeWriteOptions, treeText } from '../lib/teamRepo.js';
 import { parseVersionFolder, VERSION_FOLDER, versionFolderName } from '../lib/versions.js';
@@ -52,16 +52,15 @@ export function migrateTree(tree: MutableTree): MigrationCounts {
   const counts: MigrationCounts = { skills: 0, rekeyedReceipts: 0, archivedReceipts: 0, people: 0 };
   if (team.layout_version === 3) return counts;
 
-  const aliases = Object.keys(team.projects).filter(key => key.toLowerCase() === GLOBAL_PROJECT.toLowerCase());
-  if (aliases.length > 1) throw new Error(`Migration refused: multiple projects spell Global (${aliases.join(', ')}); resolve the project names before retrying.`);
-  const adopted = aliases[0];
-  const projects = { ...team.projects };
-  const global = adopted === undefined ? { remotes: [], skills: [] } : projects[adopted]!;
-  if (adopted !== undefined) delete projects[adopted];
-  projects[GLOBAL_PROJECT] = { ...global, skills: [...new Set([...global.skills, ...(team.global ?? [])])] };
+  // Layout 2's `global[]` is DROPPED, not folded into a project. Under layout 3 a skill is in the
+  // team because `skills/<name>/v<N>` holds its bytes — that is the marketplace — and `projects` is
+  // an optional membership list. The ids in `global[]` name skills this repo already carries, so
+  // deleting the list loses nothing; there is no reserved catch-all project to fold them into, and
+  // inventing one would put a card in front of every team that never asked for it. Existing project
+  // cards are carried across untouched, whatever they are named (`team project delete` retires one).
   const policy = { ...team.policy };
   delete policy.publish;
-  const nextTeam = { ...team, projects, policy, layout_version: 3 };
+  const nextTeam = { ...team, projects: { ...team.projects }, policy, layout_version: 3 };
   delete nextTeam.global;
   parseOrExplain(teamSchema, nextTeam, 'migrated team.json');
 
@@ -139,12 +138,12 @@ export function migrateTree(tree: MutableTree): MigrationCounts {
     const person = parseJson(legacyPersonSchema, treeText(required(tree, path)), path);
     const next = {
       ...person,
+      // Only the version vocabulary changes here. Nothing renames a project any more, so an install
+      // scope and a person's project list both carry across verbatim.
       installed: person.installed.map(entry => ({
         ...entry,
         version: entry.version !== null && LEGACY_TREE_HASH.test(entry.version) ? (hashes.get(entry.id) === entry.version ? v1 : null) : entry.version,
-        scope: entry.scope.kind === 'project' && adopted !== undefined && entry.scope.project === adopted ? { ...entry.scope, project: GLOBAL_PROJECT } : entry.scope,
       })),
-      ...(person.projects === undefined ? {} : { projects: person.projects.map(project => project === adopted ? GLOBAL_PROJECT : project) }),
     };
     // This is the REAL layout-3 validator, not the lenient input reader. Never stage a half-converted member.
     parseOrExplain(personSchema, next, `migrated ${path}`);

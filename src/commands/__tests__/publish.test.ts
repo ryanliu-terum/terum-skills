@@ -65,7 +65,7 @@ describe('publish (§5) — the only bridge between the two mirrors', () => {
     const { store, home } = await prepared();
     await librarySkill(home);
     const result = await run({ ref: '~/.claude/skills/sample', home, config: store }, new ScriptedPrompter([], [false]));
-    expect(result).toMatchObject({ ok: true, value: { team: 'team', name: 'sample', project: 'Global', version: 'v1', created: true } });
+    expect(result).toMatchObject({ ok: true, value: { team: 'team', name: 'sample', project: null, version: 'v1', created: true } });
   });
 
   it('mints v1 from the LOCAL folder, injects the managed fields, and lands on main', async () => {
@@ -73,7 +73,8 @@ describe('publish (§5) — the only bridge between the two mirrors', () => {
     const folder = await librarySkill(home);
     const io = new ScriptedPrompter([], [false]);
     const result = await run({ ref: 'sample', home, config: store }, io);
-    expect(result).toMatchObject({ ok: true, value: { team: 'team', name: 'sample', project: 'Global', version: 'v1', created: true, identicalTo: null, attachedEvals: 0, projectAdded: true } });
+    // No `--project`: the version folder alone is the publish. `team.json` is not touched at all.
+    expect(result).toMatchObject({ ok: true, value: { team: 'team', name: 'sample', project: null, version: 'v1', created: true, identicalTo: null, attachedEvals: 0, projectAdded: false } });
     // §5.1 step 4: the four managed fields are written by publish, into the version AND back into the
     // folder — an author's folder carries none of them until their first publish.
     const committed = await show(fixture.bare, 'skills/sample/v1/SKILL.md');
@@ -83,8 +84,9 @@ describe('publish (§5) — the only bridge between the two mirrors', () => {
     expect(await readFile(join(folder, 'SKILL.md'), 'utf8')).toBe(committed);
     // §4.1: the push collapsed onto main. No branch, no pull request.
     expect((await git(['branch', '--list'], fixture.bare)).trim()).toBe('* main');
-    expect(JSON.parse(await show(fixture.bare, 'team.json')).projects.Global.skills).toEqual([result.ok ? result.value.id : '']);
-    expect(io.lines.join('\n')).toContain('Published sample as Version 1 in Global.');
+    // team.json is untouched: the fixture's project list neither gains this id nor loses anything.
+    expect(JSON.parse(await show(fixture.bare, 'team.json')).projects).toEqual(TEAM_JSON.projects);
+    expect(io.lines.join('\n')).toContain('Published sample as Version 1 to the team marketplace.');
   });
 
   it('category precedence is declared > --category > the default, and only the default announces itself', async () => {
@@ -119,7 +121,7 @@ describe('publish (§5) — the only bridge between the two mirrors', () => {
     const again = await run({ ref: 'sample', home, config: store }, io);
     expect(again).toMatchObject({ ok: true, value: { version: null, created: false, identicalTo: 'v1', projectAdded: false } });
     expect(await originSha(fixture.bare)).toBe(afterFirst);
-    expect(io.lines.join('\n')).toContain('Nothing to publish: sample is identical to Version 1 and already in Global.');
+    expect(io.lines.join('\n')).toContain('Nothing to publish: sample is identical to Version 1 and already in the team marketplace.');
   });
 
   it('changed bytes mint the next ordinal from the HIGHEST version, never from the count', async () => {
@@ -261,13 +263,29 @@ describe('publish (§5) — the only bridge between the two mirrors', () => {
     expect(teamJson.projects.Global.skills).toEqual([second.ok ? second.value.id : '']);
   });
 
-  it('asks which project only when the team has more than one, defaulting to Global', async () => {
-    const { store, home } = await prepared({ projects: { Global: { remotes: [], skills: [] }, product: { remotes: [], skills: [] } } });
+  it('never asks which project, however many the team has — publishing targets the marketplace', async () => {
+    const { fixture, store, home } = await prepared({ projects: { infra: { remotes: [], skills: [] }, product: { remotes: [], skills: [] } } });
     await librarySkill(home);
-    const io = new ScriptedPrompter(['product']);
+    const io = new ScriptedPrompter();
     const result = await run({ ref: 'sample', home, config: store }, io);
-    expect(result).toMatchObject({ ok: true, value: { project: 'product' } });
-    expect(io.asked.join('\n')).toContain('Which project?');
+    expect(result).toMatchObject({ ok: true, value: { project: null, version: 'v1', projectAdded: false } });
+    expect(io.asked).toEqual([]);
+    // Neither list gained the id, and the skill is in the team all the same.
+    const teamJson = JSON.parse(await show(fixture.bare, 'team.json'));
+    expect(teamJson.projects.infra.skills).toEqual([]);
+    expect(teamJson.projects.product.skills).toEqual([]);
+    expect(await show(fixture.bare, 'skills/sample/v1/SKILL.md')).toContain('name: sample');
+  });
+
+  it('refuses a --project the team does not have, before writing anything locally or in the clone', async () => {
+    const { fixture, store, home } = await prepared({ projects: { product: { remotes: [], skills: [] } } });
+    const folder = await librarySkill(home);
+    const before = await readFile(join(folder, 'SKILL.md'), 'utf8');
+    const head = await originSha(fixture.bare);
+    expect(await run({ ref: 'sample', home, config: store, project: 'payments' }, new ScriptedPrompter()))
+      .toMatchObject({ ok: false, error: expect.stringContaining('Unknown project payments') });
+    expect(await readFile(join(folder, 'SKILL.md'), 'utf8')).toBe(before);
+    expect(await originSha(fixture.bare)).toBe(head);
   });
 
   it('D5/D77: publishing is not installing — the only people-file write is the profile entry, and publish writes it without asking', async () => {
