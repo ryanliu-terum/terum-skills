@@ -1,5 +1,5 @@
 import { execFile, spawn } from 'node:child_process';
-import { cp, chmod, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import { access, cp, chmod, mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { delimiter, dirname, relative, resolve, sep } from 'node:path';
@@ -194,6 +194,56 @@ describe('the built bin (dist/index.js)', () => {
     expect(await editHook.removeEditHook(hookOptions)).toBe('removed');
     expect(await editHook.editHookInstalled(hookOptions)).toBe(false);
     expect(JSON.parse(await readFile(resolve(home, '.claude', 'settings.json'), 'utf8'))).toEqual({});
+  });
+
+  it('the bundler refuses a marked skill whose frontmatter breaks the contract, names every problem, and bundles nothing', async () => {
+    const scratch = resolve(out, 'bundler-scratch');
+    await rm(scratch, { recursive: true, force: true });
+    const skills = resolve(scratch, '.claude', 'skills');
+    const write = async (folder: string, raw: string) => {
+      await mkdir(resolve(skills, folder), { recursive: true });
+      await writeFile(resolve(skills, folder, 'SKILL.md'), raw);
+    };
+    await write('good', '---\nname: good\ndescription: "quoted: fine"\nmetadata:\n  managed-by: terum-skills\n  short-description: "Good"\n---\nbody\n');
+    await write('review-tool', '---\nname: review-tool\ndescription: not ours\n---\nbody\n');
+    await write('misnamed', '---\nname: other\ndescription: "x"\nmetadata:\n  managed-by: terum-skills\n  short-description: "x"\n---\n');
+    await write('bare', '---\nname: bare\ndescription: bare scalar\nmetadata:\n  managed-by: terum-skills\n  short-description: "x"\n---\n');
+    await write('extra', '---\nname: extra\ndescription: "x"\nlicense: MIT\nmetadata:\n  managed-by: terum-skills\n  short-description: "x"\n---\n');
+    await write('short', '---\nname: short\ndescription: "x"\nmetadata:\n  managed-by: terum-skills\n---\n');
+    await write('broken', '---\nname: [\nmetadata:\n  managed-by: terum-skills\n---\n');
+    const script = await readFile(resolve(root, 'scripts', 'bundle-skill.mjs'), 'utf8');
+    // The script resolves its sources from its own location; run a copy planted beside the scratch tree.
+    await mkdir(resolve(scratch, 'scripts'), { recursive: true });
+    await writeFile(resolve(scratch, 'scripts', 'bundle-skill.mjs'), script);
+    await mkdir(resolve(scratch, 'assets', 'claude', 'hooks'), { recursive: true });
+    await cp(resolve(root, 'assets', 'claude', 'hooks', 'terum-skills-edit.mjs'), resolve(scratch, 'assets', 'claude', 'hooks', 'terum-skills-edit.mjs'));
+    await symlink(resolve(root, 'node_modules'), resolve(scratch, 'node_modules'), 'dir');
+    const attempt = await run(process.execPath, [resolve(scratch, 'scripts', 'bundle-skill.mjs'), '--out', resolve(scratch, 'dist')], { cwd: scratch }).then(
+      () => null,
+      (error: { code: number; stderr: string }) => error,
+    );
+    expect(attempt?.code).toBe(1);
+    const lines = attempt!.stderr.trim().split('\n');
+    expect(lines.at(-1)).toBe('5 problems; nothing bundled.');
+    expect(lines.filter((line) => line.startsWith(resolve(skills, 'misnamed', 'SKILL.md')))).toEqual([`${resolve(skills, 'misnamed', 'SKILL.md')}: name must equal the folder name misnamed (found "other")`]);
+    expect(lines.filter((line) => line.startsWith(resolve(skills, 'bare', 'SKILL.md')))).toEqual([`${resolve(skills, 'bare', 'SKILL.md')}: description must be a quoted or block scalar (HYG1: a bare scalar with a colon breaks YAML readers)`]);
+    expect(lines.filter((line) => line.startsWith(resolve(skills, 'extra', 'SKILL.md')))).toEqual([`${resolve(skills, 'extra', 'SKILL.md')}: top-level key license is not allowed (only name, description, metadata)`]);
+    expect(lines.filter((line) => line.startsWith(resolve(skills, 'short', 'SKILL.md')))).toEqual([`${resolve(skills, 'short', 'SKILL.md')}: metadata.short-description is required (Codex reads it)`]);
+    expect(lines.filter((line) => line.startsWith(resolve(skills, 'broken', 'SKILL.md')))).toEqual([`${resolve(skills, 'broken', 'SKILL.md')}: frontmatter is not valid YAML: Flow sequence in block collection must be sufficiently indented and end with a ] at line 2, column 1:`]);
+    expect(lines.some((line) => line.includes('review-tool'))).toBe(false);
+    await expect(access(resolve(scratch, 'dist', 'claude', 'skills'))).rejects.toMatchObject({ code: 'ENOENT' });
+    // With the faulty files gone, the good one bundles, the unmarked one is skipped, and a stale bundled folder is cleared.
+    for (const folder of ['misnamed', 'bare', 'extra', 'short', 'broken']) await rm(resolve(skills, folder), { recursive: true });
+    await mkdir(resolve(scratch, 'dist', 'claude', 'skills', 'stale'), { recursive: true });
+    await writeFile(resolve(scratch, 'dist', 'claude', 'skills', 'stale', 'SKILL.md'), 'old');
+    const ok = await run(process.execPath, [resolve(scratch, 'scripts', 'bundle-skill.mjs'), '--out', resolve(scratch, 'dist')], { cwd: scratch });
+    const hookSource = resolve(scratch, 'assets', 'claude', 'hooks', 'terum-skills-edit.mjs');
+    const hookDestination = resolve(scratch, 'dist', 'claude', 'hooks', 'terum-skills-edit.mjs');
+    expect(ok.stderr.trim().split('\n')).toEqual([
+      `Bundled ${resolve(skills, 'good', 'SKILL.md')} -> ${resolve(scratch, 'dist', 'claude', 'skills', 'good', 'SKILL.md')}`,
+      `Bundled ${hookSource} -> ${hookDestination}`,
+    ]);
+    expect(await readdir(resolve(scratch, 'dist', 'claude', 'skills'))).toEqual(['good']);
   });
 
   async function installedLayout(prefix: string) {

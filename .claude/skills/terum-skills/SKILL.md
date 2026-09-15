@@ -3,6 +3,7 @@ name: terum-skills
 description: "Drive the terum-skills CLI from a Claude Code session: inspect the local Library or team Marketplace, fetch with sync, publish immutable skill versions, install the latest version into Global or an added project, evaluate local skills, and prepare terminal commands for project setup, skill move/rename/delete, pruning, and team administration. Use when the user wants to manage, evaluate, publish, or install skills; hand questions requiring a TTY to the user's terminal."
 metadata:
   managed-by: terum-skills
+  short-description: "Run any terum-skills verb from a session"
 ---
 
 Run one `terum-skills` verb on the user's behalf, or prepare it for them when the CLI would

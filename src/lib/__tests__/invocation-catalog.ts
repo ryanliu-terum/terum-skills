@@ -1959,8 +1959,14 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "pattern": "The desktop checks once at launch; that check refreshes the advertisement at most once a day (App updates above) and displays the advertised version in its top-bar update chip. Settings ▸ Updates uses `updates:app:policy`: `ask` (manual download/install), `on-close` (the default), or `overnight` (01:00–05:00 local after 30 idle minutes). The old boolean migrates once: false → ask, true → on-close. Successful install markers display “Updated to {version}”, adding “when you quit” or “overnight”; `updates:app:lastShown` acknowledges the marker across launches while the current session retains it. Failure markers remain visible. Settings ▸ Updates also carries a one-shot `Update and relaunch` row: it runs `app-update --check --force`, then `--stage` for the advertised build when it is newer and not yet staged, then the same confirmation dialog and `--apply --reason manual` followed by quit. A failed probe is reported as unreachable rather than as up to date, and the launch hook's automatic policy skips a version the row already started downloading in this session."
   },
   {
+    file: '.claude/skills/terum-skills/SKILL.md',
+    line: 5,
+    policy: 'prose',
+    pattern: 'short-description: "Run any terum-skills verb from a session"',
+  },
+  {
     "file": ".claude/skills/terum-skills/SKILL.md",
-    "line": 119,
+    "line": 120,
     "policy": "fixed",
     "pattern": "| `skill disable <abs-path>` | none | `npx -y terum-skills@latest skill disable <abs-path>` — writes `off` for the folder's name into Claude Code's own `skillOverrides` setting (the same key the `/skills` menu writes); the folder stays where it is |"
   },
