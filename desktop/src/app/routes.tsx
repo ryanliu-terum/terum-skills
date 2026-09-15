@@ -43,7 +43,6 @@ export const routes:RouteObject[]=[
 {path:"/inbox/:id",element:<InboxRoute><InboxScreen/></InboxRoute>},
 {path:"/marketplace",element:<MarketplaceScreen/>},
 {path:"/marketplace/skills",element:<MarketplaceScreen/>},
-{path:"/marketplace/projects",element:<MarketplaceScreen/>},
 {path:"/marketplace/projects/:key",element:<MarketplaceScreen/>},
 {path:"/marketplace/people",element:<MarketplaceScreen/>},
 {path:"/marketplace/people/:handle",element:<MarketplaceScreen/>},

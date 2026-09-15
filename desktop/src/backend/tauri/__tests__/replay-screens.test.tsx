@@ -86,7 +86,7 @@ it('renders recorded people without dangling separators and with authored publis
   expect(mira.querySelector('.market-person-ident')?.textContent).toBe('Mira Chenmira');
 });
 it('omits unknown project descriptions, admins and evaluation chips', async () => {
-  open('#/marketplace/projects', true);
+  open('#/marketplace', true);
   const project = await screen.findByTestId('project-card-terum');
   expect(project.querySelector('.market-project-desc')).toBeNull();
   expect(project.querySelector('.market-project-foot')).toBeNull();
