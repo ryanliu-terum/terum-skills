@@ -73,8 +73,9 @@ export function installersById(people: readonly Person[]): Map<string, Installer
 }
 
 /**
- * Simplified in place, not deleted (§4.1c): `team.global` is gone and `Global` is now an ordinary
- * project key, so the projects list alone answers it — `Global` among them.
+ * Which project lists, if any, name this skill. There is no reserved project any more: a skill is in
+ * the team because the marketplace holds its bytes, so `—` means "the marketplace alone", never
+ * "unshared".
  */
 export function skillEndorsement(team: EndorsementTeam, id: string): string {
   const projects = Object.entries(team.projects).filter(([, project]) => project.skills.includes(id)).map(([name]) => name).sort();

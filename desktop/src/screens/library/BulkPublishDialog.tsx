@@ -12,7 +12,7 @@ import { plural } from '../marketplace/market-data';
 import { rowText } from './bulk-publish';
 import type { BulkPublishSummary, BulkRow, BulkRowState } from './bulk-publish';
 import { PublishOptions } from '../skill/PublishOptions';
-import { GLOBAL_LIST, TARGET_ASK, publishFlags, usePublishDefaults } from '../skill/publish-defaults';
+import { publishFlags, usePublishDefaults } from '../skill/publish-defaults';
 
 /**
  * Bulk "Publish to team" for the Library's selection mode (`?select=1&dialog=publish`, batch E 2026-09-13).
@@ -29,7 +29,7 @@ export function BulkPublishDialog({ cards, onClose, onFinished }: { cards: reado
   const [phase, setPhase] = useState<'idle' | 'running' | 'finished'>('idle');
   // Settings ▸ Publishing ▸ Defaults: the target applies to every row; categories stay per skill (the model's, or SKILL.md's).
   const defaults = usePublishDefaults(), [targetChoice, setTargetChoice] = useState<string | null>(null);
-  const target = targetChoice ?? (defaults.target === TARGET_ASK ? GLOBAL_LIST : defaults.target), flags = publishFlags(target, null);
+  const target = targetChoice ?? defaults.target, flags = publishFlags(target, null);
   const [summary, setSummary] = useState<BulkPublishSummary | null>(null);
   // `busy` is a ref, not state, so two clicks in one frame cannot start two queues (the clone is write-locked).
   const busy = useRef(false), stop = useRef(false), activeRun = useRef<Run<PublishResult> | null>(null), mounted = useRef(true), landed = useRef(0);

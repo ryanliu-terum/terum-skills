@@ -66,7 +66,7 @@ it('gates Run eval on the local folder with a reason, keeping the row', () => {
 
 it('keeps the same rows whatever the state, so the menu does not change shape', () => {
  for(const skill of [card(),card({placed:false,installed:'absent',teamState:'unshared'}),card({placed:false,onDiskOnly:true,teamState:'shared'})]) {
-  expect(cardActions(skill,{runEvalInApp:true}).map(a=>a.key)).toEqual(['run-eval','place','publish']);
+  expect(cardActions(skill,{runEvalInApp:true}).map(a=>a.key)).toEqual(['run-eval','place','publish','unpublish']);
  }
 });
 
@@ -78,7 +78,7 @@ it('offers no Open row: the card title is that link, and detailHref is where it 
 
 it('offers Copy to… beside Move to… on a local folder, and on no team skill — those reach a second root by installing', () => {
  const local=cardActions(card({teamed:false,path:'~/.claude/skills/notes'}));
- expect(local.map(a=>a.key)).toEqual(['move','copy','rename','delete','publish']);
+ expect(local.map(a=>a.key)).toEqual(['move','copy','rename','delete','publish','unpublish']);
  expect(local.find(a=>a.key==='copy')).toMatchObject({label:'Copy to…',to:'/skill/local?path='+encodeURIComponent('~/.claude/skills/notes')+'&dialog=file-copy',reason:null});
  expect(cardActions(card()).some(a=>a.key==='copy')).toBe(false);
 });

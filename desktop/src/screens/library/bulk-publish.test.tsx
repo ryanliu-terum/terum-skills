@@ -27,7 +27,7 @@ const cardNames = () => screen.getAllByTestId(/^skill-card-/).map(el => el.getAt
 async function globalCards(backend: Backend): Promise<SkillCard[]> { const result = await backend.library({ scope: { kind: 'global' } }); if (!result.ok) throw new Error(result.error); return result.value.skills; }
 const sendable = (cards: SkillCard[]) => cards.filter(card => localActionReason(card, 'publish') === null);
 async function enterSelection(backend: Backend) { openWith('#/library/global', backend); await screen.findByText('15 skills'); fireEvent.click(modeButton()); await screen.findByText('0 of 15 selected'); }
-function published(ref: string): Result<PublishResult> { return { ok: true, value: { name: ref.split('/').at(-1) ?? ref, project: 'Global', version: 'v3', created: true, identicalTo: null, attachedEvals: 0, evalAssets: 0, profileAdded: false, projectAdded: false } }; }
+function published(ref: string): Result<PublishResult> { return { ok: true, value: { name: ref.split('/').at(-1) ?? ref, project: null, version: 'v3', created: true, identicalTo: null, attachedEvals: 0, evalAssets: 0, profileAdded: false, projectAdded: false } }; }
 function deferred() { let resolve!: () => void; const promise = new Promise<void>(done => { resolve = done; }); return { promise, resolve }; }
 async function openDialog(count: number) { fireEvent.click(screen.getByRole('button', { name: `Publish ${count} skill${count === 1 ? '' : 's'} to team…` })); const dialog = await screen.findByRole('dialog'); expect(search().get('dialog')).toBe('publish'); return dialog; }
 const rowState = (name: string) => within(screen.getByTestId('bulk-row-' + name)).getAllByText(/./).at(-1)?.textContent ?? '';
@@ -116,7 +116,7 @@ it('lists Ready and Skipped rows and never sends a skipped one', async () => {
   fireEvent.click(within(dialog).getByRole('button', { name: 'Publish 1 skill' }));
   await within(dialog).findByText('Published 1 of 1 skill');
   expect(publish).toHaveBeenCalledTimes(1);
-  expect(publish.mock.calls[0]?.[0]).toEqual({ ref: localRef(cards.find(card => card.name === 'deploy-check')!), project: 'Global' }); // Settings ▸ Publishing ▸ Defaults (2026-09-14): the dialog's target is always sent
+  expect(publish.mock.calls[0]?.[0]).toEqual({ ref: localRef(cards.find(card => card.name === 'deploy-check')!) }); // Settings ▸ Publishing ▸ Defaults (2026-09-14): the default target is the marketplace, which sends no --project
   expect(rowState(broken.name)).toBe(`Skipped · ${localActionReason(broken, 'publish')}`);
 });
 
@@ -139,7 +139,7 @@ it('publishes the rows one at a time, reports each outcome, and Done refreshes t
   gate.resolve();
   await waitFor(() => expect(refs).toEqual(pick.map(localRef)));
   await within(dialog).findByText('Published 3 of 3 skills');
-  for (const card of pick) expect(rowState(card.name)).toBe(`${card.name} was published to Global as Version 3.`);
+  for (const card of pick) expect(rowState(card.name)).toBe(`${card.name} was published to the marketplace as Version 3.`);
   expect(within(dialog).queryByRole('button', { name: 'Cancel' })).toBeNull();
   const library = vi.spyOn(backend, 'library');
   fireEvent.click(within(dialog).getByRole('button', { name: 'Done' }));
@@ -165,9 +165,9 @@ it('a failing row reports the CLI sentence and the queue goes on', async () => {
   const dialog = await openDialog(3);
   fireEvent.click(within(dialog).getByRole('button', { name: 'Publish 3 skills' }));
   await within(dialog).findByText('Published 2 of 3 skills · 1 failed');
-  expect(rowState(pick[0]!.name)).toBe(`${pick[0]!.name} was published to Global as Version 3.`);
+  expect(rowState(pick[0]!.name)).toBe(`${pick[0]!.name} was published to the marketplace as Version 3.`);
   expect(rowState(pick[1]!.name)).toBe('Failed · fatal: the team clone is locked by another publish');
-  expect(rowState(pick[2]!.name)).toBe(`${pick[2]!.name} was published to Global as Version 3.`);
+  expect(rowState(pick[2]!.name)).toBe(`${pick[2]!.name} was published to the marketplace as Version 3.`);
   fireEvent.click(within(dialog).getByRole('button', { name: 'Done' }));
   expect(await screen.findByText('Published 2 of 3 skills · 1 failed', { selector: '.library-notice' })).toBeInTheDocument();
 });
@@ -181,12 +181,12 @@ it('Cancel mid-queue stops after the active run and keeps the finished outcome',
   const dialog = await openDialog(3);
   fireEvent.click(within(dialog).getByRole('button', { name: 'Publish 3 skills' }));
   await waitFor(() => expect(rowState(pick[1]!.name)).toBe('Publishing…'));
-  expect(rowState(pick[0]!.name)).toBe(`${pick[0]!.name} was published to Global as Version 3.`);
+  expect(rowState(pick[0]!.name)).toBe(`${pick[0]!.name} was published to the marketplace as Version 3.`);
   fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
   await within(dialog).findByText('Published 1 of 3 skills');
   expect(rowState(pick[1]!.name)).toBe('Cancelled');
   expect(rowState(pick[2]!.name)).toBe('Not started');
-  expect(rowState(pick[0]!.name)).toBe(`${pick[0]!.name} was published to Global as Version 3.`);
+  expect(rowState(pick[0]!.name)).toBe(`${pick[0]!.name} was published to the marketplace as Version 3.`);
   expect(within(dialog).getByRole('button', { name: 'Done' })).toBeInTheDocument();
 });
 
@@ -214,7 +214,7 @@ it('a declined question mid-queue is a cancellation: that row reads Cancelled an
   const dialog = await openDialog(3);
   fireEvent.click(within(dialog).getByRole('button', { name: 'Publish 3 skills' }));
   await within(dialog).findByText('Published 1 of 3 skills');
-  expect(rowState(pick[0]!.name)).toBe(`${pick[0]!.name} was published to Global as Version 3.`);
+  expect(rowState(pick[0]!.name)).toBe(`${pick[0]!.name} was published to the marketplace as Version 3.`);
   expect(rowState(pick[1]!.name)).toBe('Cancelled');
   expect(rowState(pick[2]!.name)).toBe('Not started');
   expect(publish).toHaveBeenCalledTimes(2);
@@ -240,7 +240,7 @@ it('a publish that finished before its cancel landed is reported as published, w
   await waitFor(() => expect(rowState(pick[0]!.name)).toBe('Publishing…'));
   fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
   await within(dialog).findByText('Published 1 of 2 skills');
-  expect(rowState(pick[0]!.name)).toBe(`${pick[0]!.name} was published to Global as Version 3. Cancelled, but publish had already finished; its changes are on disk.`);
+  expect(rowState(pick[0]!.name)).toBe(`${pick[0]!.name} was published to the marketplace as Version 3. Cancelled, but publish had already finished; its changes are on disk.`);
   expect(rowState(pick[1]!.name)).toBe('Not started');
   fireEvent.click(within(dialog).getByRole('button', { name: 'Done' }));
   expect(await screen.findByText('Published 1 of 2 skills', { selector: '.library-notice' })).toBeInTheDocument();
@@ -324,7 +324,7 @@ it("StrictMode's effect replay does not freeze the queue after its first row", a
   const dialog = await openDialog(2);
   fireEvent.click(within(dialog).getByRole('button', { name: 'Publish 2 skills' }));
   await within(dialog).findByText('Published 2 of 2 skills');
-  for (const card of pick) expect(rowState(card.name)).toBe(`${card.name} was published to Global as Version 3.`);
+  for (const card of pick) expect(rowState(card.name)).toBe(`${card.name} was published to the marketplace as Version 3.`);
   expect(within(dialog).getByRole('button', { name: 'Done' })).toBeInTheDocument();
 });
 

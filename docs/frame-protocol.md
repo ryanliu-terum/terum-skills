@@ -137,7 +137,7 @@ hello lines under `.planning/codex-runs/*/frames/` precede B5's three skill verb
 `src/lib/frames.ts` now advertises this complete verb list:
 
 ```json
-["skill move","skill copy","skill rename","skill delete","skill fix","skill category","skill enable","skill disable","project add","project remove","project list","login","setup","team create","team join","team remove","team leave","team move","team workflow-update","team project create","invite","ls","status","reconcile","publish","validate","eval","eval-report","install","uninstall-skill","uninstall","sync","prune","search","update","app","profile","app-update","serve"]
+["skill move","skill copy","skill rename","skill delete","skill fix","skill category","skill enable","skill disable","project add","project remove","project list","login","setup","team create","team join","team remove","team leave","team move","team workflow-update","team project create","team project delete","invite","ls","status","reconcile","publish","unpublish","validate","eval","eval-report","install","uninstall-skill","uninstall","sync","prune","search","update","app","profile","app-update","serve"]
 ```
 
 `team migrate` is registered but terminal-only: under `--frames` it fails before doing any work and tells the
@@ -234,8 +234,9 @@ frame `root` argument; project addition supplies its one-root restriction in-pro
 `publish <ref> [--project <name>] [--category <name>]` resolves a local Library folder, checks
 injected frontmatter, writes it back locally, and publishes directly to main as an immutable version.
 Identical bytes reuse the existing version and can still attach receipts or add project membership.
-A local FAIL receipt can trigger a confirm; multiple projects without `--project` trigger a
-`Which project?` select defaulting to Global. There is no unconditional publish confirmation.
+The version folder is the marketplace copy, so `--project` is optional and its absence asks nothing:
+publish has no project select. A local FAIL receipt can trigger a confirm; there is no
+unconditional publish confirmation. `project` in the result is the named project or `null`.
 The profile entry follows the team write, with no question: publish records the skill on the
 publisher's profile and prints `Your profile now lists <name> at <label>.` (D77). A failed team
 write can leave injected local frontmatter; a failed profile write does not undo publication.

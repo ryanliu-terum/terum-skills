@@ -9,7 +9,7 @@ import type { Config } from '../lib/schema.js';
 import { ConfigStore, createConfigStore } from '../lib/config.js';
 import { Prompter } from '../lib/prompt.js';
 import { fromError, CancelledError, Result, success } from '../lib/result.js';
-import { GLOBAL_PROJECT, parseJson, parseSkillFrontmatter, teamSchema } from '../lib/schema.js';
+import { parseJson, parseSkillFrontmatter, teamSchema } from '../lib/schema.js';
 import { Runner, systemRunner } from '../lib/runner.js';
 import { declaredCategory, declaredSkillId, injectManagedFields, isEvalAsset, readTeam, skillContentDigest, skillRecords } from '../lib/skills.js';
 import { openTeamRepo, refreshClone, SafeWriteOptions, treeText, lockWait } from '../lib/teamRepo.js';
@@ -24,6 +24,11 @@ import type { AgentApi } from '../lib/evals/agent.js';
 
 export interface PublishArgs extends WithForm {
   ref: string;
+  /**
+   * Optionally ALSO list the skill under this team project. Publishing itself targets the
+   * marketplace — the version folder in the team repo — so omitting this is the ordinary case and
+   * never asks a question.
+   */
   project?: string;
   team?: string;
   category?: string;
@@ -40,7 +45,9 @@ export interface PublishArgs extends WithForm {
 }
 
 export interface PublishResult {
-  team: string; id: string; name: string; project: string;
+  team: string; id: string; name: string;
+  /** The project this publish also listed the skill under, or `null` — the marketplace alone. */
+  project: string | null;
   /** `'v4'`, or null when the bytes were identical to an existing version. */
   version: string | null;
   created: boolean;
@@ -50,7 +57,7 @@ export interface PublishResult {
   /** Eval asset files this publish wrote to `skills/<name>/evals/` (add or modify). */
   evalAssets: number;
   profileAdded: boolean;
-  /** This publish appended the uuid to `projects[project].skills`. */
+  /** This publish appended the uuid to `projects[project].skills`; always false without `--project`. */
   projectAdded: boolean;
 }
 
@@ -240,11 +247,11 @@ export async function run(args: PublishArgs, io: Prompter): Promise<Result<Publi
       }
     }
 
-    // 6b. The project question is a REFUSAL, so it belongs ABOVE the write-back: it throws on an
-    //     unknown `--project`, and its `io.select` can be cancelled or throw on a team whose projects
-    //     do not include `Global`. The comment below asserted this ordering while the code had the
-    //     opposite — a mistyped `--project` rewrote the user's SKILL.md on a publish that never ran.
-    const project = await chooseProject(args, teamJson, io);
+    // 6b. `--project` is a REFUSAL, so it belongs ABOVE the write-back: a mistyped project name must
+    //     not rewrite the user's SKILL.md on a publish that never ran. There is no question here and
+    //     no default project: publish targets the MARKETPLACE, and a project is an extra list the
+    //     caller asked for by name.
+    const project = requestedProject(args, teamJson);
 
     // 6c. The local write-back, AFTER the last refusal (OF-2): a publish refused at any question
     //     leaves the folder byte-identical. A safeWrite failure after this point leaves the injected
@@ -260,7 +267,7 @@ export async function run(args: PublishArgs, io: Prompter): Promise<Result<Publi
       const teamSource = tree.before('team.json');
       if (teamSource === undefined) throw new Error('This repository has no team.json; it is not a terum-skills team repo.');
       const fresh = parseJson(teamSchema, treeText(teamSource), 'team.json');
-      if (!Object.hasOwn(fresh.projects, project)) throw new Error(`Unknown project ${project}.`);
+      if (project !== null && !Object.hasOwn(fresh.projects, project)) throw new Error(`Unknown project ${project}.`);
 
       // 7. Enumerate this name's versions from the TREE, not with listVersions: a pure mutation may
       //    only see the post-image. Walk descending and stop at the first digest equal to candidate.
@@ -334,11 +341,16 @@ export async function run(args: PublishArgs, io: Prompter): Promise<Result<Publi
         attached += 1;
       }
 
-      // 9a. Project membership, whether or not a version was minted: the project list records where
-      //     the team exposes a skill, the version records its bytes.
-      const list = fresh.projects[project]!.skills;
-      const projectAdded = !list.includes(id);
-      if (projectAdded) { list.push(id); tree.set('team.json', `${JSON.stringify(fresh, null, 2)}\n`); }
+      // 9a. Project membership, whether or not a version was minted — and only when one was asked
+      //     for. The version folder above IS the marketplace copy; a project list is a second,
+      //     optional place the team also names the skill, so `team.json` is untouched without
+      //     `--project` and a publish can now change nothing outside `skills/`.
+      let projectAdded = false;
+      if (project !== null) {
+        const list = fresh.projects[project]!.skills;
+        projectAdded = !list.includes(id);
+        if (projectAdded) { list.push(id); tree.set('team.json', `${JSON.stringify(fresh, null, 2)}\n`); }
+      }
 
       outcome = { version: identical === null ? target : null, identicalTo: identical, attached, projectAdded, assets: assetsWritten };
       return assessment;
@@ -360,14 +372,16 @@ export async function run(args: PublishArgs, io: Prompter): Promise<Result<Publi
       outcome.attached > 0 ? `attached ${outcome.attached} eval run(s)` : null,
       outcome.assets > 0 ? `updated ${outcome.assets} eval asset file(s)` : null,
     ].filter((part): part is string => part !== null);
+    // Where the skill now is, said once: the marketplace always, a project only when one was named.
+    const where = project === null ? `the ${team} marketplace` : `the ${team} marketplace and ${project}`;
     if (outcome.version !== null) {
-      io.print(`Published ${found.name} as ${label} in ${project}. Attached ${outcome.attached} eval run(s).`);
+      io.print(`Published ${found.name} as ${label} to ${where}. Attached ${outcome.attached} eval run(s).`);
       if (outcome.assets > 0) io.print(`Updated ${outcome.assets} eval asset file(s) for ${found.name}.`);
     } else if (outcome.projectAdded) {
       io.print(`Added ${found.name} to ${project}. It is identical to ${label} of the skill already in the team repository.`);
       if (also.length) io.print(`Also ${also.join(' and ')}.`);
     } else if (also.length === 0) {
-      io.print(`Nothing to publish: ${found.name} is identical to ${label} and already in ${project}.`);
+      io.print(`Nothing to publish: ${found.name} is identical to ${label} and already in ${where}.`);
     } else {
       io.print(`${found.name} is identical to ${label}, so no new version was minted; ${also.join(' and ')}.`);
     }
@@ -401,15 +415,16 @@ export async function run(args: PublishArgs, io: Prompter): Promise<Result<Publi
 }
 
 
-/** A choice list defaulting to Global when the team has more than one project and --project is absent. */
-async function chooseProject(args: PublishArgs, teamJson: Awaited<ReturnType<typeof readTeam>>, io: Prompter): Promise<string> {
-  if (args.project !== undefined) {
-    if (!Object.hasOwn(teamJson.projects, args.project)) throw new Error(`Unknown project ${args.project}.`);
-    return args.project;
-  }
-  const names = Object.keys(teamJson.projects).sort();
-  if (names.length <= 1) return names[0] ?? GLOBAL_PROJECT;
-  return io.select('Which project?', names, GLOBAL_PROJECT);
+/**
+ * The project this publish was asked to ALSO list the skill under, or `null` for the marketplace
+ * alone. There is no prompt and no default: publishing is how a skill reaches the team, and a
+ * project is an opt-in second list. A named project that the team does not have is refused here,
+ * before anything is written — locally or in the clone.
+ */
+function requestedProject(args: PublishArgs, teamJson: Awaited<ReturnType<typeof readTeam>>): string | null {
+  if (args.project === undefined) return null;
+  if (!Object.hasOwn(teamJson.projects, args.project)) throw new Error(`Unknown project ${args.project}.`);
+  return args.project;
 }
 
 /**

@@ -88,18 +88,20 @@ it('shows a failed local move without running install or uninstall',async()=>{
 
 // §5.2: there is no pull request any more. What the notice has to distinguish is the three things a
 // publish can actually have done — minted a version, matched one that already existed, or only added
-// the skill to a project — because they are not the same news.
+// the skill to a project — because they are not the same news. `project` is null for the ordinary
+// publish, which targets the marketplace and lists the skill under no project at all.
 it.each([
-  [{version:'v3',created:true,identicalTo:null,projectAdded:true},'deploy-check was published to Global as Version 3.'],
-  [{version:null,created:false,identicalTo:'v2',projectAdded:true},'deploy-check was added to Global; its bytes are identical to Version 2.'],
-  [{version:null,created:false,identicalTo:'v2',projectAdded:false,attachedEvals:2},'Attached 2 eval run(s) to Version 2 in Global; identical skill bytes minted no version.'],
-  [{version:null,created:false,identicalTo:'v2',projectAdded:false},'deploy-check is already Version 2 in Global; nothing to publish.'],
+  [{version:'v3',created:true,identicalTo:null,projectAdded:false,project:null},'deploy-check was published to the marketplace as Version 3.'],
+  [{version:'v3',created:true,identicalTo:null,projectAdded:true,project:'Payments'},'deploy-check was published to the marketplace and Payments as Version 3.'],
+  [{version:null,created:false,identicalTo:'v2',projectAdded:true,project:'Payments'},'deploy-check was added to Payments; its bytes are identical to Version 2.'],
+  [{version:null,created:false,identicalTo:'v2',projectAdded:false,attachedEvals:2,project:null},'Attached 2 eval run(s) to Version 2 in the marketplace; identical skill bytes minted no version.'],
+  [{version:null,created:false,identicalTo:'v2',projectAdded:false,project:null},'deploy-check is already Version 2 in the marketplace; nothing to publish.'],
 ])('names what the publish actually did: %j',async(outcome,text)=>{
  const backend=createMockBackend();
  const detail=await backend.skill({ref:'deploy-check'});
  if(!detail.ok)throw new Error('fixture detail unavailable');
  vi.spyOn(backend,'skill').mockResolvedValue({ok:true,value:{...detail.value,teamState:'shared'}});
- const publish=vi.spyOn(backend,'publish').mockImplementation(()=>createRun(async()=>({ok:true,value:{name:'deploy-check',project:'Global',attachedEvals:0,profileAdded:false,...outcome}})) as never);
+ const publish=vi.spyOn(backend,'publish').mockImplementation(()=>createRun(async()=>({ok:true,value:{name:'deploy-check',attachedEvals:0,profileAdded:false,...outcome}})) as never);
  openWith('#/skill/deploy-check?dialog=publish',backend);
  fireEvent.click(within(await screen.findByRole('dialog',{name:'Publish deploy-check to the team?'})).getByRole('button',{name:'Publish'}));
  await waitFor(()=>expect(publish).toHaveBeenCalledWith(expect.objectContaining({ref:'deploy-check'})));

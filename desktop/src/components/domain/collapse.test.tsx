@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { HashRouter } from 'react-router';
 import { Providers } from '../../app/providers';
 import { App } from '../../app/App';
@@ -25,24 +25,36 @@ it('hides the sidebar, uses the inset, and reopens from the top bar',async()=>{
  expect(screen.queryByRole('button',{name:'Show sidebar'})).toBeNull();
  expect(screen.getByRole('main').style.margin).toBe('');
 });
+// Inbox has a page behind it, so its label stays a link and only the chevron toggles. Projects has no
+// page of its own — it names the local checkouts listed under it — so the whole row is the toggle (`href` null).
 it.each([
- ['projects','Projects',['Terum','SSM','MRF'],'#/marketplace/projects'],
+ ['projects','Projects',['Terum','SSM','MRF'],null],
  ['inbox','Inbox',['Pushes','Updates','Alerts'],'#/inbox'],
-] as const)('collapses and restores %s without navigating, while its label stays a link',async(section,label,rows,href)=>{
+] as const)('collapses and restores %s without navigating',async(section,label,rows,href)=>{
  openShell();const collapse=await screen.findByRole('button',{name:'Collapse '+label});
- expect(collapse).toHaveAttribute('aria-expanded','true');expect(collapse.querySelector('svg')?.innerHTML).toBe(ICON_PATHS['chevron-down']);
+ expect(collapse).toHaveAttribute('aria-expanded','true');expect(collapse.querySelector('.nav-chevron svg')?.innerHTML).toBe(ICON_PATHS['chevron-down']);
  // Projects now renders before its roots resolve (it is there at zero checkouts), so the rows are awaited rather than read.
  for(const row of rows)expect(await screen.findByRole('link',{name:new RegExp('^'+row+' ')})).toBeVisible();
  fireEvent.click(collapse);const expand=screen.getByRole('button',{name:'Expand '+label});
  expect(location.hash).toBe('#/library/global?'+section+'=collapsed');
  expect(useUiStore.getState().collapsedSections).toEqual([section]);
- expect(expand).toHaveAttribute('aria-expanded','false');expect(expand.querySelector('svg')?.innerHTML).toBe(ICON_PATHS['chevron-right']);
- expect(expand).toHaveStyle({width:'12px',height:'12px'});
+ expect(expand).toHaveAttribute('aria-expanded','false');
+ const chevron=expand.querySelector('.nav-chevron svg');
+ expect(chevron?.innerHTML).toBe(ICON_PATHS['chevron-right']);expect(chevron).toHaveAttribute('width','12');
  for(const row of rows)expect(screen.queryByRole('link',{name:new RegExp('^'+row+' ')})).toBeNull();
- const link=expand.closest('a');expect(link).toHaveAttribute('href',href);
+ const link=expand.closest('a');
+ if(href===null){expect(link).toBeNull();expect(expand).toHaveClass('nav-row-button');}
+ else{expect(link).toHaveAttribute('href',href);expect(expand).toHaveStyle({width:'12px',height:'12px'});}
  fireEvent.click(expand);expect(useUiStore.getState().collapsedSections).toEqual([]);
  for(const row of rows)expect(screen.getByRole('link',{name:new RegExp('^'+row+' ')})).toBeVisible();
- fireEvent.click(link!.querySelector('span')!);await waitFor(()=>expect(location.hash).toBe(href));
+ if(href!==null){fireEvent.click(link!.querySelector('span')!);await waitFor(()=>expect(location.hash).toBe(href));}
+});
+it('toggles Projects from anywhere on the row and never leaves the Library',async()=>{
+ openShell();const row=await screen.findByRole('button',{name:'Collapse Projects'});
+ fireEvent.click(within(row).getByText('Projects'));
+ expect(useUiStore.getState().collapsedSections).toEqual(['projects']);
+ expect(location.hash).toBe('#/library/global?projects=collapsed');
+ expect(document.querySelector('a[href="#/marketplace/projects"]')).toBeNull();
 });
 it('does not save an unrelated URL-only collapsed section on control clicks',async()=>{
  location.hash='#/library/global?projects=collapsed';openShell();

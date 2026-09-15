@@ -267,7 +267,7 @@ it.skip('offers Fix in Quality when a failed validation counts repairable findin
  await screen.findByRole('heading',{name:'adopt-agent-tooling'});
  const validate=vi.spyOn(backend,'validate').mockResolvedValue({ok:false,error:'Hygiene failed.',value:{name:'adopt-agent-tooling',findings:3,warnings:0,repairable:2,repairs}});
  const mock=createMockBackend();const fix=vi.spyOn(backend.skillFile,'fix').mockImplementation(mock.skillFile.fix);
- const publish=vi.spyOn(backend,'publish').mockImplementation(()=>createRun(async()=>({ok:true,value:{name:'adopt-agent-tooling',project:'acme',version:'v2',created:true,identicalTo:null,attachedEvals:0,evalAssets:0,profileAdded:false,projectAdded:false}})));
+ const publish=vi.spyOn(backend,'publish').mockImplementation(()=>createRun(async()=>({ok:true,value:{name:'adopt-agent-tooling',project:null,version:'v2',created:true,identicalTo:null,attachedEvals:0,evalAssets:0,profileAdded:false,projectAdded:false}})));
  fireEvent.click(screen.getByRole('button',{name:'Validate'}));
  fireEvent.click(await screen.findByRole('button',{name:'Fix 2 findings'}));
  const dialog=await screen.findByRole('dialog');
@@ -276,14 +276,14 @@ it.skip('offers Fix in Quality when a failed validation counts repairable findin
  expect(within(dialog).getByText('3 findings reported · anything fix does not cover stays listed for you afterwards.')).toBeVisible();
  expect(validate).toHaveBeenCalledTimes(1);
  expect(within(dialog).getByRole('checkbox',{name:'Republish to the team after fixing'})).toHaveAttribute('aria-checked','true');
- // Republish asks what the publish dialog asks (desktop-qol): the target, starting on Global when the default is Ask each time.
- await waitFor(()=>expect(within(dialog).getByRole('combobox',{name:'Publish to'})).toHaveTextContent('Global'));
+ // Republish asks what the publish dialog asks (desktop-qol): the target, starting on the marketplace — no project.
+ await waitFor(()=>expect(within(dialog).getByRole('combobox',{name:'Publish to'})).toHaveTextContent('Marketplace only'));
  expect(fix).not.toHaveBeenCalled();
  fireEvent.click(within(dialog).getByRole('button',{name:'Fix and republish'}));
  await waitFor(()=>expect(fix).toHaveBeenCalledWith({path:uncPath}));
  // The publish is by folder path, as the page's own Publish is for a folder the team route cannot name.
- await waitFor(()=>expect(publish).toHaveBeenCalledWith({ref:uncPath,project:'Global'}));
- expect(await screen.findByText('adopt-agent-tooling was published to acme as Version 2.')).toBeVisible();
+ await waitFor(()=>expect(publish).toHaveBeenCalledWith({ref:uncPath}));
+ expect(await screen.findByText('adopt-agent-tooling was published to the marketplace as Version 2.')).toBeVisible();
  await waitFor(()=>expect(screen.queryByRole('dialog')).toBeNull());
  await waitFor(()=>expect(validate).toHaveBeenCalledTimes(2));
 });

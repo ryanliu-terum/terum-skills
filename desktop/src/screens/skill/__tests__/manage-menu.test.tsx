@@ -26,7 +26,7 @@ it('opens the card’s full action menu from the rail; no Open row leads back he
  await open();
  fireEvent.click(await screen.findByRole('button',{name:'Manage with Terum…'}));
  const rows=await screen.findAllByRole('menuitem');
- expect(rows.map(row=>row.textContent)).toEqual(['Run eval','Move to…','Copy to…','Rename…','Delete…','Publish to team…']);
+ expect(rows.map(row=>row.textContent)).toEqual(['Run eval','Move to…','Copy to…','Rename…','Delete…','Publish to team…','Unpublish…This skill is not in the team marketplace, so there is nothing to retract.']);
  expect(screen.queryByRole('menuitem',{name:'Open'})).toBeNull();
 });
 

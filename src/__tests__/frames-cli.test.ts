@@ -24,10 +24,11 @@ const INVOCATIONS: Record<string, string[]> = {
   'skill move':['skill','move','/skills/a','--to','global'], 'skill copy':['skill','copy','/skills/a','--to','global'], 'skill rename':['skill','rename','/skills/a','--to','b'], 'skill delete':['skill','delete','/skills/a'], 'skill enable':['skill','enable','/skills/a'], 'skill disable':['skill','disable','/skills/a'], 'skill fix':['skill','fix','/skills/a'], 'skill category':['skill','category','/skills/a','--to','infra'],
   'project add': ['project', 'add'], 'project remove': ['project', 'remove', '/project'], 'project list': ['project', 'list'],
   'team project create': ['team', 'project', 'create', 'Payments'],
+  'team project delete': ['team', 'project', 'delete', 'Payments'],
   'app-update': ['app-update', '--check'],
   app: ['app'], profile: ['profile', '--role', 'Platform'],
   login: ['login'], setup: ['setup'], 'team create': ['team', 'create', 'x'], 'team join': ['team', 'join', 'o/r'], 'team remove': ['team', 'remove', 'h'], 'team leave': ['team', 'leave', 'n'], 'team move': ['team', 'move', 'o/r2'], 'team workflow-update': ['team', 'workflow-update'],
-  invite: ['invite', 'u'], ls: ['ls'], status: ['status'], reconcile: ['reconcile', '--list'], publish: ['publish', 'ref'], validate: ['validate', 'x'], eval: ['eval', 'x'], 'eval-report': ['eval-report', 'x'], install: ['install', 'ref'], 'uninstall-skill': ['uninstall-skill', 'ref'], uninstall: ['uninstall'], sync: ['sync'], prune: ['prune'], search: ['search', 't'], update: ['update'],
+  invite: ['invite', 'u'], ls: ['ls'], status: ['status'], reconcile: ['reconcile', '--list'], publish: ['publish', 'ref'], unpublish: ['unpublish', 'skill'], validate: ['validate', 'x'], eval: ['eval', 'x'], 'eval-report': ['eval-report', 'x'], install: ['install', 'ref'], 'uninstall-skill': ['uninstall-skill', 'ref'], uninstall: ['uninstall'], sync: ['sync'], prune: ['prune'], search: ['search', 't'], update: ['update'],
 };
 
 function harness(verbs: CliVerbs) {
@@ -53,7 +54,7 @@ function harness(verbs: CliVerbs) {
 }
 
 describe('frame mode through commander — every public verb', () => {
-  const verbs: CliVerbs = { skill: asking, skillToggle: asking, project: asking, reconcile: asking, app: asking, profile: asking, login: asking, team: asking, setup: asking, install: asking, uninstall: asking, uninstallMachine: asking, sync: asking, prune: asking, search: asking, invite: asking, ls: asking, status: asking, readme: asking, publish: asking, leave: asking, guardPush: asking, validate: asking, eval: asking, evalReport: asking, update: asking, appUpdate: asking };
+  const verbs: CliVerbs = { skill: asking, skillToggle: asking, project: asking, reconcile: asking, app: asking, profile: asking, login: asking, team: asking, setup: asking, install: asking, uninstall: asking, uninstallMachine: asking, sync: asking, prune: asking, search: asking, invite: asking, ls: asking, status: asking, readme: asking, publish: asking, unpublish: asking, leave: asking, guardPush: asking, validate: asking, eval: asking, evalReport: asking, update: asking, appUpdate: asking };
 
   /**
    * `serve` is a session, not a one-shot verb: it holds stdin open, answers many requests, and writes one

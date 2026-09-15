@@ -1,12 +1,12 @@
 import { invocation, type InvocationForm } from './invocation.js';
-import { handleSchema, parseJson, parseSkillFrontmatter, personSchema, Team, teamSchema } from './schema.js';
+import { handleSchema, parseJson, parseSkillFrontmatter, Person, personSchema, Team, teamSchema } from './schema.js';
 
 /**
  * §6.0 write guard — the authorization model. A diff may touch only the rows a–i below, and
  * nothing else is writable. It runs inside the safeWrite loop against the tree the mutation
  * actually produced; teamRepo additionally proves the staged diff equals that tree's changes.
  */
-export type GuardAction = 'join' | 'install' | 'uninstall' | 'publish' | 'team-remove' | 'profile' | 'project' | 'migrate';
+export type GuardAction = 'join' | 'install' | 'uninstall' | 'publish' | 'unpublish' | 'team-remove' | 'profile' | 'project' | 'project-delete' | 'migrate';
 
 export interface GuardContext {
   action: GuardAction;
@@ -14,6 +14,13 @@ export interface GuardContext {
   handle: string;
   /** `team remove` only: the handle being archived. */
   targetHandle?: string;
+  /**
+   * `unpublish` only: the one skill row k may remove, named twice because the repository keys it
+   * both ways — `skills/<name>/` by folder, `evals/<id>/` and `profile[].id` by uuid. Both are
+   * required; row k fails CLOSED without them, so a caller that forgets one removes nothing.
+   */
+  targetSkill?: string;
+  targetSkillId?: string;
 }
 
 export interface GuardTree {
@@ -60,9 +67,12 @@ export function guard(tree: GuardTree, rawContext: GuardContext): void {
     if (context.action === 'publish' && permitsVersionFolder(tree, path)) continue; // row a′
     if (context.action === 'publish' && permitsEvalAssets(tree, path)) continue; // row a″
     if (context.action === 'publish' && permitsReceipt(tree, path)) continue; // row g
+    // Row k MUST precede rows f and b: unpublish writes people files that are not the actor's own,
+    // which row b would refuse, and it is the only action allowed to remove a version folder.
+    if (context.action === 'unpublish' && permitsUnpublish(tree, path, context)) continue; // row k
     if (path === 'README.md') continue; // row f: generated, regenerated not hand-edited
     if (path === `people/${context.handle}.json` && PEOPLE_ACTIONS.includes(context.action)) continue; // row b
-    if (path === 'team.json') { guardTeam(tree, context); continue; } // rows c, d, e, i
+    if (path === 'team.json') { guardTeam(tree, context); continue; } // rows c, d, e, i, i′
     throw new GuardError(`Write guard refused ${path} for ${context.action} by ${context.handle}`);
   }
 }
@@ -140,6 +150,62 @@ function permitsReceipt(tree: GuardTree, path: string): boolean {
       const parsed = source === undefined ? undefined : parseSkillFrontmatter(asText(source));
       return parsed?.ok === true && parsed.data.metadata.id.toLowerCase() === id;
     });
+}
+
+/** Row k: a people file, the only path row k may MODIFY rather than remove. */
+const PEOPLE_FILE = /^people\/[^/]+\.json$/;
+/** Row k: the uuid-keyed receipt directory for one skill, matched by prefix rather than by leaf. */
+const RECEIPT_PREFIX = /^evals\/([0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12})\//;
+
+/**
+ * Row k — `unpublish`, and **the only row in the guard that may remove a version folder**.
+ *
+ * Rows a′ and j exist to make a published version immutable at the authorization layer: a′ admits a
+ * version path only as an add, and j's negative lookahead keeps even the §13 migration out. Row k
+ * deliberately opens that, because retracting a skill is the one operation whose entire purpose is to
+ * take published bytes back. It is scoped as narrowly as the invariant it relaxes allows:
+ *
+ * - **One skill.** Every admitted path is under `skills/<targetSkill>/` or `evals/<targetSkillId>/`.
+ *   The name and the uuid both come from the caller, which proved they name the same skill by reading
+ *   the newest version's `metadata.id` before it asked for the write. Absent either, row k fails
+ *   CLOSED — the same posture rows a′ and g take when `tree.paths` is missing.
+ * - **Removal only**, for everything except a people file. Row k cannot add a byte and cannot edit
+ *   one, so it can retract a skill and never mint, alter or backdate a version.
+ * - **People files are modify-only, and only to drop `profile[]` entries for this skill.** This is the
+ *   one place the guard admits a write to a file that is not the actor's own (row b's rule), because a
+ *   skill is retracted for the whole team and the endorsement that survived it would name bytes that
+ *   no longer exist. `installed[]` is deliberately untouched: it records that a copy is on a machine,
+ *   which stays true until that machine syncs, and `gone-from-repo` is how the machine learns.
+ *
+ * `team.json` is not handled here — it reaches `guardTeam` as row c′, whose predicate is row c's.
+ */
+function permitsUnpublish(tree: GuardTree, path: string, context: GuardContext): boolean {
+  const name = context.targetSkill;
+  const id = context.targetSkillId?.toLowerCase();
+  if (name === undefined || id === undefined) return false; // fail CLOSED, exactly as rows a′ and g do
+  const before = tree.before(path) !== undefined;
+  const after = tree.after(path) !== undefined;
+  if (before && !after) return path.startsWith(`skills/${name}/`) || RECEIPT_PREFIX.exec(path)?.[1]?.toLowerCase() === id;
+  if (before && after && PEOPLE_FILE.test(path)) return onlyProfileEntryRemoved(tree, path, id);
+  return false;
+}
+
+/**
+ * Row k's people-file arm: `after` must equal `before` with this skill's `profile[]` entries dropped
+ * and **nothing else changed** — not `installed[]`, not the bio, not another skill's endorsement.
+ * Comparing against a constructed expectation rather than diffing fields keeps the predicate exact:
+ * any other edit smuggled into the same write fails the equality and the whole commit is refused.
+ */
+function onlyProfileEntryRemoved(tree: GuardTree, path: string, id: string): boolean {
+  let before: Person; let after: Person;
+  try {
+    before = parseJson(personSchema, asText(tree.before(path)!), path);
+    after = parseJson(personSchema, asText(tree.after(path)!), path);
+  } catch { return false; }
+  if (before.profile === undefined) return false; // nothing to drop; the write has no business here
+  const kept = before.profile.filter((entry) => entry.id.toLowerCase() !== id);
+  if (kept.length === before.profile.length) return false; // a no-op write is not this row's
+  return same({ ...before, profile: kept } satisfies Person, after);
 }
 
 /** Row j's add arm: a migrated skill's bytes land at v1, and its receipts under v1 or D7's archive. */
@@ -231,9 +297,13 @@ function guardTeam(tree: GuardTree, context: GuardContext): void {
   const before = parseTeam(tree.before('team.json'));
   const after = parseTeam(tree.after('team.json'));
   if (context.action === 'publish' && onlySkillListsChanged(before, after)) return; // row c
+  // Row c′: unpublish drops one id from the lists row c appends to. The predicate is row c's, because
+  // the shape of the permitted change is identical — only `projects[].skills` moved.
+  if (context.action === 'unpublish' && onlySkillListsChanged(before, after)) return; // row c′
   if (context.action === 'team-remove' && context.targetHandle && context.targetHandle !== context.handle && archivedAppendedOnly(before, after, context.targetHandle)) return; // row d
   if (context.action === 'join' && archivedRemovedOnly(before, after, context.handle)) return; // row e
   if (context.action === 'project' && oneEmptyProjectAdded(before, after)) return; // row i
+  if (context.action === 'project-delete' && oneProjectRemoved(before, after)) return; // row i′
   throw new GuardError(`Write guard refused team.json for ${context.action} by ${context.handle}`);
 }
 
@@ -252,7 +322,7 @@ function sameExcept(before: Team, after: Team, permitted: readonly string[]): bo
   return same(scrub(before), scrub(after));
 }
 
-/** Row c: `projects[].skills` only — project keys, remotes, and every other field are untouchable (row i creates a key; nothing edits one). The `global` branch is deleted with the field (§4.1). */
+/** Row c: `projects[].skills` only — project keys, remotes, and every other field are untouchable (row i creates a key, row i′ removes one; nothing edits one). The `global` branch is deleted with the field (§4.1). */
 function onlySkillListsChanged(before: Team, after: Team): boolean {
   if (!sameExcept(before, after, ['projects'])) return false;
   const withoutSkills = (team: Team) => Object.fromEntries(Object.entries(team.projects).map(([key, project]) => {
@@ -278,6 +348,19 @@ function oneEmptyProjectAdded(before: Team, after: Team): boolean {
   const born = after.projects[added[0]!]!;
   if (!same(born.skills, []) || born.remotes.length > 1) return false;
   return same(Object.keys(born).sort(), ['remotes', 'skills']);
+}
+
+/**
+ * Row i′: exactly one project key removed, and nothing else moved. The skills that key listed are
+ * NOT touched — a version folder is the marketplace copy and outlives every list that ever named it,
+ * so deleting a project drops a membership list and never a skill. Deliberately symmetrical with row
+ * i: one key, every surviving project byte-identical, every other team.json field untouched.
+ */
+function oneProjectRemoved(before: Team, after: Team): boolean {
+  if (!sameExcept(before, after, ['projects'])) return false;
+  const removed = Object.keys(before.projects).filter((key) => !Object.hasOwn(after.projects, key));
+  if (removed.length !== 1 || Object.keys(after.projects).length !== Object.keys(before.projects).length - 1) return false;
+  return Object.keys(after.projects).every((key) => same(before.projects[key], after.projects[key]));
 }
 
 /** Row d: `archived` becomes exactly `before.archived + [target]`; a handle already archived cannot be appended again. */

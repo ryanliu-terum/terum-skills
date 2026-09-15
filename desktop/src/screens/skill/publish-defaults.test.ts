@@ -1,18 +1,20 @@
 import { expect, it } from 'vitest';
-import { CATEGORY_SUGGEST, GLOBAL_LIST, TARGET_ASK, effectiveTarget, publishFlags, sharedState, targetOptions } from './publish-defaults';
+import { CATEGORY_SUGGEST, MARKETPLACE_ONLY, effectiveTarget, publishFlags, sharedState, targetOptions } from './publish-defaults';
 
-it('lists the CLI question, Global, then the team projects once', () => {
-  expect(targetOptions(['Terum', 'Global', 'SSM'])).toEqual([TARGET_ASK, GLOBAL_LIST, 'Terum', 'SSM']);
-  expect(targetOptions(null)).toEqual([TARGET_ASK, GLOBAL_LIST]);
+it('lists the marketplace first, then the team projects', () => {
+  expect(targetOptions(['Terum', 'SSM'])).toEqual([MARKETPLACE_ONLY, 'Terum', 'SSM']);
+  expect(targetOptions(null)).toEqual([MARKETPLACE_ONLY]);
 });
-it('falls back to the CLI question when the stored target is not a project any more', () => {
-  expect(effectiveTarget('Payments', ['Terum'])).toBe(TARGET_ASK);
+it('falls back to the marketplace when the stored target is not a project any more', () => {
+  expect(effectiveTarget('Payments', ['Terum'])).toBe(MARKETPLACE_ONLY);
   expect(effectiveTarget('Terum', ['Terum'])).toBe('Terum');
-  expect(effectiveTarget(GLOBAL_LIST, null)).toBe(GLOBAL_LIST);
+  expect(effectiveTarget(MARKETPLACE_ONLY, null)).toBe(MARKETPLACE_ONLY);
+  // A team that still carries the retired Global card can target it like any other project.
+  expect(effectiveTarget('Global', ['Global'])).toBe('Global');
 });
-it('sends --project only for a fixed target and --category only when typed', () => {
-  expect(publishFlags(TARGET_ASK, null)).toEqual({});
-  expect(publishFlags(GLOBAL_LIST, '  ')).toEqual({ project: GLOBAL_LIST });
+it('sends --project only for a named project and --category only when typed', () => {
+  expect(publishFlags(MARKETPLACE_ONLY, null)).toEqual({});
+  expect(publishFlags(MARKETPLACE_ONLY, '  ')).toEqual({});
   expect(publishFlags('Terum', ' ops ')).toEqual({ project: 'Terum', category: 'ops' });
   expect(CATEGORY_SUGGEST).toBe('Model suggests');
 });
