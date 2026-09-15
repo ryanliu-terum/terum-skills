@@ -76,6 +76,22 @@ it('counts never-published folders, and reports a dash when the overlay is absen
  expect(unknown.value.overview).toMatchObject({unpublished:'—',unpublished_note:''});
 });
 
+// disablePerMachine (2026-09-14): `enabled` is read off the CLI row, which read it off Claude Code's skillOverrides; a CLI too old to send the key reads as enabled, never as off.
+it('carries each row\'s enabled onto its card and treats a missing key as enabled',async()=>{
+ const f=chromeLibraryReplay({local:value=>{
+  const section=value.local[0]!,row=section.rows[0]!;
+  const withoutKey:Omit<typeof row,'enabled'>&{enabled?:boolean}={...row};delete withoutKey.enabled;
+  section.rows=[{...row,enabled:false},{...row,path:row.path+'-second',enabled:true},{...withoutKey,path:row.path+'-third'}];
+ }});
+ const result=await createTauriBackend(f.bridge).library(global);
+ expect(result.ok).toBe(true);if(!result.ok)throw new Error(result.error);
+ const byPath=new Map(result.value.skills.map(card=>[card.path,card.enabled]));
+ const first=[...byPath.keys()].find(path=>path!==null&&!path.endsWith('-second')&&!path.endsWith('-third'))!;
+ expect(byPath.get(first)).toBe(false);
+ expect(byPath.get(first+'-second')).toBe(true);
+ expect(byPath.get(first+'-third')).toBe(true);
+});
+
 it('serves the recorded scan coverage abbreviated from the real roots, never a literal (L5)',async()=>{
  const backend=createTauriBackend(chromeLibraryReplay({local:underHome}).bridge);
  const result=await backend.library(global);

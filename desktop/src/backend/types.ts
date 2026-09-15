@@ -7,6 +7,8 @@ export interface AskOptions {detail?:readonly string[];descriptions?:readonly st
 export interface Prompter {readonly interactive:boolean;confirm(question:string,options?:AskOptions):Promise<boolean>;text(question:string,defaultValue?:string,options?:AskOptions):Promise<string>;select(question:string,choices:readonly string[],options?:AskOptions):Promise<string>;print(line:string):void}
 /** §9.2/D13: `path` is `text` whose answer is a filesystem path — the shell may offer a folder chooser. */
 export type AskKind='confirm'|'text'|'select'|'path';
+/** Carried with a question from the run that asked it: when `signal` aborts, the run has settled and the question is withdrawn. */
+export type PromptOptions={signal?:AbortSignal};
 export interface PromptQuestion {kind:AskKind;question:string;choices?:readonly string[];default?:string;detail?:readonly string[];descriptions?:readonly string[]}
 export type Frame={t:'print';line:string}|{t:'ask';id:string;kind:AskKind;question:string;default?:string;choices?:readonly string[];detail?:readonly string[];descriptions?:readonly string[]}|{t:'progress';done:number;total:number;label?:string}|{t:'result';ok:boolean;error?:string;declined?:boolean;refused?:boolean};
 export interface Run<T>{readonly frames:AsyncIterable<Frame>;answer(id:string,value:string|boolean):void;cancel():Promise<void>;readonly done:Promise<Result<T>>}
@@ -200,3 +202,5 @@ INVITEE?:string;K:number|null;AGENT_CLI_AUTH:'signed-in'|'unknown';MACHINE:Machi
 export type Onboarding = Pick<Design, 'ONBOARD_STEPS'|'ONBOARD_BASICS'|'GLOBAL_SET'|'BOOT_STEPS'|'ONBOARD_LATER'|'ONBOARD_COMMUNITY'|'ONBOARD_FETCH_ERROR'|'WELCOME_LINES'|'BASICS_COPY'|'BASICS_HINT'|'THEME_OPTIONS'|'LIBRARY_OVERVIEW'|'INVITEE'|'TEAM_REPO'|'INVITE_TIP'|'JOIN_BLOCK_NOTE'> & {skill:SkillCard;summary:ReceiptSummary|null;arm:Receipt['arm'];used_by:string[];installs_n:number;shareCommand:string;rosterInitials:string[];team:Design['TEAMS'][number];me:Design['ME'];teamN:number;searchResults:{kind:'skill'|'person'|'project';name:string;meta:string;initials?:string}[];joinBlock:string;bootRows:[string,string,string][];failedBootRows:[string,string,string][]};
 
 export interface SkillFileResult {kind:'move'|'copy'|'rename'|'delete'|'fix';path:string;destination:string|null;quarantined:string|null;installed:boolean;notices:string[]}
+/** `skill enable|disable`: the per-machine switch. `settingsFile` is the Claude Code settings file whose `skillOverrides` now says so; `changed:false` means it already did. */
+export interface SkillToggleResult {kind:'enable'|'disable';path:string;name:string;enabled:boolean;settingsFile:string;changed:boolean;notices:string[]}

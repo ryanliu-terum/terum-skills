@@ -35,7 +35,7 @@ export { SERVE_READ_VERBS } from './serve-verbs.js';
 /** Public verbs, as a shell may invoke them (hidden maintenance verbs and `share` are not listed).
  * B4 marketplace uses existing ls/status/install/publish entries; reinstall is install, not a verb. */
 export const FRAME_VERBS = [
-  'skill move', 'skill copy', 'skill rename', 'skill delete', 'skill fix', 'project add', 'project remove', 'project list', 'login', 'setup', 'team create', 'team join', 'team remove', 'team leave', 'team move', 'team workflow-update', 'team project create', 'team project delete', 'invite', 'ls', 'status', 'reconcile', 'publish', 'validate', 'eval', 'eval-report', 'install', 'uninstall-skill', 'uninstall', 'sync', 'prune', 'search', 'update', 'app', 'profile', 'app-update', 'serve'] as const;
+  'skill move', 'skill copy', 'skill rename', 'skill delete', 'skill fix', 'skill enable', 'skill disable', 'project add', 'project remove', 'project list', 'login', 'setup', 'team create', 'team join', 'team remove', 'team leave', 'team move', 'team workflow-update', 'team project create', 'team project delete', 'invite', 'ls', 'status', 'reconcile', 'publish', 'validate', 'eval', 'eval-report', 'install', 'uninstall-skill', 'uninstall', 'sync', 'prune', 'search', 'update', 'app', 'profile', 'app-update', 'serve'] as const;
 
 /**
  * What the CLI can honour today for the affordances the design draws (investigation doc §7). Every
@@ -47,12 +47,16 @@ export const FRAME_VERBS = [
  * only; the rest of D29 stands. The card is backed by `ls`'s `receipt` limb, so the number a card
  * shows is one receipt's own `candidate-vs-baseline` net lift with its provenance beside it, never a
  * statistic derived across receipts (eval-engine spec §12).
+ *
+ * `disablePerMachine` moved false -> true on 2026-09-14 (Teddy): `skill enable` / `skill disable` write Claude
+ * Code's own `skillOverrides` setting (src/lib/skill-overrides.ts), so the drawn switch is now the same switch
+ * as Claude's `/skills` menu rather than an app-only flag.
  */
 export const FRAME_FEATURES: Readonly<Record<string, boolean>> = Object.freeze({
   libraryProjects: true, projects: true,
   memberRole: true, localIdentity: true, roles: true,
   favorites: false, follow: false, lastSeen: false, installScope: true, inviteScoping: false,
-  disablePerMachine: false, projectMembers: false, liftOnCards: true, runEvalInApp: true, perCase: true, progress: true,
+  disablePerMachine: true, projectMembers: false, liftOnCards: true, runEvalInApp: true, perCase: true, progress: true,
   refresh: true, appUpdate: true, reconcile: true,
   serve: true,
 });

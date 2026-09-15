@@ -16,3 +16,18 @@
 .skill-card[data-selectable] .skill-card-buttons>.checkbox{margin-right:6px;position:relative;cursor:pointer}
 .skill-card[data-selectable] .skill-card-ident>a{cursor:default}
 .skill-card[data-selected]{border-color:var(--tk-accent);box-shadow:0 0 0 1px var(--tk-accent)}
+
+/* Bottom row (UI policy §4, 2026-09-14). The two groups never wrap under each other: the LEFT group is the one
+   that gives way (its labels clip with an ellipsis and carry the full text in `title`), the RIGHT group (reinstall,
+   flags, switch) keeps its width. Inside the version unit the WORDS shrink and ellipse; the green installed check
+   (`.card-installed`, flex-shrink:0 above) is never clipped, and the size chip never shrinks. `text-overflow` only
+   works on a block box, so it sits on the label span, not on the inline-flex unit. Boards draw at widths where nothing
+   clipped, so no board moves. */
+.skill-card-bottom{flex-wrap:nowrap}
+.skill-card-bottom>div:first-child{flex:1 1 auto;flex-wrap:nowrap;overflow:hidden}
+.skill-card-bottom>div:first-child>.card-version{flex-shrink:1;min-width:0}
+.skill-card-bottom>div:first-child>.card-version>.card-version-label,.skill-card-bottom>div:first-child>.card-version-label{flex-shrink:1;min-width:0;overflow:hidden;text-overflow:ellipsis}
+.skill-card-bottom>div:first-child>.chip{flex-shrink:1}
+.skill-card-bottom>div:first-child>.chip.card-size{flex-shrink:0}
+/* The eval dot: 6px, the accent colour, a slow pulse; still, not hidden, when the person asked for reduced motion. */
+.card-evaluating{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;position:relative}

@@ -144,7 +144,17 @@ button:focus-visible,.button[data-state="focus"],[role="switch"]:focus-visible,[
 .prompt-path .prompt-field {flex:1 1 auto;min-width:0;}
 .prompt-actions {display:flex;justify-content:flex-end;gap:8px;margin-top:16px;}
 
-.eval-chip { font-size: 12px; background: var(--tk-bg2); border: 1px solid var(--tk-border1); border-radius: 6px; height: 24px; padding: 0 8px; color: var(--tk-text2); }
+.eval-chip { font-size: 12px; background: var(--tk-bg2); border: 1px solid var(--tk-border1); border-radius: 6px; height: 24px; padding: 0 8px; color: var(--tk-text2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+/* The eval chip's labels are longer than the slot (.topbar-right is a fixed 240px). The chip gives way, but only its
+   subject (the skill's name, "N skills") shortens with an ellipsis: the state ("Starting", "Evaluating · 12 of 28")
+   never shrinks, and the longest state in the ladder fits beside the square Stop and the bell (e2e/routes/eval-chip-fit).
+   The full label stays in `title`. */
+.eval-chip[data-tone] { display: inline-flex; align-items: center; min-width: 0; overflow: hidden; flex-shrink: 1; padding: 0 6px; }
+.eval-chip[data-tone] > .eval-dot { flex-shrink: 0; }
+.eval-chip-state { flex-shrink: 0; white-space: nowrap; }
+.eval-chip-subject { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The top bar's Stop is a square glyph (the media "stop"), drawn like the dot so the chip keeps its width; its name is "Stop". */
+.stop-glyph { display: inline-block; width: 8px; height: 8px; border-radius: 1.5px; background: currentColor; }
 .update-chip > span { color: var(--tk-brand); }
 .workflow-lines { font-size: 12px; max-height: 220px; overflow: auto; background: var(--tk-bg2); border: 1px solid var(--tk-border1); border-radius: 6px; padding: 8px 10px; white-space: pre-wrap; }
 
@@ -168,4 +178,25 @@ button:focus-visible,.button[data-state="focus"],[role="switch"]:focus-visible,[
 .copy-value:focus-visible {outline:2px solid var(--tk-accent);outline-offset:2px;}
 
 /* Text the user may want to copy is selectable (2026-09-14); the chrome, controls and card frames stay `user-select:none` from `.shell`. */
-.skill-md-tab,.detail-description,.detail-rail .detail-row>span:last-child,.detail-status>div>span,.board-error-line,.terminal-hint,.cli-box .board-mono,.settings-value,.setting-row>div:first-child,.settings-note,.settings-head>span,.placement-row>span,.placement-footer,.prune-list,.skill-card-desc,.inbox-document,.inbox-fields,.inbox-subject,.inbox-row-content,.member-identity,.market-project-desc,.market-person-lines,.search-page-row,.state-body,.copy-value,pre,code {user-select:text;-webkit-user-select:text;}
+.skill-md-tab,.settings-action-error,.detail-description,.detail-rail .detail-row>span:last-child,.detail-status>div>span,.board-error-line,.terminal-hint,.cli-box .board-mono,.settings-value,.setting-row>div:first-child,.settings-note,.settings-head>span,.placement-row>span,.placement-footer,.prune-list,.skill-card-desc,.inbox-document,.inbox-fields,.inbox-subject,.inbox-row-content,.member-identity,.market-project-desc,.market-person-lines,.search-page-row,.state-body,.copy-value,pre,code {user-select:text;-webkit-user-select:text;}
+/* A workflow dialog's error line: selectable and right-click copyable (UI policy §1); same metrics as the inline style it replaced. */
+.workflow-error {font-size:12px;color:var(--tk-bad);user-select:text;-webkit-user-select:text;}
+
+/* Eval status (UI policy §5, 2026-09-14): the top-bar chip carries the run's state and the card its dot. Neither renders without a run, so no board moves. */
+.eval-dot{display:inline-block;width:6px;height:6px;border-radius:3px;background:var(--tk-accent);margin-right:6px;vertical-align:middle;animation:eval-pulse 1.6s ease-in-out infinite;}
+.card-evaluating>.eval-dot{margin-right:0;}
+@keyframes eval-pulse{0%,100%{opacity:1;transform:scale(1);}50%{opacity:.35;transform:scale(.7);}}
+@media (prefers-reduced-motion:reduce){.eval-dot{animation:none;}}
+.eval-chip[data-tone="done"]{color:var(--tk-good);}
+.eval-chip[data-tone="failed"],.eval-chip[data-tone="stopped"]{color:var(--tk-bad);}
+
+/* Check against the team (UI policy §2/§6): a row is its checkbox line over its path. The path is a sibling of the
+   <label>, indented under the label's text (8px row padding + 16px box + 8px gap), so copying it cannot toggle the row. */
+.reconcile-row{display:flex;flex-direction:column;gap:2px;min-width:0;max-width:100%;}
+.reconcile-row>.checkbox-row{height:auto;min-height:28px;padding-block:4px;align-items:flex-start;}
+.reconcile-row>.checkbox-row .checkbox{margin-top:2px;}
+.reconcile-row>.checkbox-row .checkbox-label{min-width:0;flex:1 1 auto;align-items:flex-start;}
+.reconcile-row>.checkbox-row .checkbox-label>span:last-child{min-width:0;flex:1 1 auto;line-height:18px;text-wrap:pretty;}
+.reconcile-path{padding-left:32px;min-width:0;}
+.reconcile-footnote{display:flex;flex-direction:column;gap:6px;padding:8px 0 0;border-top:1px dashed var(--tk-border1);margin-top:4px;}
+.dialog-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:4px;}
