@@ -42,13 +42,18 @@ describe('evalRunCovers', () => {
 
 describe('evalChip', () => {
   it('says starting until the CLI prints, then evaluating, then the count', () => {
-    expect(evalChip(base)).toEqual({ label: 'Starting eval · deploy-check', title: 'Starting eval · deploy-check', tone: 'running', running: true });
+    expect(evalChip(base)).toEqual({ state: 'Starting', subject: 'deploy-check', label: 'Starting · deploy-check', title: 'Starting · deploy-check', tone: 'running', running: true });
     expect(evalChip({ ...base, lines: ['x'] })?.label).toBe('Evaluating · deploy-check');
     expect(evalChip({ ...base, progress: { t: 'progress', done: 3, total: 28 } })?.label).toBe('Evaluating · 3 of 28 · deploy-check');
     expect(evalChip({ ...base, name: '28 skills', many: { refs: [], mode: 'now' }, progress: { t: 'progress', done: 3, total: 28 } })?.label).toBe('Evaluating · 3 of 28');
+    // The state is the part the top bar never shortens; the subject is the part it may.
+    expect(evalChip({ ...base, lines: ['x'] })).toMatchObject({ state: 'Evaluating', subject: 'deploy-check' });
+    expect(evalChip({ ...base, progress: { t: 'progress', done: 3, total: 28 } })).toMatchObject({ state: 'Evaluating · 3 of 28', subject: 'deploy-check' });
+    expect(evalChip({ ...base, name: '28 skills', many: { refs: [], mode: 'now' }, progress: { t: 'progress', done: 3, total: 28 } })).toMatchObject({ state: 'Evaluating · 3 of 28', subject: null });
+    expect(evalChip({ ...base, name: '28 skills', many: { refs: [], mode: 'now' } })).toMatchObject({ state: 'Starting', subject: '28 skills', label: 'Starting · 28 skills' });
   });
   it('names the end state and carries the failure in the title', () => {
-    expect(evalChip({ ...base, state: 'done' })).toEqual({ label: 'Eval finished · deploy-check', title: 'Eval finished · deploy-check', tone: 'done', running: false });
+    expect(evalChip({ ...base, state: 'done' })).toEqual({ state: 'Eval finished', subject: 'deploy-check', label: 'Eval finished · deploy-check', title: 'Eval finished · deploy-check', tone: 'done', running: false });
     const failed = evalChip({ ...base, state: 'failed', result: { ok: false, error: 'claude is not installed' } });
     expect(failed).toMatchObject({ label: 'Eval failed · deploy-check', title: 'Eval failed · deploy-check — claude is not installed', tone: 'failed', running: false });
     expect(evalChip({ ...base, state: 'stopped' })?.label).toBe('Eval stopped · deploy-check');

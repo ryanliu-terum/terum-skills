@@ -21,25 +21,33 @@ export function evalRunCovers(current: EvalRunState | null, card: Pick<SkillCard
   return !card.teamed && current.ref === mine;
 }
 
-export type EvalChip = { label: string; title: string; tone: 'running' | 'done' | 'failed' | 'stopped'; running: boolean };
+/**
+ * `state` is the part that must always be read whole (the verb and, while counting, the count); `subject` is the skill's
+ * name or "N skills", the part the top bar may shorten with an ellipsis. `label` joins them for the accessible name.
+ */
+export type EvalChip = { state: string; subject: string | null; label: string; title: string; tone: 'running' | 'done' | 'failed' | 'stopped'; running: boolean };
 
 /**
  * The top-bar chip for every state of the run: starting, printing, counting, then finished / failed / stopped. `null`
- * when there is nothing to show. `title` carries the whole state (the chip clips past 150px) and, for a failed run,
- * the CLI's own error, so the reason is one hover away even after the dialog is closed.
+ * when there is nothing to show. `title` carries the whole label (the top bar may shorten the subject) and, for a
+ * failed run, the CLI's own error, so the reason is one hover away even after the dialog is closed.
  */
 export function evalChip(current: EvalRunState | null): EvalChip | null {
   if (!current) return null;
   const name = current.name;
-  const chip = (label: string, tone: EvalChip['tone'], running: boolean, detail?: string): EvalChip => ({ label, title: detail ? `${label} — ${detail}` : label, tone, running });
+  const chip = (state: string, subject: string | null, tone: EvalChip['tone'], running: boolean, detail?: string): EvalChip => {
+    const label = subject === null ? state : `${state} · ${subject}`;
+    return { state, subject, label, title: detail ? `${label} — ${detail}` : label, tone, running };
+  };
   if (current.state === 'running') {
-    if (current.progress) return chip(`Evaluating · ${current.progress.done} of ${current.progress.total}${current.many ? '' : ` · ${name}`}`, 'running', true);
-    if (current.lines.length === 0) return chip(`Starting eval · ${name}`, 'running', true);
-    return chip(`Evaluating · ${name}`, 'running', true);
+    // Several skills: the count is the whole story, so the subject ("N skills") gives way to it.
+    if (current.progress) return chip(`Evaluating · ${current.progress.done} of ${current.progress.total}`, current.many ? null : name, 'running', true);
+    if (current.lines.length === 0) return chip('Starting', name, 'running', true);
+    return chip('Evaluating', name, 'running', true);
   }
-  if (current.state === 'stopped') return chip(`Eval stopped · ${name}`, 'stopped', false);
-  if (current.state === 'failed') return chip(`Eval failed · ${name}`, 'failed', false, current.result && !current.result.ok ? current.result.error : undefined);
-  return chip(`Eval finished · ${name}`, 'done', false);
+  if (current.state === 'stopped') return chip('Eval stopped', name, 'stopped', false);
+  if (current.state === 'failed') return chip('Eval failed', name, 'failed', false, current.result && !current.result.ok ? current.result.error : undefined);
+  return chip('Eval finished', name, 'done', false);
 }
 
 /**

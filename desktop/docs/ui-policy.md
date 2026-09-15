@@ -51,12 +51,23 @@ guard test (`src/components/domain/__tests__/ui-policy.test.ts`) fails a build t
 
 ## §5 Work in flight is visible where it started and where it lands
 
-- The top bar carries the eval chip through every state: **Starting eval · name** (no CLI output yet),
-  **Evaluating · name** (printing), **Evaluating · n of N** (counting), then **Eval finished / failed /
-  stopped · name** with a ✕ to clear. The chip's `title` carries the whole state and, for a failed run, the CLI's
-  error. Closing a run's dialog never forgets the run (`dismiss` closes, `clear` forgets): the chip stays until its
-  ✕ or the next run, and clicking it reopens the dialog in its final state. Only "Stop" cancels a run; a busy
-  dialog offers "Keep running" beside it.
+- The top bar carries the eval chip through every state: **Starting · name** (no CLI output yet),
+  **Evaluating · name** (printing), **Evaluating · n of N** (counting; for several skills the count stands alone),
+  then **Eval finished / failed / stopped · name** with a ✕ to clear. The chip is a *state* and a *subject*
+  (`evalChip`): the state, verb and count, is never shortened; the subject, the skill's name or "N skills", is what
+  gives way with an ellipsis when the fixed 240 px slot runs out (a name past about nine characters is shortened
+  while the run is on; the whole label is in `title` and one click away in the dialog). The longest state in the
+  ladder fits beside the square Stop button (named "Stop") and the inbox bell, proven in real Chromium by
+  `e2e/routes/eval-chip-fit.spec.ts`. The settled words are the design's own ("Eval finished" is also the Inbox's).
+  The chip's `title` carries the whole label and, for a failed run, the CLI's error. Closing a run's dialog never
+  forgets the run (`dismiss` closes, `clear` forgets): the chip stays until its ✕ or the next run, and clicking it
+  reopens the dialog in its final state. Only "Stop" cancels a run; a busy dialog offers "Keep running" beside it,
+  and while the CLI is asking a question that question is modal, so the answer comes first.
+- A question never outlives its run. Every question the CLI asks carries its run's signal (`PromptOptions.signal`,
+  set by `driveRun`); when the run settles — Stop, a failure, the CLI finishing without waiting — the prompt host
+  withdraws the dialog and the driver returns the run's own result, so no dead "Continue?" stays on screen and the
+  next eval is never refused as "already running". Pinned by `drive.test.ts`, `prompt-provider.test.tsx`, the
+  bulk-eval Stop test and `e2e/routes/eval-chip-fit.spec.ts`.
 - Every skill card the run covers shows a pulsing dot (`.card-evaluating`, 6 px, the accent colour, still under
   `prefers-reduced-motion`) while the run is on. Covered means the card's own `localRef` is the run's ref (the path
   for a local folder, so two same-named folders in two roots never light together). A `--pending` run's set is

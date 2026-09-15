@@ -35,7 +35,7 @@ it('the chip says starting, then counts, then finished with a dismiss; the cover
   mount(run, skill, 'terum');
   expect(screen.queryByRole('status', { name: 'Evaluating deploy-check' })).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: 'Start' }));
-  expect(await screen.findByRole('button', { name: 'Starting eval · deploy-check' })).toBeInTheDocument();
+  expect(await screen.findByRole('button', { name: 'Starting · deploy-check' })).toBeInTheDocument();
   expect(screen.getByRole('status', { name: 'Evaluating deploy-check' })).toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Stop' })).toBeInTheDocument();
   release();
@@ -55,7 +55,7 @@ it('a card outside the run shows no dot', async () => {
   // A team run for one skill while a different team card is on screen.
   mount(run, card({ name: 'another-skill', teamed: true }), 'terum', 'other-skill');
   fireEvent.click(screen.getByRole('button', { name: 'Start' }));
-  await screen.findByRole('button', { name: 'Starting eval · other-skill' });
+  await screen.findByRole('button', { name: 'Starting · other-skill' });
   expect(screen.queryByRole('status', { name: /^Evaluating / })).toBeNull();
   // Same run, but the card on screen is a LOCAL folder of that name: a team run does not light it.
   cleanup();
@@ -63,6 +63,6 @@ it('a card outside the run shows no dot', async () => {
   runs.push(run2);
   mount(run2, card({ name: 'other-skill', teamed: false }), 'terum');
   fireEvent.click(screen.getByRole('button', { name: 'Start' }));
-  await screen.findByRole('button', { name: 'Starting eval · other-skill' });
+  await screen.findByRole('button', { name: 'Starting · other-skill' });
   expect(screen.queryByRole('status', { name: 'Evaluating other-skill' })).toBeNull();
 });

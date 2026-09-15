@@ -145,8 +145,16 @@ button:focus-visible,.button[data-state="focus"],[role="switch"]:focus-visible,[
 .prompt-actions {display:flex;justify-content:flex-end;gap:8px;margin-top:16px;}
 
 .eval-chip { font-size: 12px; background: var(--tk-bg2); border: 1px solid var(--tk-border1); border-radius: 6px; height: 24px; padding: 0 8px; color: var(--tk-text2); white-space: nowrap; }
-/* The eval chip's states are longer than the slot (.topbar-right is a fixed 240px); the chip gives way with an ellipsis and carries the full state in `title`. */
-.eval-chip[data-tone] { min-width: 0; max-width: 150px; overflow: hidden; text-overflow: ellipsis; flex-shrink: 1; }
+/* The eval chip's labels are longer than the slot (.topbar-right is a fixed 240px). The chip gives way, but only its
+   subject (the skill's name, "N skills") shortens with an ellipsis: the state ("Starting", "Evaluating · 12 of 28")
+   never shrinks, and the longest state in the ladder fits beside the square Stop and the bell (e2e/routes/eval-chip-fit).
+   The full label stays in `title`. */
+.eval-chip[data-tone] { display: inline-flex; align-items: center; min-width: 0; overflow: hidden; flex-shrink: 1; padding: 0 6px; }
+.eval-chip[data-tone] > .eval-dot { flex-shrink: 0; }
+.eval-chip-state { flex-shrink: 0; white-space: nowrap; }
+.eval-chip-subject { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The top bar's Stop is a square glyph (the media "stop"), drawn like the dot so the chip keeps its width; its name is "Stop". */
+.stop-glyph { display: inline-block; width: 8px; height: 8px; border-radius: 1.5px; background: currentColor; }
 .update-chip > span { color: var(--tk-brand); }
 .workflow-lines { font-size: 12px; max-height: 220px; overflow: auto; background: var(--tk-bg2); border: 1px solid var(--tk-border1); border-radius: 6px; padding: 8px 10px; white-space: pre-wrap; }
 

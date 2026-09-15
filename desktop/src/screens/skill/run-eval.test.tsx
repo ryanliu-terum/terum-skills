@@ -28,11 +28,11 @@ it('keeps the eval alive across navigation and reopens its streamed output from 
  const {evalSpy}=await open();const {run,cancel}=longRun();evalSpy.mockReturnValue(run);start();
  await screen.findByText('preflight ok');
  await act(async()=>{location.hash='#/library/global';});
- await screen.findByText(/^(Starting eval|Evaluating) · deploy-check$/);
+ await screen.findByRole('button',{name:/^(Starting|Evaluating) · deploy-check$/});
  fireEvent.keyDown(screen.getByRole('dialog'),{key:'Escape'});
  await waitFor(()=>expect(screen.queryByRole('dialog')).toBeNull());
  expect(cancel).not.toHaveBeenCalled();
- fireEvent.click(screen.getByRole('button',{name:/^(Starting eval|Evaluating) · deploy-check$/}));
+ fireEvent.click(screen.getByRole('button',{name:/^(Starting|Evaluating) · deploy-check$/}));
  expect(await within(await screen.findByRole('dialog')).findByText('preflight ok')).toBeVisible();
  expect(cancel).not.toHaveBeenCalled();
 });
@@ -66,7 +66,7 @@ it('uses the exact honest cost sentence without an estimate',async()=>{
 });
 it('forwards unexpected questions and print notices, and closes on success',async()=>{
  const {evalSpy,ask,print}=await open();evalSpy.mockImplementation(()=>createRun(async ctx=>{ctx.print('GitHub CLI is installed but logged out.');await ctx.ask('confirm','Unexpected eval question?');return {ok:true,value};}));start();
- await waitFor(()=>expect(ask).toHaveBeenCalledWith({kind:'confirm',question:'Unexpected eval question?'}));
+ await waitFor(()=>expect(ask).toHaveBeenCalledWith({kind:'confirm',question:'Unexpected eval question?'},{signal:expect.any(AbortSignal)}));
  await waitFor(()=>expect(screen.queryByRole('dialog')).toBeNull());expect(print).toHaveBeenCalledWith('GitHub CLI is installed but logged out.');
 });
 

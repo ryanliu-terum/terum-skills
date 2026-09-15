@@ -7,6 +7,8 @@ export interface AskOptions {detail?:readonly string[];descriptions?:readonly st
 export interface Prompter {readonly interactive:boolean;confirm(question:string,options?:AskOptions):Promise<boolean>;text(question:string,defaultValue?:string,options?:AskOptions):Promise<string>;select(question:string,choices:readonly string[],options?:AskOptions):Promise<string>;print(line:string):void}
 /** §9.2/D13: `path` is `text` whose answer is a filesystem path — the shell may offer a folder chooser. */
 export type AskKind='confirm'|'text'|'select'|'path';
+/** Carried with a question from the run that asked it: when `signal` aborts, the run has settled and the question is withdrawn. */
+export type PromptOptions={signal?:AbortSignal};
 export interface PromptQuestion {kind:AskKind;question:string;choices?:readonly string[];default?:string;detail?:readonly string[];descriptions?:readonly string[]}
 export type Frame={t:'print';line:string}|{t:'ask';id:string;kind:AskKind;question:string;default?:string;choices?:readonly string[];detail?:readonly string[];descriptions?:readonly string[]}|{t:'progress';done:number;total:number;label?:string}|{t:'result';ok:boolean;error?:string;declined?:boolean;refused?:boolean};
 export interface Run<T>{readonly frames:AsyncIterable<Frame>;answer(id:string,value:string|boolean):void;cancel():Promise<void>;readonly done:Promise<Result<T>>}

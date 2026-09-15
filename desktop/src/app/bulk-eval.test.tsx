@@ -5,15 +5,15 @@ import { Tooltip } from '@base-ui/react/tooltip';
 import { BackendContext, PrintContext, PromptContext } from '../backend';
 import { createMockBackend } from '../backend/mock';
 import { createRun } from '../backend/mock/run';
-import type { EvalManyResult, Run } from '../backend/types';
+import { PromptCancelledError, type EvalManyResult, type PromptOptions, type PromptQuestion, type Run } from '../backend/types';
 import { App } from './App';
 import { EvalRunProvider } from './EvalRunProvider';
 
 const runs:Run<EvalManyResult>[]=[];
 afterEach(async()=>{for(const run of runs.splice(0))await run.cancel();cleanup();location.hash='';localStorage.clear();vi.restoreAllMocks();});
-function open(hash:string,answer=true){
+function open(hash:string,answer=true,asker?:(question:PromptQuestion,options?:PromptOptions)=>Promise<string|boolean>){
  const backend=createMockBackend(),spy=vi.spyOn(backend,'evalMany');
- const ask=vi.fn(async()=>answer),print=vi.fn();
+ const ask=vi.fn(asker??(async()=>answer)),print=vi.fn();
  location.hash=hash;
  render(<BackendContext value={backend}><QueryClientProvider client={new QueryClient({defaultOptions:{queries:{retry:false}}})}><Tooltip.Provider><PromptContext value={ask}><PrintContext value={print}><EvalRunProvider><App/></EvalRunProvider></PrintContext></PromptContext></Tooltip.Provider></QueryClientProvider></BackendContext>);
  return {backend,spy,ask,print};
@@ -52,7 +52,7 @@ it('In batches takes a size, passes --batch, forwards the question between batch
  expect(hint(q)).toHaveTextContent('npx -y terum-skills@latest eval deploy-check migration-guard --batch 1');
  fireEvent.click(within(q).getByRole('button',{name:'Run evals'}));
  expect(spy).toHaveBeenCalledWith({refs:['deploy-check','migration-guard'],mode:'batches',batch:1});
- await waitFor(()=>expect(ask).toHaveBeenCalledWith({kind:'confirm',question:'Continue with the next 1? (1 of 2 done, 1 left)'}));
+ await waitFor(()=>expect(ask).toHaveBeenCalledWith({kind:'confirm',question:'Continue with the next 1? (1 of 2 done, 1 left)'},{signal:expect.any(AbortSignal)}));
  const running=await screen.findByRole('dialog',{name:'Evaluating 2 skills'});
  await within(running).findByText('Evaluated 1 of 2; 0 failed. 1 queued for later.',{selector:'[role=status]'});
  expect(within(running).getByRole('log')).toHaveTextContent('Queued 1 eval for later.');
@@ -85,7 +85,7 @@ it('keeps streaming across navigation, names the run in the top bar, and refuses
  expect(await within(again).findByRole('alert')).toHaveTextContent('An eval is already running for deploy-check');
  expect(spy).toHaveBeenCalledTimes(1);
  fireEvent.click(within(again).getByRole('button',{name:'Cancel'}));
- fireEvent.click(await screen.findByRole('button',{name:/^(Starting eval|Evaluating) · .*2 skills$|^Evaluating · \d+ of \d+$/}));
+ fireEvent.click(await screen.findByRole('button',{name:/^(Starting|Evaluating) · .*2 skills$|^Evaluating · \d+ of \d+$/}));
  const reopened=await screen.findByRole('dialog',{name:'Evaluating 2 skills'});
  // A busy dialog whose dismissal keeps the run offers a non-destructive way out beside Stop.
  expect(within(reopened).getByRole('button',{name:'Keep running'})).toBeVisible();
@@ -123,4 +123,26 @@ it('an empty request offers nothing but Close',async()=>{
  fireEvent.click(within(q).getByRole('button',{name:'Close'}));
  await waitFor(()=>expect(screen.queryByRole('dialog')).toBeNull());
  expect(location.hash).toBe('#/library/global');expect(spy).not.toHaveBeenCalled();
+});
+
+// A question never outlives its run (2026-09-14 review): Stop while the CLI asks "Continue?" used to leave the driver
+// awaiting the answer, so the run never settled in the provider and the next request was refused as already running.
+it('Stop during the question between batches settles the run and frees the next one',async()=>{
+ const {spy}=open('#/library/global?dialog=bulk-eval&ref=deploy-check&ref=migration-guard',true,(_question,options)=>new Promise((_resolve,reject)=>{options?.signal?.addEventListener('abort',()=>reject(new PromptCancelledError('The run ended before this question was answered.')));}));
+ const q=await question();
+ fireEvent.click(within(q).getByRole('radio',{name:'In batches'}));
+ fireEvent.change(within(q).getByRole('spinbutton',{name:'Batch size'}),{target:{value:'1'}});
+ fireEvent.click(within(q).getByRole('button',{name:'Run evals'}));
+ const running=await screen.findByRole('dialog',{name:'Evaluating 2 skills'});
+ expect(await within(running).findByText('1 of 2 evaluated')).toBeVisible();
+ fireEvent.click(within(running).getByRole('button',{name:'Stop'}));
+ expect(await within(running).findByText('Stopped')).toBeVisible();
+ fireEvent.click(within(running).getByRole('button',{name:'Close'}));
+ await waitFor(()=>expect(screen.queryByRole('dialog')).toBeNull());
+ // The next request starts: nothing is "already running".
+ await act(async()=>{location.hash='#/settings/evals?dialog=bulk-eval&ref=onboarding-tour';});
+ fireEvent.click(within(await question()).getByRole('button',{name:'Run evals'}));
+ expect(spy).toHaveBeenCalledTimes(2);
+ expect(await screen.findByRole('dialog',{name:'Evaluating onboarding-tour'})).toBeVisible();
+ expect(screen.queryByRole('alert')).toBeNull();
 });
