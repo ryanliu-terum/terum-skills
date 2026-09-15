@@ -34,6 +34,11 @@ export interface HygieneInput {
 const ALLOWED_EXTENSIONS = new Set(['.md', '.txt', '.json', '.yaml', '.yml', '.csv', '.toml', '.xml', '.html', '.css', '.js', '.ts', '.py', '.sh', '.sql', '.svg', '.png', '.jpg', '.jpeg', '.gif', '.webp', '.pdf']);
 /** HYG2's invisible set; exported so `skill fix` strips exactly what this check names. */
 export const INVISIBLE = /[\u202A-\u202E\u2066-\u2069\u200B-\u200D\u2060\uFEFF]/u;
+/** HYG7's sentence, said once: `team.json.categories` is advice, so `skill category` gives the same
+ *  guidance for the same value rather than a second wording of the one rule that gates nothing. */
+export function offListCategory(category: string, categories: readonly string[]): string {
+  return `terum-category \`${category}\` is not one of your team's categories (${categories.join(', ')}). Browse will give it a bucket of its own; add it to team.json or change this line.`;
+}
 const EMAIL = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
 const SCRIPTS = ['Latin', 'Cyrillic', 'Greek', 'Armenian', 'Hebrew', 'Arabic', 'Syriac', 'Thaana', 'Devanagari', 'Bengali', 'Gurmukhi', 'Gujarati', 'Oriya', 'Tamil', 'Telugu', 'Kannada', 'Malayalam', 'Sinhala', 'Thai', 'Lao', 'Tibetan', 'Myanmar', 'Georgian', 'Hangul', 'Ethiopic', 'Cherokee', 'Canadian_Aboriginal', 'Ogham', 'Runic', 'Khmer', 'Mongolian', 'Hiragana', 'Katakana', 'Bopomofo', 'Han', 'Yi', 'Old_Italic', 'Gothic', 'Deseret', 'Inherited', 'Common'] as const;
 const SCRIPT_PATTERNS = SCRIPTS.map((script) => [script, new RegExp(`^\\p{Script=${script}}$`, 'u')] as const);
@@ -71,7 +76,7 @@ export function inspectHygiene(input: HygieneInput): HygieneAssessment {
   if (input.categories?.length && typeof category === 'string' && category.trim()
     && !input.categories.some(allowed => allowed.toLowerCase() === category.toLowerCase())) {
     const line = lineOf(skill, /^\s*terum-category\s*:/m);
-    warnings.push({ code: 'HYG7', path: 'SKILL.md', ...(line === undefined ? {} : { line }), message: `terum-category \`${category}\` is not one of your team's categories (${input.categories.join(', ')}). Browse will give it a bucket of its own; add it to team.json or change this line.` });
+    warnings.push({ code: 'HYG7', path: 'SKILL.md', ...(line === undefined ? {} : { line }), message: offListCategory(category, input.categories) });
   }
 
   const author = parsed.success ? authorEmail(parsed.data.metadata?.author) : undefined;

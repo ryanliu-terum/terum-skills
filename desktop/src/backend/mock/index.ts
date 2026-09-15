@@ -198,6 +198,18 @@ export function createMockBackend(opts:{latencyMs?:number}={}):Backend & {readon
    move:({path,to})=>fileRun('move',path,to),copy:({path,to})=>fileRun('copy',path,to),rename:({path,to})=>fileRun('rename',path,to),delete:({path})=>fileRun('delete',path),
    // No fixture folder is broken, so the mock has nothing to rewrite: it answers as the CLI does for a file that already parses.
    fix:({path})=>long('library',async ctx=>{const line=path.split('/').at(-1)+': SKILL.md frontmatter is already valid YAML; nothing changed.';ctx.print(line);return ok({kind:'fix' as const,path,destination:null,quarantined:null,installed:false,notices:[line]});}),
+   // No bytes to rewrite here either, so the mock answers the CLI's own shape: its two refusals (an empty
+   // name and the one the file already declares) and the change line. It stops there — the CLI's remaining
+   // notices name the version the team still shows, and every fixture skill carries a pre-versioning hash
+   // rather than a `v<N>` ordinal, so there is no version number here to name and the mock invents none.
+   category:({path,to})=>long('library',async ctx=>{
+    const change=[...fileChanges.values()].find(change=>change.path===path),name=path.split('/').at(-1)??path;
+    const detail=skillByRef(change?.original??name),wanted=to.trim(),current=detail.ok?detail.value.category:'misc';
+    if(!wanted)return fail('--to must be a non-empty category name.');
+    if(wanted===current)return fail(`${name} already declares ${current}; nothing to change.`);
+    const line=`Changed ${name} from ${current} to ${wanted}.`;ctx.print(line);
+    return ok({kind:'category' as const,path,destination:null,quarantined:null,installed:false,notices:[line]});
+   }),
   },
   // Same shape as the CLI verb: the mock keeps the state in its preferences so every card and rail reads it back, as the real adapter reads skillOverrides.
   setSkillEnabled:({path,enabled}:{path:string;enabled:boolean})=>long('library',async ctx=>{const name=path.split(/[\\/]/).filter(Boolean).at(-1)??path;backend.prefs.set('enabled:'+name,enabled);for(const listener of listeners)listener('config');const line=enabled?`Enabled ${name}: Claude Code loads it again on this machine (skillOverrides in ~/.claude/settings.json).`:`Disabled ${name}: Claude Code no longer loads it on this machine (skillOverrides in ~/.claude/settings.json).`;ctx.print(line);return ok({kind:enabled?'enable' as const:'disable' as const,path,name,enabled,settingsFile:'~/.claude/settings.json',changed:true,notices:[]});}),

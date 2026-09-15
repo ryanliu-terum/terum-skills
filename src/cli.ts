@@ -76,7 +76,7 @@ export function buildProgram(execute: Execute, verbs: CliVerbs = { login, team: 
     .option('--no-evals', 'do not offer to evaluate the shared skills that have no receipt')
     .action(async (target: string | undefined, options: { app?: boolean; projects?: boolean; existing?: boolean; evals?: boolean }) => execute((io) => active.setup({ form: context.form, target, app: options.app, projects: options.projects, ...(options.existing === false ? { existing: false } : {}), evals: options.evals, cwd: process.cwd() }, io), { verb: 'setup', notices: true }));
 
-  const skill = program.command('skill').description('Move, copy, rename, delete, fix, enable, or disable a folder in your Library');
+  const skill = program.command('skill').description('Move, copy, rename, delete, fix, recategorise, enable, or disable a folder in your Library');
   for (const kind of ['move', 'copy', 'rename'] as const) skill.command(`${kind} <path>`)
     .description(kind === 'move' ? 'Move a Library folder to another root; the original is gone'
       : kind === 'copy' ? 'Copy a Library folder into another root; the original stays where it is'
@@ -87,6 +87,9 @@ export function buildProgram(execute: Execute, verbs: CliVerbs = { login, team: 
     .action(async (path: string) => execute(io => active.skill({ form: context.form, kind: 'delete', path }, io), { verb: 'skill delete', notices: true }));
   skill.command('fix <path>').description('Rewrite SKILL.md frontmatter that is not valid YAML by quoting the offending value; the text stays the same')
     .action(async (path: string) => execute(io => active.skill({ form: context.form, kind: 'fix', path }, io), { verb: 'skill fix', notices: true }));
+  skill.command('category <path>').description("Change a Library folder's metadata.terum-category in SKILL.md; nothing is published, so the team keeps showing the category its newest version carries")
+    .requiredOption('--to <name>', "the new category; your team's list is advice, not an enum, so any name is accepted")
+    .action(async (path: string, options: { to: string }) => execute(io => active.skill({ form: context.form, kind: 'category', path, to: options.to }, io), { verb: 'skill category', notices: true }));
   for (const kind of ['enable', 'disable'] as const) skill.command(`${kind} <path>`)
     .description(kind === 'disable' ? 'Stop Claude Code loading a Library folder on this machine; its files stay where they are (writes skillOverrides in Claude Code settings)' : 'Let Claude Code load a Library folder again on this machine (removes the skillOverrides entry)')
     .action(async (path: string) => execute(io => active.skillToggle({ form: context.form, kind, path }, io), { verb: `skill ${kind}`, notices: true }));
