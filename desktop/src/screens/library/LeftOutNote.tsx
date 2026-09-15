@@ -17,7 +17,7 @@ export function LeftOutNote({ leftOut, selected }: { leftOut: readonly { name: s
   if (leftOut.length === 0) return null;
   const groups = groupLeftOut(leftOut);
   return <div role="note" className="library-selection-note" ref={menu} data-open={open || undefined}>
-    <div className="left-out-summary"><span>{leftOut.length} of {selected} selected {selected === 1 ? 'skill is' : 'skills are'} left out of the eval — {groups.length === 1 ? groups[0]!.heading : `${groups.length} reasons`}.</span><button type="button" className="collapsible-toggle" aria-expanded={open} onClick={() => setOpen(!open)}>{open ? 'Hide' : 'Show why'}</button></div>
+    <div className="left-out-summary"><span>{leftOut.length} of {selected} selected {selected === 1 ? 'skill' : 'skills'} {leftOut.length === 1 ? 'is' : 'are'} left out of the eval — {groups.length === 1 ? groups[0]!.heading : `${groups.length} reasons`}.</span><button type="button" className="collapsible-toggle" aria-expanded={open} onClick={() => setOpen(!open)}>{open ? 'Hide' : 'Show why'}</button></div>
     {open ? <div className="left-out-groups">{groups.map(group => <div key={group.heading} className="left-out-group"><span className="left-out-heading">{group.heading}</span><div className="left-out-names">{group.rows.map(row => <span key={row.name} ref={rowMenu(row)}><Chip title={row.reason}>{row.name}</Chip></span>)}</div></div>)}<div className="advice-actions"><Button kind="ghost" icon="copy" onClick={() => void copy(text, 'note')}>Copy all</Button></div></div> : null}
   </div>;
 }

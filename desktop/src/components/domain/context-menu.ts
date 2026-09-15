@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { useBackend, useHostStatus } from '../../backend';
 import type { Capabilities } from '../../backend/types';
 import type { IconName } from '../ui/icon-paths';
@@ -111,4 +111,14 @@ export function useCopy(): (text: string, what: string) => Promise<void> {
 export function useCopyMenu(text: () => string, what: string): (element: Element | null) => (() => void) | undefined {
   const copy = useCopy();
   return useContextMenu(() => [{ key: 'copy', label: `Copy ${what}`, icon: 'copy', onSelect: () => void copy(text(), what) }]);
+}
+
+/**
+ * A right-click "Copy <what>" menu for a block whose text is whatever it renders (an error line, an alert): the
+ * returned ref callback registers the element, and the menu reads that element's `textContent` at click time.
+ */
+export function useCopySelfMenu(what: string): (element: Element | null) => (() => void) | undefined {
+  const [element, setElement] = useState<Element | null>(null);
+  const register = useCopyMenu(() => element?.textContent ?? '', what);
+  return useCallback((node: Element | null) => { setElement(node); return register(node); }, [register]);
 }

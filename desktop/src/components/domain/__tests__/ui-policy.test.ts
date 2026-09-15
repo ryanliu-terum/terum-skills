@@ -24,7 +24,12 @@ it('no surface renders a bare <pre> that is not a log pane with a copy menu (doc
   expect(offenders).toEqual([]);
 });
 
+it('no surface renders a bare role="alert" div with the settings error class — it is an AlertText (docs/ui-policy.md §1)', () => {
+  const offenders = surfaces().filter(path => /<div role="alert" className="settings-action-error"/.test(readFileSync(path, 'utf8')));
+  expect(offenders).toEqual([]);
+});
+
 it('the policy document names every primitive the guard accepts', () => {
   const policy = readFileSync('docs/ui-policy.md', 'utf8');
-  for (const name of ['CliBox', 'TerminalHint', 'CollapsibleCommand', 'AdviceBlock', 'PathText', 'useCopyMenu', 'skillRootLabel', 'reasonHeading']) expect(policy).toContain(name);
+  for (const name of ['CliBox', 'TerminalHint', 'CollapsibleCommand', 'AdviceBlock', 'PathText', 'AlertText', 'ErrorLine', 'useCopyMenu', 'skillRootLabel', 'reasonHeading', 'runStatus']) expect(policy).toContain(name);
 });

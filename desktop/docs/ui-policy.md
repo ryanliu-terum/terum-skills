@@ -14,8 +14,10 @@ guard test (`src/components/domain/__tests__/ui-policy.test.ts`) fails a build t
   string is the CLI's own line verbatim (AGENTS.md invariant 4), never re-derived.
 - The CLI's **advice** (update, uninstall) renders through `AdviceBlock`: prose stays prose, each indented line
   is a `CliBox`, and "Copy all" copies the whole printout when the caller has it (`report.lines`).
-- Every **error** (`role="alert"`) and every **log pane** (`role="log"`) is selectable and offers right-click
-  "Copy error" / "Copy output" (`useCopyMenu`). A streaming pane copies what is on screen at click time.
+- Every **error block** renders through `AlertText`, `ErrorLine` or the workflow dialog's error line, and every
+  **log pane** (`role="log"`) carries `useCopyMenu`: selectable, right-click "Copy error" / "Copy output". A
+  streaming pane copies what is on screen at click time. (An inline `<span role="alert">` inside a settings row
+  still relies on the row's own selectable text; converting those is outstanding, not claimed.)
 - A **value** a person may need elsewhere (a handle, a version, a hash, a path) copies on click (`CopyValue`,
   `Value`) and says "Copied <what>" in the toast; the toast never moves a board.
 
@@ -29,6 +31,9 @@ guard test (`src/components/domain/__tests__/ui-policy.test.ts`) fails a build t
   apart without reading the path.
 - A path never appears inside a sentence, a hint, or a chip label. A CLI message that embeds one (`lstat '<path>'`)
   is shown as the CLI wrote it, but the surface that groups such messages strips the path for the heading (§6).
+- A copyable path beside a checkbox is a SIBLING of the checkbox's `<label>`, never inside it, and `CopyValue`
+  cancels the click's default: a browser forwards a click on a role=button span to the label's control, so a copy
+  would otherwise toggle the row. jsdom does not forward, so this rule has a Playwright test, not only a vitest one.
 
 ## §3 A long command collapses; the copy is always the full line
 
@@ -39,21 +44,27 @@ guard test (`src/components/domain/__tests__/ui-policy.test.ts`) fails a build t
 ## §4 A card row never wraps into another row
 
 - The skill card's bottom row is two groups that never wrap under each other. The LEFT group (version words,
-  eval state, size, installs) gives way: labels and chips clip with an ellipsis and carry the full text in `title`.
-  The RIGHT group (Reinstall, flags, the enable switch) keeps its width. The one exception is the boards' own
-  `.card-version` unit, which is one flex item so a check is never orphaned.
+  eval state, size, installs) gives way: every label and chip there clips with an ellipsis and carries its full text
+  in `title`, except the size chip, which never shrinks. The RIGHT group (Reinstall, flags, the enable switch) keeps
+  its width. Inside the boards' `.card-version` unit the words shrink and the green installed check never clips.
 - Nothing in a card renders under `position:absolute` on top of another row's content.
 
 ## §5 Work in flight is visible where it started and where it lands
 
 - The top bar carries the eval chip through every state: **Starting eval · name** (no CLI output yet),
   **Evaluating · name** (printing), **Evaluating · n of N** (counting), then **Eval finished / failed /
-  stopped · name** with a ✕ to dismiss. Clicking the chip reopens the run's dialog. Only "Stop" cancels a run.
+  stopped · name** with a ✕ to clear. The chip's `title` carries the whole state and, for a failed run, the CLI's
+  error. Closing a run's dialog never forgets the run (`dismiss` closes, `clear` forgets): the chip stays until its
+  ✕ or the next run, and clicking it reopens the dialog in its final state. Only "Stop" cancels a run; a busy
+  dialog offers "Keep running" beside it.
 - Every skill card the run covers shows a pulsing dot (`.card-evaluating`, 6 px, the accent colour, still under
-  `prefers-reduced-motion`) while the run is on. A `--pending` run's set is decided by the CLI, so no card claims
-  it. The dot renders only during a run, so no board moves.
-- A dialog's status line is never a bare "Running…" for long: "Starting…" until the CLI prints, "Running…" while it
-  prints, the count once it counts, and one summary sentence at the end (`evalManyStatus`).
+  `prefers-reduced-motion`) while the run is on. Covered means the card's own `localRef` is the run's ref (the path
+  for a local folder, so two same-named folders in two roots never light together). A `--pending` run's set is
+  decided by the CLI and a queueing run evaluates nothing now, so neither lights a card. The dot renders only
+  during a run, so no board moves.
+- Every eval dialog's status line comes from one ladder (`runStatus`): "Starting…" until the CLI prints, "Running…"
+  while it prints, the count once it counts, then Stopped, the CLI's error, or the summary sentence
+  (`evalManyStatus` for several skills).
 
 ## §6 Say a thing once, and collapse what is long
 

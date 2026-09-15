@@ -89,7 +89,9 @@ it('accepts machine removal once, renders the complete CLI outcome, and quits',a
  const run=uninstall.mock.results[0]!.value,answer=vi.spyOn(run,'answer');fireEvent.click(remove);
  const region=await screen.findByRole('region',{name:'terum-skills was removed from this machine'});
  expect(uninstall).toHaveBeenCalledExactlyOnceWith({});expect(answer).toHaveBeenCalledExactlyOnceWith(expect.any(String),true);
- for(const line of [`Left: ${design.TEAMS.map(t=>t.key).join(', ')}`,`Placed skills removed: ${design.PLACEMENTS_N}`,'Hook: removed','/terum-skills skill: removed','config.json: removed','Kept: ~/.terum/skills/backups','Record: ~/.terum/skills/backups/uninstall.2026-09-09T12-00-00-000Z.json',...MOCK_REMOVE_ADVICE])expect(within(region).getByText(line,{exact:true})).toBeInTheDocument();
+ for(const line of [`Left: ${design.TEAMS.map(t=>t.key).join(', ')}`,`Placed skills removed: ${design.PLACEMENTS_N}`,'Hook: removed','/terum-skills skill: removed','config.json: removed','Kept: ~/.terum/skills/backups','Record:',...MOCK_REMOVE_ADVICE])expect(within(region).getByText(line,{exact:true})).toBeInTheDocument();
+ // UI policy §2: the record path is a PathText — the full path lives in the title and on copy, never in prose.
+ expect(screen.getByTitle('~/.terum/skills/backups/uninstall.2026-09-09T12-00-00-000Z.json')).toBeInTheDocument();
  const lines=["Wrote a record of this machine's terum-skills state to ~/.terum/skills/backups/uninstall.2026-09-09T12-00-00-000Z.json.",...design.TEAMS.flatMap(t=>[`Leaving ${t.key}…`,`Left ${t.key}.`])];
  expect(within(region).getByRole('log').textContent).toBe(lines.join('\n'));
  fireEvent.click(within(region).getByRole('button',{name:'Show in Finder'}));expect(reveal).toHaveBeenCalledWith('~/.terum/skills/backups/uninstall.2026-09-09T12-00-00-000Z.json');
@@ -108,7 +110,7 @@ it('renders a partial removal failure and allows closing it',async()=>{
 });
 it('refuses removal while an eval is running and offers to show it',async()=>{
  const uninstall=vi.spyOn(backend,'uninstallMachine'),show=vi.fn();
- open('#/settings/advanced',{current:{state:'running',ref:'deploy-check',name:'deploy-check',team:undefined,run:createRun(async()=>({ok:true,value:{name:'deploy-check',runDir:'/eval',executionStatus:'complete',team:null,id:null,shareHint:true}})),lines:[],startedAt:0},dialogOpen:false,start:()=>{},stop:async()=>{},dismiss:()=>{},show});
+ open('#/settings/advanced',{current:{state:'running',ref:'deploy-check',name:'deploy-check',team:undefined,run:createRun(async()=>({ok:true,value:{name:'deploy-check',runDir:'/eval',executionStatus:'complete',team:null,id:null,shareHint:true}})),lines:[],startedAt:0},dialogOpen:false,start:()=>{},stop:async()=>{},dismiss:()=>{},clear:()=>{},show});
  fireEvent.click(await screen.findByRole('button',{name:'Remove…'}));
  const dialog=await screen.findByRole('dialog',{name:'Stop the running eval first'});expect(uninstall).not.toHaveBeenCalled();
  fireEvent.click(within(dialog).getByRole('button',{name:'Show eval'}));expect(show).toHaveBeenCalledOnce();

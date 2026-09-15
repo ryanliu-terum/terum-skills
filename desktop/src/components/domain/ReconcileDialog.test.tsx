@@ -50,6 +50,13 @@ it('defaults identical and same-id rows on, leaves name-only rows off with the r
   expect(document.querySelector('.reconcile-footnote .cli-box .board-mono')).toHaveTextContent('npx -y terum-skills@latest skill rename <path> --to <new-name>');
   // UI policy §2: a path is a PathText (full path in the title, root label beside the name), never prose.
   expect(screen.getByTitle('~/.claude/skills/old-deploy')).toBeInTheDocument();
+  // The path is a sibling of the checkbox, never inside its <label>: a browser forwards a click on a role=button span
+  // to the label's control (jsdom does not, so the structure is what this test can pin; e2e/routes/reconcile-path-copy
+  // clicks it in Chromium). Clicking the path copies and changes nothing else.
+  const path = screen.getByTitle('~/.claude/skills/pr-review');
+  expect(path.closest('label')).toBeNull();
+  fireEvent.click(path);
+  expect(boxes[2]).not.toBeChecked();
   expect(screen.getByText(/holds the bytes of deploy-check Version 5 under a different folder name; nothing is offered for it\./)).toBeInTheDocument();
   expect(screen.getAllByText('· Global')).toHaveLength(3);
 });

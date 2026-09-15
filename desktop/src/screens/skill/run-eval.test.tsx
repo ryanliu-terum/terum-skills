@@ -126,3 +126,22 @@ it('Queue for overnight queues this one skill through the several-skills verb an
  await within(queued).findByText('Queued 1 eval for overnight.',{selector:'[role=status]'});
  expect(location.hash).toBe('#/skill/deploy-check?tab=evals');
 });
+
+it('a finished run keeps its chip: Close leaves it, the chip reopens the finished dialog, ✕ clears it (UI policy §5)',async()=>{
+ const {evalSpy}=await open();
+ const run=createRun<EvalResult>(async ctx=>{ctx.print('preflight ok');return {ok:true,value};});runs.push(run);evalSpy.mockReturnValue(run);start();
+ // The run finished: the dialog closed itself, the chip stayed.
+ const chip=await screen.findByRole('button',{name:'Eval finished · deploy-check'});
+ expect(chip).toHaveAttribute('title','Eval finished · deploy-check');
+ await waitFor(()=>expect(screen.queryByRole('dialog')).toBeNull());
+ expect(screen.queryByRole('button',{name:'Stop'})).toBeNull();
+ fireEvent.click(chip);
+ const reopened=await screen.findByRole('dialog');
+ expect(within(reopened).getByText('Finished')).toBeVisible();
+ expect(within(reopened).queryByRole('button',{name:'Run eval again'})).toBeNull();
+ fireEvent.click(within(reopened).getByRole('button',{name:'Close'}));
+ await waitFor(()=>expect(screen.queryByRole('dialog')).toBeNull());
+ expect(screen.getByRole('button',{name:'Eval finished · deploy-check'})).toBeVisible();
+ fireEvent.click(screen.getByRole('button',{name:'Dismiss eval status'}));
+ await waitFor(()=>expect(screen.queryByRole('button',{name:'Eval finished · deploy-check'})).toBeNull());
+});

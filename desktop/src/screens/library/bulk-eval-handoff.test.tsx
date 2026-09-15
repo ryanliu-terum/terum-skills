@@ -64,7 +64,7 @@ it('a selected card that cannot be evaluated here is left out, and the bar says 
   expect(evaluateButton()).toHaveTextContent('Evaluate 1 skill…');
   // UI policy §6: collapsed, the note is one sentence with the count and the one reason; "Show why" opens the grouped names.
   const note = screen.getByRole('note');
-  expect(note).toHaveTextContent('1 of 2 selected skills are left out of the eval — Install it first — evals run against the copy on your machine.');
+  expect(note).toHaveTextContent('1 of 2 selected skills is left out of the eval — Install it first — evals run against the copy on your machine.');
   expect(within(note).queryByText(absent.name)).toBeNull();
   fireEvent.click(within(note).getByRole('button', { name: 'Show why' }));
   expect(within(note).getByText(absent.name).closest('.chip')).toHaveAttribute('title', 'Install it first — evals run against the copy on your machine.');

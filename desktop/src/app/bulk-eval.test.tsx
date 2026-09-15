@@ -87,6 +87,8 @@ it('keeps streaming across navigation, names the run in the top bar, and refuses
  fireEvent.click(within(again).getByRole('button',{name:'Cancel'}));
  fireEvent.click(await screen.findByRole('button',{name:/^(Starting eval|Evaluating) · .*2 skills$|^Evaluating · \d+ of \d+$/}));
  const reopened=await screen.findByRole('dialog',{name:'Evaluating 2 skills'});
+ // A busy dialog whose dismissal keeps the run offers a non-destructive way out beside Stop.
+ expect(within(reopened).getByRole('button',{name:'Keep running'})).toBeVisible();
  fireEvent.click(within(reopened).getByRole('button',{name:'Stop'}));
  expect(await within(reopened).findByText('Stopped')).toBeVisible();expect(cancel).toHaveBeenCalledTimes(1);
 });

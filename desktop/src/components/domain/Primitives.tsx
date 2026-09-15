@@ -5,7 +5,7 @@ import { Icon } from '../ui/Icon';
 import type { IconName } from '../ui/icon-paths';
 import { Button } from '../ui/Button';
 import { Menu,MenuTrigger,MenuPopup,MenuItem } from '../ui/Menu';
-import { useContextMenu, useCopy, useCopyMenu } from './context-menu';
+import { useContextMenu, useCopy, useCopyMenu, useCopySelfMenu } from './context-menu';
 import { CopyValue } from './ContextMenu';
 import { splitAdvice, adviceCommands } from '../../lib/advice';
 import { shortenPath } from '../../lib/path-text';
@@ -23,7 +23,10 @@ export function IconButton({icon,label,onClick,size=24,iconSize=16,pressed=false
 export function CommandText({command}:{command:string}){return command.split(' ').map((part,i)=><span key={i}>{i?' ':''}<span style={{display:'inline-block',overflowWrap:'anywhere'}}>{decodeText(part)}</span></span>);}
 /** Right-click copies the printed command (the hint itself stays text, as drawn). */
 export function TerminalHint({command,prefix}:{command:string;prefix?:string}){const copy=useCopy(),menu=useContextMenu(()=>[{key:'copy',label:'Copy command',icon:'copy',onSelect:()=>void copy(decodeText(command),'command')}]);return <div className="terminal-hint" ref={menu}><span className="terminal-glyph"><Icon name="terminal" size={12} stroke="2"/></span>{prefix?<span style={{whiteSpace:'nowrap'}}>{prefix} ·</span>:null}<span className="board-mono"><CommandText command={command}/></span></div>;}
-export function ErrorLine({children}:PropsWithChildren){return <div className="board-error-line">{children}</div>;}
+/** The boards' mono error line; right-click copies what it shows (UI policy §1). */
+export function ErrorLine({children}:PropsWithChildren){const menu=useCopySelfMenu('error');return <div className="board-error-line" ref={menu}>{children}</div>;}
+/** A `role="alert"` block that is selectable and copies on right-click (UI policy §1); `className` keeps the caller's metrics. */
+export function AlertText({children,className}:PropsWithChildren<{className?:string}>){const menu=useCopySelfMenu('error');return <div role="alert" className={className} ref={menu}>{children}</div>;}
 export function CenteredState({icon,title,body,primary,primaryDisabled=false,primaryReason,secondary,onPrimary,onSecondary,children,alert=false}:{icon:IconName;title:string;body:string;primary?:string;primaryDisabled?:boolean;primaryReason?:string|undefined;secondary?:string;onPrimary?:()=>void;onSecondary?:()=>void;children?:ReactNode;alert?:boolean}){return <div className="centered-state" role={alert?'alert':undefined}><div className="state-icon"><Icon name={icon} size={18}/></div><span className="state-title">{title}</span><span className="state-body">{decodeText(body)}</span><div className="state-actions">{primary?<Button kind="primary" disabled={primaryDisabled} title={primaryReason} onClick={onPrimary}>{primary}</Button>:null}{secondary?<Button onClick={onSecondary}>{secondary}</Button>:null}</div>{primaryReason?<Small>{primaryReason}</Small>:null}{children}</div>;}
 export function HoverTip({children,below=true}:{children:ReactNode;below?:boolean}){return <span role="tooltip" className={'tooltip board-hover-tip'+(below?' below':'')}>{children}</span>;}
 export function CopyButton({text}:{text:string}){const backend=useBackend(),[copied,setCopied]=useState(false),[error,setError]=useState<string|null>(null),timer=useRef<ReturnType<typeof setTimeout>|null>(null);useEffect(()=>()=>{if(timer.current)clearTimeout(timer.current);},[]);async function copy(){try{const result=await backend.copyToClipboard(text);if(!result.ok){setError(result.error);return;}setError(null);setCopied(true);if(timer.current)clearTimeout(timer.current);timer.current=setTimeout(()=>setCopied(false),1500);}catch(e){setError(e instanceof Error?e.message:'Clipboard unavailable.');}}return <span className="copy-control"><IconButton icon="copy" iconSize={14} label="Copy command" pressed={copied} onClick={()=>void copy()}/>{copied?<HoverTip below={false}>Copied</HoverTip>:null}{error?<span role="alert" className="tooltip board-hover-tip">{error}</span>:null}</span>;}

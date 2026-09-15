@@ -19,10 +19,11 @@ afterEach(async () => { for (const run of runs.splice(0)) await run.cancel(); cl
 const card = (over: Partial<Card> = {}): Card => ({ ...cardOf(design.CATALOG[0]!), ...over });
 
 function Start({ name, team }: { name: string; team?: string }) { const host = useEvalRun(); return <button onClick={() => host.start({ ref: name, name, ...(team === undefined ? {} : { team }) })}>Start</button>; }
-function mount(run: Run<EvalResult>, skill: Card, team?: string) {
+/** `runName` is the skill the run is started for; the card on screen may be another one. */
+function mount(run: Run<EvalResult>, skill: Card, team?: string, runName = skill.name) {
   const backend = createMockBackend();
   backend.eval = () => run;
-  render(<BackendContext value={backend}><QueryClientProvider client={new QueryClient()}><Tooltip.Provider><PromptContext value={async () => true}><EvalRunProvider><TopBar mode="cosmetic"/><MemoryRouter initialEntries={['/marketplace']}><Start name={skill.name} {...(team === undefined ? {} : { team })}/><SkillCard skill={skill}/></MemoryRouter></EvalRunProvider></PromptContext></Tooltip.Provider></QueryClientProvider></BackendContext>);
+  render(<BackendContext value={backend}><QueryClientProvider client={new QueryClient()}><Tooltip.Provider><PromptContext value={async () => true}><EvalRunProvider><TopBar mode="cosmetic"/><MemoryRouter initialEntries={['/marketplace']}><Start name={runName} {...(team === undefined ? {} : { team })}/><SkillCard skill={skill}/></MemoryRouter></EvalRunProvider></PromptContext></Tooltip.Provider></QueryClientProvider></BackendContext>);
 }
 
 it('the chip says starting, then counts, then finished with a dismiss; the covered card pulses only while the run is on', async () => {
@@ -51,9 +52,11 @@ it('the chip says starting, then counts, then finished with a dismiss; the cover
 it('a card outside the run shows no dot', async () => {
   const run = createRun<EvalResult>(async ctx => { await ctx.sleep(60_000); return { ok: true, value: {} as EvalResult }; });
   runs.push(run);
-  mount(run, card({ name: 'other-skill', teamed: true }), 'terum');
+  // A team run for one skill while a different team card is on screen.
+  mount(run, card({ name: 'another-skill', teamed: true }), 'terum', 'other-skill');
   fireEvent.click(screen.getByRole('button', { name: 'Start' }));
   await screen.findByRole('button', { name: 'Starting eval · other-skill' });
+  expect(screen.queryByRole('status', { name: /^Evaluating / })).toBeNull();
   // Same run, but the card on screen is a LOCAL folder of that name: a team run does not light it.
   cleanup();
   const run2 = createRun<EvalResult>(async ctx => { await ctx.sleep(60_000); return { ok: true, value: {} as EvalResult }; });
