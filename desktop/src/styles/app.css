@@ -144,7 +144,7 @@ button:focus-visible,.button[data-state="focus"],[role="switch"]:focus-visible,[
 .prompt-path .prompt-field {flex:1 1 auto;min-width:0;}
 .prompt-actions {display:flex;justify-content:flex-end;gap:8px;margin-top:16px;}
 
-.eval-chip { font-size: 12px; background: var(--tk-bg2); border: 1px solid var(--tk-border1); border-radius: 6px; height: 24px; padding: 0 8px; color: var(--tk-text2); white-space: nowrap; }
+.eval-chip { font-size: 12px; background: var(--tk-bg2); border: 1px solid var(--tk-border1); border-radius: 6px; height: 24px; padding: 0 8px; color: var(--tk-text2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 /* The eval chip's labels are longer than the slot (.topbar-right is a fixed 240px). The chip gives way, but only its
    subject (the skill's name, "N skills") shortens with an ellipsis: the state ("Starting", "Evaluating · 12 of 28")
    never shrinks, and the longest state in the ladder fits beside the square Stop and the bell (e2e/routes/eval-chip-fit).
