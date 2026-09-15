@@ -94,7 +94,8 @@ describe('team create (§6)', () => {
     const result = await create({ name: 'new-team', remote: publicRemote, config: store, runner }, io);
     if (!result.ok) throw new Error(result.error);
     const clone = store.teamClone('new-team');
-    expect(JSON.parse(await readFile(pathJoin(clone, 'team.json'), 'utf8'))).toMatchObject({ layout_version: 3, name: 'new-team', archived: [], policy: { skill_license: 'UNLICENSED' } });
+    // Born with NO projects: publishing targets the marketplace, so there is no reserved catch-all card.
+    expect(JSON.parse(await readFile(pathJoin(clone, 'team.json'), 'utf8'))).toMatchObject({ layout_version: 3, name: 'new-team', projects: {}, archived: [], policy: { skill_license: 'UNLICENSED' } });
     const me = JSON.parse(await readFile(pathJoin(clone, 'people', 'me.json'), 'utf8'));
     expect(me).toMatchObject({ handle: 'me', display_name: 'Me', email: 'me@example.com' });
     // §3.5: declined[] stays in the schema so legacy files parse, but is no longer written — a new team's first person file has no such key.

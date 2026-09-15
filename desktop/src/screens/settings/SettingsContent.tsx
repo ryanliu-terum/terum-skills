@@ -29,7 +29,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useUrlState } from '../../app/url-state';
 import { BoardSkeleton, ErrorLine } from '../../components/domain/Primitives';
 import { detailPath, localActionReason } from '../../components/domain/skill-card-actions';
-import { CATEGORY_OPTIONS, CATEGORY_SUGGEST, PUBLISH_CATEGORY_KEY, PUBLISH_TARGET_KEY, TARGET_ASK, sharedState, targetOptions, usePublishDefaults } from '../skill/publish-defaults';
+import { CATEGORY_OPTIONS, CATEGORY_SUGGEST, MARKETPLACE_ONLY, PUBLISH_CATEGORY_KEY, PUBLISH_TARGET_KEY, sharedState, targetOptions, usePublishDefaults } from '../skill/publish-defaults';
 
 type Props={surfaces:Surfaces|undefined;section:string;data:Settings;status:StatusResult;report:UpdateAdvice|null;updateError:string|null;appVersion:string|null};
 export function SettingsContent({surfaces,section,data:d,status,report,updateError,appVersion}:Props){
@@ -116,7 +116,7 @@ export function SettingsContent({surfaces,section,data:d,status,report,updateErr
       const sharedError=shared.data?.ok===false?shared.data.error:shared.isError?shared.error.message:null;
       content=<><Head title="Publishing" sub="Publishing deliberately mints a version from a local skill folder. Nothing leaves this machine any other way."/>
       <Group label="Defaults" note={<Note>The two flags of <Mono>npx -y terum-skills@latest publish &lt;ref&gt;</Mono>. The app fills them from here and shows them in the dialog before every publish.</Note>}><Card>
-        <Row title="Publish to" desc="The team list the skill is endorsed into. Ask each time starts the dialog on Global.">{choice(PUBLISH_TARGET_KEY,'Publish to',TARGET_ASK,targetOptions(publishDefaults.projects))}</Row>
+        <Row title="Publish to" desc="Publishing always goes to the team's marketplace; a project here is an extra list the skill is added to.">{choice(PUBLISH_TARGET_KEY,'Publish to',MARKETPLACE_ONLY,targetOptions(publishDefaults.projects))}</Row>
         <Row title="Category" desc="terum-category in SKILL.md. The model suggests one from the team's list unless you type it; a category already declared in SKILL.md is kept either way.">{choice(PUBLISH_CATEGORY_KEY,'Category',CATEGORY_SUGGEST,CATEGORY_OPTIONS)}</Row>
         <Row title="Eval receipts" desc="Every local eval of the exact bytes you publish is attached to the new version as a copy. Runs of earlier bytes stay local."><Value quiet>Attached automatically</Value></Row>
       </Card></Group>

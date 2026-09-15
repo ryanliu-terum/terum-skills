@@ -64,7 +64,7 @@ describe('config store (§5.4)', () => {
   // user's placement ledger on first read, and the next `update()` makes that rewrite permanent on disk.
   // Through the store rather than the schema so the test fails if EITHER half stops: the read no
   // longer migrating, or the write no longer persisting what the read produced.
-  it('migrates placements and pending on read (40-hex version → null, any-case global → Global), leaves every other row untouched, and the next update makes the rewrite permanent on disk', async () => {
+  it('migrates placements and pending on read (40-hex version → null), leaves every other row untouched, and the next update makes the rewrite permanent on disk', async () => {
     const root = join(await temporaryDirectory(), 'skills');
     const store = createConfigStore(root);
     await store.ensureRoot();
@@ -86,14 +86,11 @@ describe('config store (§5.4)', () => {
       },
     };
     await writeFile(join(root, 'config.json'), JSON.stringify(seeded));
+    // Only the 40-hex version becomes null. Nothing rewrites a scope's project name any more: there is
+    // no reserved `Global` project, so a stored spelling is display text and is carried verbatim.
     const migrated = {
-      pending: [{ ...seeded.pending[0]!, scope: { kind: 'project', project: 'Global' }, version: null }],
-      placements: {
-        ...seeded.placements,
-        '/h/hash': { ...seeded.placements['/h/hash'], version: null },
-        '/h/lower': { ...seeded.placements['/h/lower'], scope: { kind: 'project', project: 'Global' } },
-        '/h/upper': { ...seeded.placements['/h/upper'], scope: { kind: 'project', project: 'Global' } },
-      },
+      pending: [{ ...seeded.pending[0]!, version: null }],
+      placements: { ...seeded.placements, '/h/hash': { ...seeded.placements['/h/hash'], version: null } },
     };
     const first = await store.read();
     expect(first.placements).toEqual(migrated.placements);
@@ -102,7 +99,6 @@ describe('config store (§5.4)', () => {
     await store.update((config) => { config.default_handle = 'me'; });
     const written = await readFile(join(root, 'config.json'), 'utf8');
     expect(written).not.toContain(hash);
-    expect(written).not.toMatch(/"project":\s*"(?:global|GLOBAL)"/);
     const onDisk = JSON.parse(written) as { placements: unknown; pending: unknown; default_handle: unknown };
     expect(onDisk.placements).toEqual(migrated.placements);
     expect(onDisk.pending).toEqual(migrated.pending);

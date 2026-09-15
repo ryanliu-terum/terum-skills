@@ -54,7 +54,7 @@ it('abbreviates the real detail labels while Edit and Manage keep the absolute o
  fireEvent.click(screen.getByRole('button',{name:'Manage with Terum…'}));
  fireEvent.click(await screen.findByRole('menuitem',{name:'Publish to team…'}));
  fireEvent.click(await screen.findByRole('button',{name:'Publish'}));
- await waitFor(()=>expect(publish).toHaveBeenCalledWith({ref:'deploy-check',team:'acme',project:'Global'}));
+ await waitFor(()=>expect(publish).toHaveBeenCalledWith({ref:'deploy-check',team:'acme'}));
 });
 it('uses the resolved path label in the real Global Remove dialog',async()=>{
  open('none','#/skill/deploy-check?dialog=remove','placed');

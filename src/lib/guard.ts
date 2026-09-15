@@ -6,7 +6,7 @@ import { handleSchema, parseJson, parseSkillFrontmatter, personSchema, Team, tea
  * nothing else is writable. It runs inside the safeWrite loop against the tree the mutation
  * actually produced; teamRepo additionally proves the staged diff equals that tree's changes.
  */
-export type GuardAction = 'join' | 'install' | 'uninstall' | 'publish' | 'team-remove' | 'profile' | 'project' | 'migrate';
+export type GuardAction = 'join' | 'install' | 'uninstall' | 'publish' | 'team-remove' | 'profile' | 'project' | 'project-delete' | 'migrate';
 
 export interface GuardContext {
   action: GuardAction;
@@ -62,7 +62,7 @@ export function guard(tree: GuardTree, rawContext: GuardContext): void {
     if (context.action === 'publish' && permitsReceipt(tree, path)) continue; // row g
     if (path === 'README.md') continue; // row f: generated, regenerated not hand-edited
     if (path === `people/${context.handle}.json` && PEOPLE_ACTIONS.includes(context.action)) continue; // row b
-    if (path === 'team.json') { guardTeam(tree, context); continue; } // rows c, d, e, i
+    if (path === 'team.json') { guardTeam(tree, context); continue; } // rows c, d, e, i, i′
     throw new GuardError(`Write guard refused ${path} for ${context.action} by ${context.handle}`);
   }
 }
@@ -234,6 +234,7 @@ function guardTeam(tree: GuardTree, context: GuardContext): void {
   if (context.action === 'team-remove' && context.targetHandle && context.targetHandle !== context.handle && archivedAppendedOnly(before, after, context.targetHandle)) return; // row d
   if (context.action === 'join' && archivedRemovedOnly(before, after, context.handle)) return; // row e
   if (context.action === 'project' && oneEmptyProjectAdded(before, after)) return; // row i
+  if (context.action === 'project-delete' && oneProjectRemoved(before, after)) return; // row i′
   throw new GuardError(`Write guard refused team.json for ${context.action} by ${context.handle}`);
 }
 
@@ -252,7 +253,7 @@ function sameExcept(before: Team, after: Team, permitted: readonly string[]): bo
   return same(scrub(before), scrub(after));
 }
 
-/** Row c: `projects[].skills` only — project keys, remotes, and every other field are untouchable (row i creates a key; nothing edits one). The `global` branch is deleted with the field (§4.1). */
+/** Row c: `projects[].skills` only — project keys, remotes, and every other field are untouchable (row i creates a key, row i′ removes one; nothing edits one). The `global` branch is deleted with the field (§4.1). */
 function onlySkillListsChanged(before: Team, after: Team): boolean {
   if (!sameExcept(before, after, ['projects'])) return false;
   const withoutSkills = (team: Team) => Object.fromEntries(Object.entries(team.projects).map(([key, project]) => {
@@ -278,6 +279,19 @@ function oneEmptyProjectAdded(before: Team, after: Team): boolean {
   const born = after.projects[added[0]!]!;
   if (!same(born.skills, []) || born.remotes.length > 1) return false;
   return same(Object.keys(born).sort(), ['remotes', 'skills']);
+}
+
+/**
+ * Row i′: exactly one project key removed, and nothing else moved. The skills that key listed are
+ * NOT touched — a version folder is the marketplace copy and outlives every list that ever named it,
+ * so deleting a project drops a membership list and never a skill. Deliberately symmetrical with row
+ * i: one key, every surviving project byte-identical, every other team.json field untouched.
+ */
+function oneProjectRemoved(before: Team, after: Team): boolean {
+  if (!sameExcept(before, after, ['projects'])) return false;
+  const removed = Object.keys(before.projects).filter((key) => !Object.hasOwn(after.projects, key));
+  if (removed.length !== 1 || Object.keys(after.projects).length !== Object.keys(before.projects).length - 1) return false;
+  return Object.keys(after.projects).every((key) => same(before.projects[key], after.projects[key]));
 }
 
 /** Row d: `archived` becomes exactly `before.archived + [target]`; a handle already archived cannot be appended again. */

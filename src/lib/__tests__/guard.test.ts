@@ -218,6 +218,31 @@ describe('row i — project create adds one key, born empty', () => {
   });
 });
 
+describe("row i′ — project delete removes one key and nothing else", () => {
+  const P = { remotes: ['github.com/a/p'], skills: [] };
+  const remove: GuardContext = { action: 'project-delete', handle: 'me' };
+
+  it('admits exactly one removed key, whatever it listed', () => {
+    expect(() => guard(tree({ 'team.json': [team(), team({ projects: {} })] }), remove)).not.toThrow();
+    // A card with endorsements goes the same way: the skills live in `skills/<name>/v<N>`, which this
+    // diff cannot reach, so removing the list is never removing a skill.
+    expect(() => guard(tree({ 'team.json': [team({ projects: { p: { remotes: [], skills: [ID] }, q: P } }), team({ projects: { q: P } })] }), remove)).not.toThrow();
+  });
+
+  it('refuses two keys at once, an edit riding along, and a removal that is really a rename', () => {
+    refuse(tree({ 'team.json': [team({ projects: { p: P, q: P } }), team({ projects: {} })] }), remove, 'team.json');
+    refuse(tree({ 'team.json': [team({ projects: { p: P, q: P } }), team({ projects: { q: { remotes: [], skills: [ID] } } })] }), remove, 'team.json');
+    refuse(tree({ 'team.json': [team(), team({ categories: ['c'], projects: {} })] }), remove, 'team.json');
+    refuse(tree({ 'team.json': [team(), team({ projects: { renamed: P } })] }), remove, 'team.json');
+  });
+
+  it('is the only action that may remove a key, and removes nothing on its own', () => {
+    refuse(tree({ 'team.json': [team(), team({ projects: {} })] }), publish, 'team.json');
+    refuse(tree({ 'team.json': [team(), team({ projects: {} })] }), { action: 'project', handle: 'me' }, 'team.json');
+    refuse(tree({ 'team.json': [team(), team({ archived: ['x'] })] }), remove, 'team.json');
+  });
+});
+
 describe('row j — the §13 migration', () => {
   it('MUST run before the team.json branch: the pre-image is layout 2, which teamSchema refuses to parse', () => {
     expect(() => guard(tree({ 'team.json': [legacyTeam(), team()] }), migrate)).not.toThrow();

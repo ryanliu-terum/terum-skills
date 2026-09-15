@@ -137,6 +137,10 @@ export function buildProgram(execute: Execute, verbs: CliVerbs = { login, team: 
     .option('--remote <url>', "the project's repository; its skills place when a teammate installs inside that folder")
     .addOption(new Option('--team <team>', 'configured team (required when more than one exists)').hideHelp())
     .action(async (name: string | undefined, options: { remote?: string; team?: string }) => execute(io => active.team({ form: context.form, kind: 'project-create', name, ...options }, io), { verb: 'team project create', notices: true }));
+  teamProject.command('delete [name]').description("Delete a team project: removes the list only — its skills stay in the team's marketplace")
+    .option('--yes', 'skip the confirmation (a script, or a shell that already asked)')
+    .addOption(new Option('--team <team>', 'configured team (required when more than one exists)').hideHelp())
+    .action(async (name: string | undefined, options: { yes?: boolean; team?: string }) => execute(io => active.team({ form: context.form, kind: 'project-delete', name, ...options }, io), { verb: 'team project delete', notices: true }));
   team
     .command('workflow-update')
     .description('Print the current workflow scaffold for manual migration; never writes a repository')
@@ -165,8 +169,8 @@ export function buildProgram(execute: Execute, verbs: CliVerbs = { login, team: 
   program
     .command('publish <ref>')
     .option('--category <name>', "the skill's terum-category; skips the model suggestion")
-    .description('Endorse a shared skill for the team: opens a pull request under policy "pr", commits directly under policy "push"')
-    .option('--project <project>', 'endorse into the project list instead of the global list')
+    .description("Publish a skill to the team's marketplace: opens a pull request under policy \"pr\", commits directly under policy \"push\"")
+    .option('--project <project>', "also list the skill under this team project; without it the skill goes to the marketplace alone")
     .addOption(new Option('--team <team>', 'configured team (required when more than one exists and the ref is bare)').hideHelp())
     .action(async (ref: string, options: { project?: string; team?: string; category?: string }) => execute((io) => active.publish({ form: context.form, ref, ...options, cwd: process.cwd() }, io), { verb: 'publish', notices: true }));
 

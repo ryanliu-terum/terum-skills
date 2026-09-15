@@ -29,13 +29,22 @@ export async function run(args: ReadmeArgs, io: Prompter): Promise<Result<{ chan
       if (base.code !== 0) throw new Error(`Could not read ${args.prComment}:team.json: ${(base.stderr || base.stdout).trim()}`);
       const before = parseJson(teamSchema, base.stdout, `${args.prComment}:team.json`);
       const current = parseJson(teamSchema, await readFile(join(cwd, 'team.json'), 'utf8'), 'team.json');
-      // `team.json.global` is deleted (§4.1); `Global` is an ordinary project key, so the projects
-      // walk alone covers what the union used to.
+      // A publish now targets the MARKETPLACE and may touch no project list at all, so a projects-only
+      // diff would report "nothing" for the ordinary publish. What a publish always adds is a version
+      // folder, and the base ref is the only place to learn which folders are new — hence the tree read.
+      const baseTree = await runner.run('git', ['ls-tree', '-r', '--name-only', args.prComment, '--', 'skills'], { cwd });
+      if (baseTree.code !== 0) throw new Error(`Could not read ${args.prComment}:skills: ${(baseTree.stderr || baseTree.stdout).trim()}`);
+      const baseVersions = new Set(baseTree.stdout.split('\n').flatMap((line) => {
+        const match = /^skills\/([^/]+)\/(v[1-9][0-9]*)\//.exec(line.trim());
+        return match === null ? [] : [`${match[1]}/${match[2]}`];
+      }));
+      // The second thing a publish can add: membership in a project list, with no new bytes at all
+      // (identical bytes, `--project` naming a list the skill was not on). Both belong in the preview.
       const beforeIds = new Set(Object.values(before.projects).flatMap((project) => project.skills));
-      const added = new Set(Object.values(current.projects).flatMap((project) => project.skills).filter((id) => !beforeIds.has(id)));
-      const skills = data.skills.filter((skill) => added.has(skill.id));
+      const listed = new Set(Object.values(current.projects).flatMap((project) => project.skills).filter((id) => !beforeIds.has(id)));
+      const skills = data.skills.filter((skill) => !baseVersions.has(`${skill.name}/${skill.latest}`) || listed.has(skill.id));
       // The Action finds its own comment by the anchor below, so skill text must not be able to forge a second one.
-      const comment = ['<!-- terum-skills:pr-comment -->', '## terum-skills publish preview', ...(skills.length ? skills.map((skill) => `- ${inlineText(skill.name)} (${inlineText(skill.category)})`) : ['- No new endorsements.'])].join('\n');
+      const comment = ['<!-- terum-skills:pr-comment -->', '## terum-skills publish preview', ...(skills.length ? skills.map((skill) => `- ${inlineText(skill.name)} (${inlineText(skill.category)})`) : ['- No new skill versions.'])].join('\n');
       io.print(comment);
       return success({ comment });
     }

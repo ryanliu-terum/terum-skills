@@ -45,9 +45,6 @@ export function sameScope(a: unknown, b: unknown): boolean {
   return left.data.kind === 'global' || left.data.project === (right.data as { kind: 'project'; project: string }).project;
 }
 
-/** `Global` is reserved: auto-created at team creation and present in every layout-3 repo (§3.1). */
-export const GLOBAL_PROJECT = 'Global';
-
 /**
  * §3.4 — a persisted version is the string `"v3"`, or `null`. One type in all five declarations.
  *
@@ -248,21 +245,13 @@ function migrateVersion(entry: Record<string, unknown>): Record<string, unknown>
 }
 
 /**
- * `Global` is the reserved project name, but the migration commit runs on ONE machine and cannot reach
- * another member's config — and §10 deleted the sync pass that used to reconcile placements. So a
- * scope naming `global`/`GLOBAL` is normalized here, on read, on every machine.
+ * There is no reserved project name any more: a skill reaches the team by being published to the
+ * marketplace, and `projects` is an optional membership list. A stored scope naming a project is
+ * display text — nothing normalizes it, because nothing depends on its spelling.
  */
-function migrateScope(entry: Record<string, unknown>): Record<string, unknown> {
-  const scope = entry['scope'];
-  if (!scope || typeof scope !== 'object' || Array.isArray(scope)) return entry;
-  const project = (scope as Record<string, unknown>)['project'];
-  if (typeof project !== 'string' || project === GLOBAL_PROJECT || project.toLowerCase() !== GLOBAL_PROJECT.toLowerCase()) return entry;
-  return { ...entry, scope: { ...(scope as Record<string, unknown>), project: GLOBAL_PROJECT } };
-}
-
 function migrateEntry(entry: unknown): unknown {
   if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return entry;
-  return migrateScope(migrateVersion(entry as Record<string, unknown>));
+  return migrateVersion(entry as Record<string, unknown>);
 }
 
 function migratePlacements(value: unknown): unknown {
