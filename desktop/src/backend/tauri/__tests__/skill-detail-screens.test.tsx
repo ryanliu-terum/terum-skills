@@ -43,14 +43,13 @@ it('renders the recorded detail in the board shapes with one heading and real pr
   expect(screen.queryByRole('menu')).toBeNull();
   expect(screen.queryByRole('button',{name:'Show files'})).toBeNull();
   expect(screen.getByText('Installed',{selector:'.detail-status span'})).toBeVisible();
+  // Quality and Activity are unshipped (QUALITY_ACTIVITY_SHIPPED in SkillScreen.tsx): each tab is its
+  // named region with the coming-soon panel, and the hygiene and activity assertions move to the
+  // skipped tests below, which come back with the tabs.
   fireEvent.click(screen.getByRole('tab',{name:'Quality'}));
-  expect(screen.getByText('Hygiene checks · passed on connect · free, no model calls')).toBeVisible();
-  expect(screen.getByText('Per-check results are not reported by this terum-skills version.')).toBeVisible();
-  expect(screen.getByText('No tool grants requested')).toBeVisible();
-  expect(screen.queryByText('none')).toBeNull();
+  expect(within(screen.getByRole('region',{name:'Quality'})).getByText('Coming soon')).toBeVisible();
   fireEvent.click(screen.getByRole('tab',{name:'Activity'}));
-  expect(screen.getByText('0 events')).toBeVisible();
-  expect(screen.getByText('No recorded activity on this machine.')).toBeVisible();
+  expect(within(screen.getByRole('region',{name:'Activity'})).getByText('Coming soon')).toBeVisible();
 });
 it('shows the global install destination and full team-version prefix for an unplaced skill',async()=>{
   open('#/skill/tdd?dialog=install');
@@ -113,7 +112,9 @@ it.each([[0,'Nobody has installed this yet'],[1,'Installed by you'],[2,'Installe
   expect(screen.queryByText(/Installed by \d+ teammates?/)).toBeNull();
 });
 
-it.each([0,1,2])('keeps a successful validation with %s warnings in Quality and refreshes the detail',async warnings=>{
+// Skipped 2026-09-14: the Quality panel is behind QUALITY_ACTIVITY_SHIPPED (SkillScreen.tsx), so the
+// Validate button and the Fix flow it drives are not on the page. Un-skip when the tab ships.
+it.skip.each([0,1,2])('keeps a successful validation with %s warnings in Quality and refreshes the detail',async warnings=>{
   const {backend,client}=open('#/skill/deploy-check?tab=quality');
   await screen.findByText('Hygiene checks · passed on connect · free, no model calls');
   const invalidate=vi.spyOn(client,'invalidateQueries');
@@ -123,7 +124,7 @@ it.each([0,1,2])('keeps a successful validation with %s warnings in Quality and 
   expect(invalidate).toHaveBeenCalledWith({queryKey:['skill','deploy-check']});
   expect(screen.getByRole('heading',{name:'deploy-check'})).toBeVisible();
 });
-it.each([true,false])('keeps validation failure (with value=%s) in Quality',async hasValue=>{
+it.skip.each([true,false])('keeps validation failure (with value=%s) in Quality',async hasValue=>{
   const {backend}=open('#/skill/deploy-check?tab=quality');
   await screen.findByText('Hygiene checks · passed on connect · free, no model calls');
   vi.spyOn(backend,'validate').mockResolvedValue({ok:false,error:'Cannot validate.',...(hasValue?{value:{name:'deploy-check',findings:2,warnings:1,repairable:0,repairs:[]}}:{})});
@@ -132,7 +133,7 @@ it.each([true,false])('keeps validation failure (with value=%s) in Quality',asyn
   expect(screen.getByRole('heading',{name:'deploy-check'})).toBeVisible();
   expect(screen.queryByText("Couldn't read deploy-check")).toBeNull();
 });
-it('keeps a rejected validation in Quality',async()=>{
+it.skip('keeps a rejected validation in Quality',async()=>{
   const {backend}=open('#/skill/deploy-check?tab=quality');
   await screen.findByText('Hygiene checks · passed on connect · free, no model calls');
   vi.spyOn(backend,'validate').mockRejectedValue(new Error('Validation unavailable.'));
@@ -261,7 +262,7 @@ it('draws Fix beside a name-mismatch flag too',async()=>{
 /** The local folder as a copy the team already holds (ls --local's knownToTeam), so a publish after the fix is a republish. */
 const knownLocalFolder:AmendResult=(...args)=>{localFolder()(...args);const [name,value]=args;if(name==='ls-local')Object.assign(((value.local as Record<string,unknown>[])[1]!.rows as Record<string,unknown>[])[0]!,{knownToTeam:true});};
 const repairs=['Set name to `adopt-agent-tooling` to match the folder (was `adopt-tooling`).','Removed 1 invisible character from SKILL.md.'];
-it('offers Fix in Quality when a failed validation counts repairable findings; the dialog reuses that validation, pre-selects republish for a team-held folder, fixes, publishes, then validates again',async()=>{
+it.skip('offers Fix in Quality when a failed validation counts repairable findings; the dialog reuses that validation, pre-selects republish for a team-held folder, fixes, publishes, then validates again',async()=>{
  const {backend}=open('#/skill/local?path='+encodeURIComponent(uncPath)+'&tab=quality',knownLocalFolder);
  await screen.findByRole('heading',{name:'adopt-agent-tooling'});
  const validate=vi.spyOn(backend,'validate').mockResolvedValue({ok:false,error:'Hygiene failed.',value:{name:'adopt-agent-tooling',findings:3,warnings:0,repairable:2,repairs}});
@@ -286,7 +287,7 @@ it('offers Fix in Quality when a failed validation counts repairable findings; t
  await waitFor(()=>expect(screen.queryByRole('dialog')).toBeNull());
  await waitFor(()=>expect(validate).toHaveBeenCalledTimes(2));
 });
-it('unticking republish fixes without publishing',async()=>{
+it.skip('unticking republish fixes without publishing',async()=>{
  const {backend}=open('#/skill/local?path='+encodeURIComponent(uncPath)+'&tab=quality',knownLocalFolder);
  await screen.findByRole('heading',{name:'adopt-agent-tooling'});
  vi.spyOn(backend,'validate').mockResolvedValue({ok:false,error:'Hygiene failed.',value:{name:'adopt-agent-tooling',findings:3,warnings:0,repairable:2,repairs}});
@@ -300,7 +301,7 @@ it('unticking republish fixes without publishing',async()=>{
  expect(await within(dialog).findByRole('button',{name:'Done'})).toBeVisible();
  expect(publish).not.toHaveBeenCalled();
 });
-it('draws no Fix in Quality when nothing is repairable or the CLI predates the count',async()=>{
+it.skip('draws no Fix in Quality when nothing is repairable or the CLI predates the count',async()=>{
  const {backend}=open('#/skill/local?path='+encodeURIComponent(uncPath)+'&tab=quality',localFolder());
  await screen.findByRole('heading',{name:'adopt-agent-tooling'});
  vi.spyOn(backend,'validate').mockResolvedValue({ok:false,error:'Hygiene failed.',value:{name:'adopt-agent-tooling',findings:1,warnings:0,repairable:0,repairs:[]}});
@@ -308,7 +309,7 @@ it('draws no Fix in Quality when nothing is repairable or the CLI predates the c
  expect(await screen.findByText('1 finding · 0 warnings')).toBeVisible();
  expect(screen.queryByRole('button',{name:/^Fix/})).toBeNull();
 });
-it('sends the folder, not the route segment, to validate',async()=>{
+it.skip('sends the folder, not the route segment, to validate',async()=>{
  const {backend,client}=open('#/skill/local?path='+encodeURIComponent(uncPath)+'&tab=quality',localFolder());
  await screen.findByRole('heading',{name:'adopt-agent-tooling'});
  const validate=vi.spyOn(backend,'validate').mockResolvedValue({ok:true,value:{name:'adopt-agent-tooling',findings:0,warnings:0,repairable:0,repairs:[]}}),invalidate=vi.spyOn(client,'invalidateQueries');
@@ -375,7 +376,7 @@ it('routes a by-path removal through D6 with the exact folder and typed confirma
  fireEvent.click(within(dialog).getByRole('button',{name:'Delete'}));
  await waitFor(()=>expect(remove).toHaveBeenCalledWith({path:seedRoot+'/.claude/skills/deploy-check'}));
 });
-it('validates the team name on a qualified name route, not its placed folder or qualified ref',async()=>{
+it.skip('validates the team name on a qualified name route, not its placed folder or qualified ref',async()=>{
  const {backend}=open('#/skill/acme%2Fdeploy-check?'+seedOrigin+'&tab=quality',projectCopy());
  await screen.findByRole('heading',{name:'deploy-check'});
  const validate=vi.spyOn(backend,'validate').mockResolvedValue({ok:true,value:{name:'deploy-check',findings:0,warnings:0,repairable:0,repairs:[]}});

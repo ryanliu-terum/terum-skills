@@ -1,9 +1,13 @@
-import type { Frame, PromptQuestion, Result, Run } from './types';
+import type { Frame, PromptOptions, PromptQuestion, Result, Run } from './types';
 import { PromptCancelledError } from './types';
 import { scriptedPrompter } from './prompter';
 /** Consume replayable frames and answer every prompt before waiting for completion. */
-export async function driveRun<T>(run:Run<T>,answers:Record<string,string|boolean>,onUnexpected:(question:PromptQuestion)=>Promise<string|boolean>,onPrint?:(line:string)=>void,onProgress?:(frame:Extract<Frame,{t:'progress'}>)=>void,onAsk?:(question:PromptQuestion)=>void):Promise<Result<T>>{
- const prompter=scriptedPrompter(answers,onUnexpected);
+export async function driveRun<T>(run:Run<T>,answers:Record<string,string|boolean>,onUnexpected:(question:PromptQuestion,options?:PromptOptions)=>Promise<string|boolean>,onPrint?:(line:string)=>void,onProgress?:(frame:Extract<Frame,{t:'progress'}>)=>void,onAsk?:(question:PromptQuestion)=>void):Promise<Result<T>>{
+ // A question never outlives its run: once `done` settles (Stop, a failure, the CLI finishing without waiting), the
+ // question it left open is withdrawn through `settled`, and the driver returns the run's own result.
+ const settled=new AbortController();
+ void run.done.then(()=>settled.abort(),()=>settled.abort());
+ const prompter=scriptedPrompter(answers,question=>onUnexpected(question,{signal:settled.signal}));
  try{
   for await(const frame of run.frames){
    if(frame.t==='print')onPrint?.(frame.line);
@@ -17,5 +21,9 @@ export async function driveRun<T>(run:Run<T>,answers:Record<string,string|boolea
    }
   }
   return await run.done;
- }catch(error){await run.cancel();return error instanceof PromptCancelledError ? {ok:false,error:'Setup was cancelled.',cancelled:true} : {ok:false,error:error instanceof Error?error.message:'Operation failed.'};}
+ }catch(error){
+  if(settled.signal.aborted)return await run.done.catch((reason:unknown)=>({ok:false as const,error:reason instanceof Error?reason.message:String(reason)}));
+  await run.cancel();
+  return error instanceof PromptCancelledError ? {ok:false,error:'Setup was cancelled.',cancelled:true} : {ok:false,error:error instanceof Error?error.message:'Operation failed.'};
+ }
 }

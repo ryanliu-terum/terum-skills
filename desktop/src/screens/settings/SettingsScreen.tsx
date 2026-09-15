@@ -4,7 +4,7 @@ import { useBackend } from '../../backend';
 import { useUrlState } from '../../app/url-state';
 import { Shell } from '../../components/domain/Shell';
 import { ScreenFrame } from '../../components/domain/ScreenFrame';
-import { BoardSkeleton, CenteredState, ErrorLine, TerminalHint } from '../../components/domain/Primitives';
+import { AlertText, BoardSkeleton, CenteredState, ErrorLine, TerminalHint } from '../../components/domain/Primitives';
 import { WorkflowHeader } from '../../components/domain/WorkflowControls';
 import { useWorkflow } from '../../components/domain/useWorkflow';
 import { Icon } from '../../components/ui/Icon';
@@ -31,7 +31,7 @@ export function SettingsScreen(){
     <div className="settings-body"><nav className="settings-nav" aria-label="Settings sections">{settingsSections.filter(([key])=>key!=='inbox'||surfaces.data?.inbox===true).map(([key,label,icon])=><a key={key} href={'#/settings/'+key+(search.size?'?'+search.toString():'')} aria-current={key===selected?'page':undefined} onClick={event=>{event.preventDefault();const next=new URLSearchParams(search);next.delete('dialog');navigate('/settings/'+key+(next.size?'?'+next.toString():''));}}><Icon name={icon} size={16}/><span>{label}</span></a>)}</nav>
     <div className="settings-scroll"><div className={'settings-content'+(error&&loading?' wide':'')}>
       {error&&loading?reason==='no-team'?<CenteredState icon="box" title="No team on this machine" body="Create a team or join the one you were invited to. Setup runs here in the app." primary="Start setup" secondary="Copy terminal command" onPrimary={()=>navigate('/onboarding/boot?start=1')} onSecondary={()=>void action.perform(()=>backend.copyToClipboard('npx -y terum-skills@latest setup'))}><TerminalHint command="npx -y terum-skills@latest setup" prefix="From the terminal"/></CenteredState>:reason==='invalid-config'?<CenteredState alert icon="alert" title="Couldn't read your settings" body="config.json in ~/.terum/skills is not valid JSON. terum-skills never rewrites a file it could not read, so nothing was lost: fix the file or move it aside, then try again." primary="Try again" secondary="Show in Finder" onPrimary={()=>{void query.refetch();void status.refetch();}} onSecondary={()=>void action.perform(()=>backend.revealPath('~/.terum/skills/config.json'))}><ErrorLine>{error}</ErrorLine></CenteredState>:<CenteredState alert icon="alert" title="Couldn't read your settings" body="terum-skills could not read your settings, so this page shows nothing rather than stale values. The message below is the CLI's own." primary="Try again" secondary="Show in Finder" onPrimary={()=>{void query.refetch();void status.refetch();}} onSecondary={()=>void action.perform(()=>backend.revealPath('~/.terum/skills'))}><ErrorLine>{error}</ErrorLine></CenteredState>:loading?<SettingsLoading/>:<>{error&&<ErrorLine>{error}</ErrorLine>}<SettingsContent surfaces={surfaces.data} key={section} section={section} data={data} status={identity} report={update.data?.ok?update.data.value:null} updateError={update.data?.ok===false?update.data.error:update.isError?update.error.message:null} appVersion={capabilities.data?.appVersion??null}/></>}
-      {action.error&&<div role="alert" className="settings-action-error">{action.error}</div>}
+      {action.error&&<AlertText className="settings-action-error">{action.error}</AlertText>}
     </div></div></div>
   </ScreenFrame></Shell>;
 }

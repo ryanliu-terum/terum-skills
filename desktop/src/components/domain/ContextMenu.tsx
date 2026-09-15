@@ -77,5 +77,8 @@ export function CopyValue({ text, what, children, className, style }: { text?: s
   const run = () => void copy(text ?? ref.current?.textContent ?? '', what);
   // A span, not a <button>: the rows it sits in style their value through `span` selectors (`.detail-row>span`), so a
   // different element would lose those pixels. The role and the key handler give it the button's semantics.
-  return <span ref={ref} role="button" tabIndex={0} className={'copy-value' + (className ? ' ' + className : '')} style={style} title="Click to copy" onClick={run} onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); run(); } }}>{children}</span>;
+  // `preventDefault` on the click: a span with role=button is not HTML interactive content, so a browser forwards a
+  // click on it to the enclosing <label>'s control (Blink does; jsdom does not, so no vitest can see it). Copying a
+  // value must never toggle a checkbox it happens to sit beside (review 2026-09-14, Check against the team).
+  return <span ref={ref} role="button" tabIndex={0} className={'copy-value' + (className ? ' ' + className : '')} style={style} title="Click to copy" onClick={event => { event.preventDefault(); run(); }} onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); run(); } }}>{children}</span>;
 }

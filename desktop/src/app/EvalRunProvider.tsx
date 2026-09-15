@@ -49,6 +49,8 @@ export function EvalRunProvider({children}:PropsWithChildren){
   return track(service.drain(),{ref:item.skill,name:item.skill,...(item.team===undefined?{}:{team:item.team}),queue:true});
  }
  async function stop(){const active=live.current;if(!active||active.state!=='running')return;update({...active,state:'stopped'});try{await active.run.cancel();}catch(error){if(live.current?.run===active.run)update({...live.current,result:{ok:false,error:String(error)}});}}
- function dismiss(){setDialogOpen(false);if(live.current?.state!=='running')update(null);}
- return <EvalRunContext value={{current,dialogOpen,start,startMany,startQueued,isRunning:()=>inFlight.current,stop,dismiss,show:()=>setDialogOpen(true)}}>{children}</EvalRunContext>;
+ // UI policy §5: closing the dialog never forgets the run — the chip stays ("Eval finished · …") until its ✕ or the next run.
+ function dismiss(){setDialogOpen(false);}
+ function clear(){setDialogOpen(false);if(live.current?.state!=='running')update(null);}
+ return <EvalRunContext value={{current,dialogOpen,start,startMany,startQueued,isRunning:()=>inFlight.current,stop,dismiss,clear,show:()=>setDialogOpen(true)}}>{children}</EvalRunContext>;
 }

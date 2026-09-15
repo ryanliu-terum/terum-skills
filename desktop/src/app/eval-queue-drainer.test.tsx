@@ -45,7 +45,7 @@ it('drains only after thirty minutes idle, one visible parallel batch through th
   await act(() => vi.advanceTimersByTimeAsync(29 * minute)); expect(h.drain).not.toHaveBeenCalled();
   await act(() => vi.advanceTimersByTimeAsync(minute)); expect(h.drain).toHaveBeenCalledTimes(1);
   expect(h.host().current).toMatchObject({ queue: true, state: 'running', name: 'alpha' }); expect(h.host().dialogOpen).toBe(true);
-  expect(screen.getByTestId('host')).toHaveTextContent('Evaluating alpha'); expect(h.ask).toHaveBeenCalledWith({ kind: 'confirm', question: 'Commit generated assets?' });
+  expect(screen.getByTestId('host')).toHaveTextContent('Evaluating alpha'); expect(h.ask).toHaveBeenCalledWith({ kind: 'confirm', question: 'Commit generated assets?' }, { signal: expect.any(AbortSignal) });
   await act(async () => { h.release(); }); expect(h.drain).toHaveBeenCalledTimes(1);
   await act(async () => { h.release(); }); expect(h.host().current?.state).toBe('done'); expect(h.items).toHaveLength(0);
 });

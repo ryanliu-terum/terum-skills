@@ -76,6 +76,15 @@ specs; the maintainers write the specs, run every gate themselves, and do all gi
    (a browser will not launch), say so in the report and do not fake a result. Ambiguity → implement the
    most conservative reading and record the fork in `openQuestions`; never resolve a design fork yourself.
 
+## The UI policy (docs/ui-policy.md)
+
+Every screen, dialog, note and card also obeys `desktop/docs/ui-policy.md` (2026-09-14): anything printed is
+copyable (commands through `CliBox` / `TerminalHint` / `CollapsibleCommand` / `AdviceBlock`, errors and logs through
+`useCopyMenu`), a path is never prose (`PathText`, root labels), a long command collapses to a summary that still
+copies the full line, a card row never wraps into another, work in flight shows in the top-bar chip and as a dot on
+the covered cards, a shared hint is said once, and a long list folds. The guard test
+`src/components/domain/__tests__/ui-policy.test.ts` fails a command printed outside those primitives.
+
 ## Stack pins (do not add, remove or bump without a spec saying so)
 
 vite 8.2.2 · react / react-dom 19.2.8 · typescript 5.9.3 (strict, `noUncheckedIndexedAccess`,

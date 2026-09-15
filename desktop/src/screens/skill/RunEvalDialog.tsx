@@ -1,8 +1,9 @@
 import { localActionReason, localRef } from '../../components/domain/skill-card-actions';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useCapabilities } from '../../backend';
 import type { SkillDetail } from '../../backend/types';
 import { useEvalRun } from '../../app/eval-run-context';
+import { runStatus } from '../../app/eval-run-status';
 import { canRetry } from './can-retry';
 import { WorkflowDialog } from '../../components/domain/WorkflowControls';
 import { TerminalHint } from '../../components/domain/Primitives';
@@ -15,9 +16,13 @@ export function RunEvalDialog({skill:s,open,onClose}:{skill:SkillDetail;open:boo
  const active=evalRun.current&&evalRun.current.name===s.name&&(evalRun.current.team??null)===s.team?evalRun.current:null;
  const done=active?.state==='done';
  const dismiss=evalRun.dismiss;
- useEffect(()=>{if(done){dismiss();onClose();}},[done,dismiss,onClose]);
+ // A finished run closes its dialog ONCE (the Evals tab refreshes to the new receipt); the run itself stays, so the
+ // top-bar chip reads "Eval finished" and clicking it reopens this dialog in its finished state (UI policy §5). The ref
+ // keeps a re-render (the host's `onClose` is a fresh function each time) from closing the reopened dialog again.
+ const closedOnDone=useRef(false);
+ useEffect(()=>{if(done&&!closedOnDone.current){closedOnDone.current=true;dismiss();onClose();}},[done,dismiss,onClose]);
  const visible=open||(evalRun.dialogOpen&&active!==null);
- if(!visible||done||!capabilities)return null;
+ if(!visible||!capabilities)return null;
  function close(){if(active)evalRun.dismiss();onClose();}
  // The CLI's `eval` verb takes the skill, never the URL segment: on the by-path route that segment
  // is the literal word `local`, which must never be passed to the CLI as the skill name.
@@ -45,7 +50,7 @@ export function RunEvalDialog({skill:s,open,onClose}:{skill:SkillDetail;open:boo
  // A run can outlive its folder — the copy is uninstalled while the eval streams — so the null arm
  // states that rather than asserting a copy that is no longer there.
  const versionLine=s.path===null?'This skill is no longer on this machine.':`Evaluates the copy on this machine at ${s.pathLabel}.`;
- const status=busy?'Running…':active?.state==='stopped'?'Stopped':active?.result?.ok===false?active.result.error:undefined;
+ const status=active?runStatus(active):undefined;
  return <WorkflowDialog title={title} body={versionLine} primary={finished?(retryable?'Run eval again':null):missing?null:'Run eval'} command={missing?'':s.evalCommand} close={close} submit={start} busy={busy} error={error} onStop={()=>void evalRun.stop()} dismissKeepsRunning lines={active?.lines??[]} status={status} closeLabel={finished?'Close':'Cancel'}>
  <p>{estimate}</p>
  </WorkflowDialog>;

@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { useBackend, useHostStatus } from '../../backend';
 import type { Capabilities } from '../../backend/types';
 import type { IconName } from '../ui/icon-paths';
@@ -102,3 +102,23 @@ export function useCopy(): (text: string, what: string) => Promise<void> {
   }, [backend, toast]);
 }
 
+
+/**
+ * A right-click menu with one row, "Copy <what>", for a block of text the user may want to take elsewhere — a
+ * log pane, an error line, an advice paragraph (UI policy §1: anything the app prints is copyable). `text`
+ * is read at click time so a streaming pane copies what is on screen then.
+ */
+export function useCopyMenu(text: () => string, what: string): (element: Element | null) => (() => void) | undefined {
+  const copy = useCopy();
+  return useContextMenu(() => [{ key: 'copy', label: `Copy ${what}`, icon: 'copy', onSelect: () => void copy(text(), what) }]);
+}
+
+/**
+ * A right-click "Copy <what>" menu for a block whose text is whatever it renders (an error line, an alert): the
+ * returned ref callback registers the element, and the menu reads that element's `textContent` at click time.
+ */
+export function useCopySelfMenu(what: string): (element: Element | null) => (() => void) | undefined {
+  const [element, setElement] = useState<Element | null>(null);
+  const register = useCopyMenu(() => element?.textContent ?? '', what);
+  return useCallback((node: Element | null) => { setElement(node); return register(node); }, [register]);
+}

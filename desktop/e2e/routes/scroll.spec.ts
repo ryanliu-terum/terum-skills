@@ -156,7 +156,9 @@ for(const tab of ['quality','activity']){
  test(`${tab} scrolls inside its own tab, never the column`,async({page})=>{
   const errors=await openPane(page,'#/skill/deploy-check?tab='+tab);
   const rail=page.locator('.detail-rail'),pane=page.locator('.'+tab+'-tab');
-  const last=page.locator(tab==='quality'?'.quality-tab > :last-child':'.activity-row:last-child');
+  // The tab's own last child, whatever it holds: the built panels' last block, or the coming-soon
+ // panel while QUALITY_ACTIVITY_SHIPPED is false (src/screens/skill/SkillScreen.tsx).
+ const last=page.locator('.'+tab+'-tab > :last-child');
   const railBefore=await boxOf(rail);
   await expect(pane).toHaveCSS('overflow-y','auto');
   await expect(pane).toHaveCSS('scrollbar-width','none');
