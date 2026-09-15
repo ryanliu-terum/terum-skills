@@ -126,14 +126,14 @@ it('refuses the publish dialog for a skill with no folder on this machine',async
 
 it('removes a skill through the run and returns to Library',async()=>{open('#/skill/deploy-check?dialog=remove');const dialog=await screen.findByRole('dialog');fireEvent.click(within(dialog).getByRole('button',{name:'Remove'}));await waitFor(()=>expect(location.hash).toBe('#/library/global'));});
 it('closes eval dialog after a successful run',async()=>{open('#/skill/deploy-check?tab=evals&dialog=run-eval');const dialog=await screen.findByRole('dialog');fireEvent.click(within(dialog).getByRole('button',{name:'Run eval'}));await waitFor(()=>expect(location.hash).toBe('#/skill/deploy-check?tab=evals'));});
-it('persists card switches and favorites',async()=>{open('#/library/global');const card=await screen.findByTestId('skill-card-deploy-check');fireEvent.click(within(card).getByRole('switch'));expect(within(card).getByRole('switch')).toHaveAttribute('aria-checked','false');expect(localStorage.getItem('terum-skills-app:pref:enabled:deploy-check')).toBe('false');fireEvent.click(within(card).getByRole('button',{name:'Favorite deploy-check'}));expect(localStorage.getItem('terum-skills-app:pref:favorite:deploy-check')).toBe('false');});
+it('persists favorites',async()=>{open('#/library/global');const card=await screen.findByTestId('skill-card-deploy-check');fireEvent.click(within(card).getByRole('button',{name:'Favorite deploy-check'}));expect(localStorage.getItem('terum-skills-app:pref:favorite:deploy-check')).toBe('false');});
 it('renders unknown skill errors with a settled readiness marker',async()=>{open('#/skill/unknown-skill');expect(await screen.findByRole('alert')).toHaveTextContent('No skill named unknown-skill.');await waitFor(()=>expect(document.documentElement.dataset.appReady).toBe('true'));});
 it('uses the default tab for unknown values',async()=>{open('#/skill/deploy-check?tab=unexpected');expect(await screen.findByTestId('frontmatter')).toBeInTheDocument();expect(screen.getByRole('tab',{name:'SKILL.md'})).toHaveAttribute('aria-selected','true');});
 it('renders disabled status without opacity fading',async()=>{open('#/skill/deploy-check?__mock=disabled');expect(await screen.findByText('Disabled')).toBeInTheDocument();expect(screen.getByText('On disk, not loaded')).toBeInTheDocument();expect(screen.getByRole('switch')).toHaveAttribute('aria-checked','false');});
 it('commits the loading skeleton and readiness without waiting on a pending query',async()=>{open('#/skill/deploy-check?__mock=loading');await waitFor(()=>expect(document.documentElement.dataset.appReady).toBe('true'));expect(screen.queryByText(/S1b builds this/)).toBeNull();expect(screen.queryByRole('heading')).toBeNull();});
 it('cancels install without running it',async()=>{open('#/skill/deploy-check?__mock=not-installed&dialog=install');const dialog=await screen.findByRole('dialog');fireEvent.click(within(dialog).getByRole('button',{name:'Cancel'}));await waitFor(()=>expect(screen.queryByRole('dialog')).toBeNull());expect(location.hash).toBe('#/skill/deploy-check?__mock=not-installed');expect(screen.getByText('Not installed')).toBeInTheDocument();});
 it('dismisses a dialog with Escape',async()=>{open('#/skill/deploy-check?dialog=remove');await screen.findByRole('dialog');fireEvent.keyDown(document.activeElement??document.body,{key:'Escape'});await waitFor(()=>expect(location.hash).toBe('#/skill/deploy-check'));});
-it('surfaces failed preference writes without changing the switch',async()=>{open('#/library/global');const card=await screen.findByTestId('skill-card-deploy-check');vi.spyOn(Storage.prototype,'setItem').mockImplementation(()=>{throw new Error('Storage full.');});fireEvent.click(within(card).getByRole('switch'));expect(within(card).getByRole('alert')).toHaveTextContent('Storage full.');expect(within(card).getByRole('switch')).toHaveAttribute('aria-checked','true');});
+it('surfaces a failed switch write on the card and puts the switch back',async()=>{const backend=createMockBackend();vi.spyOn(backend,'setSkillEnabled').mockReturnValue(createRun(async()=>({ok:false,error:'Cannot edit ~/.claude/settings.json: it is not valid JSON. Fix it by hand or move it aside, then re-run.'})));openWith('#/library/global',backend);const card=await screen.findByTestId('skill-card-deploy-check');fireEvent.click(within(card).getByRole('switch'));expect(await within(card).findByRole('alert')).toHaveTextContent('Cannot edit ~/.claude/settings.json: it is not valid JSON. Fix it by hand or move it aside, then re-run.');expect(within(card).getByRole('switch')).toHaveAttribute('aria-checked','true');});
 it('copies the exact share command and expires its confirmation',async()=>{const writeText=vi.fn().mockResolvedValue(undefined);vi.stubGlobal('navigator',Object.assign(Object.create(navigator),{clipboard:{writeText}}));open('#/skill/deploy-check');await screen.findByRole('heading',{name:'deploy-check'});fireEvent.click(screen.getByRole('button',{name:'Copy command'}));expect(await screen.findByRole('tooltip')).toHaveTextContent('Copied');expect(writeText).toHaveBeenCalledWith('npx -y terum-skills@latest install terum/team-skills/deploy-check@5f0e12ab9c3d');await waitFor(()=>expect(screen.queryByRole('tooltip')).toBeNull(),{timeout:2000});vi.unstubAllGlobals();});
 it.each([
  ['#/library/global?__mock=empty','No skills in your global library'],
@@ -450,11 +450,29 @@ it('cancels a move before it starts and stays on the source page',async()=>{
  fireEvent.click(within(dialog).getByRole('button',{name:'Cancel'}));await waitFor(()=>expect(screen.queryByRole('dialog')).toBeNull());expect(move).not.toHaveBeenCalled();expect(new URLSearchParams(location.hash.split('?')[1]).get('path')).toBe('~/.claude/skills/deploy-check');
 });
 
-it('keeps preference keys on the skill, not on the route segment',async()=>{
- open('#/skill/local?path='+encodeURIComponent('/Users/you/code/ssm/.claude/skills/deploy-check'));
+it('switches a skill through the CLI verb on its folder path, never through an app preference',async()=>{
+ const backend=createMockBackend();const toggled=vi.spyOn(backend,'setSkillEnabled');
+ openWith('#/skill/local?path='+encodeURIComponent('/Users/you/code/ssm/.claude/skills/deploy-check'),backend);
  fireEvent.click(await screen.findByRole('switch',{name:'Enable skill'}));
- expect(localStorage.getItem('terum-skills-app:pref:enabled:deploy-check')).toBe('false');
+ await waitFor(()=>expect(toggled).toHaveBeenCalledWith({path:'/Users/you/code/ssm/.claude/skills/deploy-check',enabled:false}));
+ // Nothing is keyed on the route segment, and the value is not the app's to remember: the mock's own verb stores it, as the CLI writes skillOverrides.
  expect(localStorage.getItem('terum-skills-app:pref:enabled:local')).toBeNull();
+ await waitFor(()=>expect(screen.getByRole('switch',{name:'Enable skill'})).toHaveAttribute('aria-checked','false'));
+});
+it('surfaces a failed switch write in the detail rail without leaving the page, and puts the switch back',async()=>{
+ const backend=createMockBackend();vi.spyOn(backend,'setSkillEnabled').mockReturnValue(createRun(async()=>({ok:false,error:'Cannot edit ~/.claude/settings.json: it is not valid JSON. Fix it by hand or move it aside, then re-run.'})));
+ openWith('#/skill/local?path='+encodeURIComponent('/Users/you/code/ssm/.claude/skills/deploy-check'),backend);
+ fireEvent.click(await screen.findByRole('switch',{name:'Enable skill'}));
+ expect(await screen.findByRole('alert')).toHaveTextContent('Cannot edit ~/.claude/settings.json: it is not valid JSON. Fix it by hand or move it aside, then re-run.');
+ expect(screen.getByRole('switch',{name:'Enable skill'})).toHaveAttribute('aria-checked','true');
+ expect(screen.getByRole('heading',{name:'deploy-check'})).toBeInTheDocument();
+});
+it('the Library card switch calls the same verb with the card\'s folder path',async()=>{
+ const backend=createMockBackend();const toggled=vi.spyOn(backend,'setSkillEnabled');
+ openWith('#/library/global',backend);
+ fireEvent.click(await screen.findByRole('switch',{name:'Enable deploy-check'}));
+ await waitFor(()=>expect(toggled).toHaveBeenCalledWith({path:expect.stringMatching(/deploy-check$/),enabled:false}));
+ await waitFor(()=>expect(screen.getByRole('switch',{name:'Enable deploy-check'})).toHaveAttribute('aria-checked','false'));
 });
 it('keeps checkout selection and back navigation on a scoped page whose read failed',async()=>{
  const backend=createMockBackend();

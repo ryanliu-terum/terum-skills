@@ -1,4 +1,5 @@
 import { run as runSkill } from './commands/skill.js';
+import { run as runSkillToggle } from './commands/skillToggle.js';
 import { invocation, getStartedLines, type InvocationForm } from './lib/invocation.js';
 import { run as profile, type ProfileArgs } from './commands/profile.js';
 import { run as runUpdate } from './commands/update.js';
@@ -36,10 +37,10 @@ import { failure, Result } from './lib/result.js';
  * to it. `execute` is injected so the mapping and the exit code are testable without a terminal.
  */
 export type Execute = (invoke: (io: Prompter) => Promise<Result<unknown>>, meta: { verb: string; notices: boolean }) => Promise<void>;
-export interface CliVerbs { skill?: typeof runSkill; project?: typeof runProject; reconcile?: typeof runReconcile; profile?: typeof profile; app?: typeof runApp; appUpdate?: typeof runAppUpdate; update?: typeof runUpdate; login: typeof login; team: TeamCommand; setup?: typeof runSetup; install?: typeof install; uninstall?: typeof uninstall; uninstallMachine?: typeof runUninstallMachine; sync?: typeof sync; prune?: typeof prune; search?: typeof search; invite?: typeof invite; ls?: typeof runLs; status?: typeof status; readme?: typeof readme; publish?: typeof runPublish; leave?: typeof runLeave; guardPush?: typeof runGuardPush; validate?: typeof runValidate; eval?: typeof runEval; evalReport?: typeof runEvalReport; }
+export interface CliVerbs { skill?: typeof runSkill; skillToggle?: typeof runSkillToggle; project?: typeof runProject; reconcile?: typeof runReconcile; profile?: typeof profile; app?: typeof runApp; appUpdate?: typeof runAppUpdate; update?: typeof runUpdate; login: typeof login; team: TeamCommand; setup?: typeof runSetup; install?: typeof install; uninstall?: typeof uninstall; uninstallMachine?: typeof runUninstallMachine; sync?: typeof sync; prune?: typeof prune; search?: typeof search; invite?: typeof invite; ls?: typeof runLs; status?: typeof status; readme?: typeof readme; publish?: typeof runPublish; leave?: typeof runLeave; guardPush?: typeof runGuardPush; validate?: typeof runValidate; eval?: typeof runEval; evalReport?: typeof runEvalReport; }
 
 export function buildProgram(execute: Execute, verbs: CliVerbs = { login, team: runTeam }, context: { form?: InvocationForm; launch?: Launch; noUpdateCheck?: boolean; frames?: boolean; serve?: () => Promise<void> } = {}): Command {
-  const active: Required<CliVerbs> = { skill: verbs.skill ?? runSkill, project: verbs.project ?? runProject, reconcile: verbs.reconcile ?? runReconcile, profile: verbs.profile ?? profile, app: verbs.app ?? runApp, appUpdate: verbs.appUpdate ?? runAppUpdate, update: verbs.update ?? runUpdate, login: verbs.login, team: verbs.team, setup: verbs.setup ?? runSetup, install: verbs.install ?? install, uninstall: verbs.uninstall ?? uninstall, uninstallMachine: verbs.uninstallMachine ?? runUninstallMachine, sync: verbs.sync ?? sync, prune: verbs.prune ?? prune, search: verbs.search ?? search, invite: verbs.invite ?? invite, ls: verbs.ls ?? runLs, status: verbs.status ?? status, readme: verbs.readme ?? readme, publish: verbs.publish ?? runPublish, leave: verbs.leave ?? runLeave, guardPush: verbs.guardPush ?? runGuardPush, validate: verbs.validate ?? runValidate, eval: verbs.eval ?? runEval, evalReport: verbs.evalReport ?? runEvalReport };
+  const active: Required<CliVerbs> = { skill: verbs.skill ?? runSkill, skillToggle: verbs.skillToggle ?? runSkillToggle, project: verbs.project ?? runProject, reconcile: verbs.reconcile ?? runReconcile, profile: verbs.profile ?? profile, app: verbs.app ?? runApp, appUpdate: verbs.appUpdate ?? runAppUpdate, update: verbs.update ?? runUpdate, login: verbs.login, team: verbs.team, setup: verbs.setup ?? runSetup, install: verbs.install ?? install, uninstall: verbs.uninstall ?? uninstall, uninstallMachine: verbs.uninstallMachine ?? runUninstallMachine, sync: verbs.sync ?? sync, prune: verbs.prune ?? prune, search: verbs.search ?? search, invite: verbs.invite ?? invite, ls: verbs.ls ?? runLs, status: verbs.status ?? status, readme: verbs.readme ?? readme, publish: verbs.publish ?? runPublish, leave: verbs.leave ?? runLeave, guardPush: verbs.guardPush ?? runGuardPush, validate: verbs.validate ?? runValidate, eval: verbs.eval ?? runEval, evalReport: verbs.evalReport ?? runEvalReport };
   const program = new Command();
   program.version(packageVersion() ?? 'version unknown', '-v, --version');
   program.name('terum-skills').description('Share private Claude Code skills through a team git repository.').exitOverride();
@@ -74,7 +75,7 @@ export function buildProgram(execute: Execute, verbs: CliVerbs = { login, team: 
     .option('--no-evals', 'do not offer to evaluate the shared skills that have no receipt')
     .action(async (target: string | undefined, options: { app?: boolean; projects?: boolean; existing?: boolean; evals?: boolean }) => execute((io) => active.setup({ form: context.form, target, app: options.app, projects: options.projects, ...(options.existing === false ? { existing: false } : {}), evals: options.evals, cwd: process.cwd() }, io), { verb: 'setup', notices: true }));
 
-  const skill = program.command('skill').description('Move, copy, rename, delete, or fix a folder in your Library');
+  const skill = program.command('skill').description('Move, copy, rename, delete, fix, enable, or disable a folder in your Library');
   for (const kind of ['move', 'copy', 'rename'] as const) skill.command(`${kind} <path>`)
     .description(kind === 'move' ? 'Move a Library folder to another root; the original is gone'
       : kind === 'copy' ? 'Copy a Library folder into another root; the original stays where it is'
@@ -85,6 +86,9 @@ export function buildProgram(execute: Execute, verbs: CliVerbs = { login, team: 
     .action(async (path: string) => execute(io => active.skill({ form: context.form, kind: 'delete', path }, io), { verb: 'skill delete', notices: true }));
   skill.command('fix <path>').description('Rewrite SKILL.md frontmatter that is not valid YAML by quoting the offending value; the text stays the same')
     .action(async (path: string) => execute(io => active.skill({ form: context.form, kind: 'fix', path }, io), { verb: 'skill fix', notices: true }));
+  for (const kind of ['enable', 'disable'] as const) skill.command(`${kind} <path>`)
+    .description(kind === 'disable' ? 'Stop Claude Code loading a Library folder on this machine; its files stay where they are (writes skillOverrides in Claude Code settings)' : 'Let Claude Code load a Library folder again on this machine (removes the skillOverrides entry)')
+    .action(async (path: string) => execute(io => active.skillToggle({ form: context.form, kind, path }, io), { verb: `skill ${kind}`, notices: true }));
 
   const project = program.command('project').description('Add, forget, or list the projects in your library — the folders this machine reads skills from');
   project.command('add [path]').description('Add a folder to your library')

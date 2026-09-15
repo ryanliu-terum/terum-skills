@@ -21,7 +21,7 @@ const asking = (async (_args: unknown, io: Prompter) => {
 }) as never;
 
 const INVOCATIONS: Record<string, string[]> = {
-  'skill move':['skill','move','/skills/a','--to','global'], 'skill copy':['skill','copy','/skills/a','--to','global'], 'skill rename':['skill','rename','/skills/a','--to','b'], 'skill delete':['skill','delete','/skills/a'], 'skill fix':['skill','fix','/skills/a'],
+  'skill move':['skill','move','/skills/a','--to','global'], 'skill copy':['skill','copy','/skills/a','--to','global'], 'skill rename':['skill','rename','/skills/a','--to','b'], 'skill delete':['skill','delete','/skills/a'], 'skill enable':['skill','enable','/skills/a'], 'skill disable':['skill','disable','/skills/a'], 'skill fix':['skill','fix','/skills/a'],
   'project add': ['project', 'add'], 'project remove': ['project', 'remove', '/project'], 'project list': ['project', 'list'],
   'team project create': ['team', 'project', 'create', 'Payments'],
   'app-update': ['app-update', '--check'],
@@ -53,7 +53,7 @@ function harness(verbs: CliVerbs) {
 }
 
 describe('frame mode through commander — every public verb', () => {
-  const verbs: CliVerbs = { skill: asking, project: asking, reconcile: asking, app: asking, profile: asking, login: asking, team: asking, setup: asking, install: asking, uninstall: asking, uninstallMachine: asking, sync: asking, prune: asking, search: asking, invite: asking, ls: asking, status: asking, readme: asking, publish: asking, leave: asking, guardPush: asking, validate: asking, eval: asking, evalReport: asking, update: asking, appUpdate: asking };
+  const verbs: CliVerbs = { skill: asking, skillToggle: asking, project: asking, reconcile: asking, app: asking, profile: asking, login: asking, team: asking, setup: asking, install: asking, uninstall: asking, uninstallMachine: asking, sync: asking, prune: asking, search: asking, invite: asking, ls: asking, status: asking, readme: asking, publish: asking, leave: asking, guardPush: asking, validate: asking, eval: asking, evalReport: asking, update: asking, appUpdate: asking };
 
   /**
    * `serve` is a session, not a one-shot verb: it holds stdin open, answers many requests, and writes one
