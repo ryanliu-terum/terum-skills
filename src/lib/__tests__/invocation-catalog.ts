@@ -19,7 +19,7 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "file": "src/cli.ts",
     "line": 168,
     "policy": "prose",
-    "pattern": "program.command('uninstall').description('Remove terum-skills from this machine: your team (placed skills, local clone, cache), the session-start hook and the /terum-skills Claude Code skill if present, and ~/.terum/skills except recovery data; then prints the package-manager step').allowExcessArguments().action(async (_options: Record<string, never>, command: Command) => execute(async (io) => command.args.length ? failure(`To remove a skill, use \\`${invocation(context.form, 'uninstall-skill <ref>')}\\`.`) : active.uninstallMachine({ launch: context.launch, form: context.form }, io), { verb: 'uninstall', notices: true }));"
+    "pattern": "program.command('uninstall').description('Remove terum-skills from this machine: your team (placed skills, local clone, cache), the session-start hook and the terum-skills skills for Claude Code and Codex if present, and ~/.terum/skills except recovery data; then prints the package-manager step').allowExcessArguments().action(async (_options: Record<string, never>, command: Command) => execute(async (io) => command.args.length ? failure(`To remove a skill, use \\`${invocation(context.form, 'uninstall-skill <ref>')}\\`.`) : active.uninstallMachine({ launch: context.launch, form: context.form }, io), { verb: 'uninstall', notices: true }));"
   },
   {
     "file": "src/commands/eval.ts",
@@ -37,7 +37,7 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "file": "src/commands/install.ts",
     "line": 40,
     "policy": "prose",
-    "pattern": "/** Where that bootstrap offers the bundled /terum-skills Claude Code skill (test knob). */"
+    "pattern": "/** Where that bootstrap offers the bundled terum-skills skills (test knob). */"
   },
   {
     "file": "src/commands/invite.ts",
@@ -91,7 +91,7 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "file": "src/commands/setup.ts",
     "line": 65,
     "policy": "prose",
-    "pattern": "/** Where the bundled /terum-skills Claude Code skill is offered from and placed (test knob). */"
+    "pattern": "/** Where the bundled terum-skills skills are offered from and placed (test knob). */"
   },
   {
     "file": "src/commands/setup.ts",
@@ -103,19 +103,19 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "file": "src/commands/setup.ts",
     "line": 83,
     "policy": "prose",
-    "pattern": "'This wizard helps you create a team, join one, invite teammates, and offer the session hook, the /terum-skills Claude Code skill and a reminder to publish a skill after Claude edits one; re-run it any time to continue, and leave the invitation question blank to skip it.',"
+    "pattern": "'This wizard helps you create a team, join one, invite teammates, and offer the session hook and the terum-skills skills for Claude Code and Codex and a reminder to publish a skill after Claude edits one; re-run it any time to continue, and leave the invitation question blank to skip it.',"
   },
   {
     "file": "src/commands/setup.ts",
     "line": 138,
     "policy": "prose",
-    "pattern": "`Setup stopped here, so the project, eval, session hook, /terum-skills and edit-hook steps were not offered \u2014 run \\`${invocation(form, 'setup')}\\` again to finish.`,"
+    "pattern": "`Setup stopped here, so the project, eval, session hook, terum-skills skills and edit-hook steps were not offered \u2014 run \\`${invocation(form, 'setup')}\\` again to finish.`,"
   },
   {
     "file": "src/commands/setup.ts",
     "line": 425,
     "policy": "prose",
-    "pattern": "// The /terum-skills Claude Code skill ships inside this package, and setup is the one onboarding"
+    "pattern": "// The terum-skills skills ship inside this package, and setup is the one onboarding step"
   },
   {
     "file": "src/commands/status.ts",

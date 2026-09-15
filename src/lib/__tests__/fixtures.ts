@@ -12,7 +12,7 @@ import { snapshotSkillDirectory } from '../placer/vendor/skillhub/skill-fingerpr
 import { writeStamp } from '../hook.js';
 import { receiptSchema, type Receipt } from '../evals/receipt.js';
 import { createConfigStore, type ConfigStore } from '../config.js';
-import { managedSkillRoots, type WrapperOptions } from '../wrapper.js';
+import { managedSkillRoots, readBundledSkills, type WrapperOptions } from '../wrapper.js';
 
 /** Every temp dir created through `temporaryDirectory` — removed by setup.ts after each test. */
 export const TEMP_DIRS: string[] = [];
@@ -21,6 +21,12 @@ export const TEMP_DIRS: string[] = [];
 export const BUNDLED_SKILL_SOURCE = fileURLToPath(new URL('../../../.claude/skills/terum-skills/SKILL.md', import.meta.url));
 /** The repo's own skill folder: the bundle's source of truth. Reading it as a bundle skips unmarked review tools. */
 export const CANONICAL_SKILLS = fileURLToPath(new URL('../../../.claude/skills', import.meta.url));
+/** The names the bundle would carry, from the canonical folder: tests written before every skill exists stay true after. */
+export async function bundledNames(): Promise<string[]> {
+  const bundled = await readBundledSkills(CANONICAL_SKILLS);
+  if (bundled === null) throw new Error(`${CANONICAL_SKILLS} holds no marked skill`);
+  return [...bundled.keys()].sort();
+}
 /** The canonical edit-hook script, for the same reason: from src/ the bundled copy under dist/ does not exist. */
 export const BUNDLED_EDIT_HOOK_SOURCE = fileURLToPath(new URL('../../../assets/claude/hooks/terum-skills-edit.mjs', import.meta.url));
 /** Edit-hook options rooted in a test state root, pointed at a settings file that is never the real ~/.claude/settings.json. */
