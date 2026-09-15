@@ -20,7 +20,7 @@
 - Invocation literals: any new line in `src/**` (outside `__tests__`) containing `terum-skills`, and any `README.md` / `docs/**/*.md` / `.claude/skills/terum-skills/SKILL.md` line naming a verb after a backtick or at line start, must be catalogued in `src/lib/__tests__/invocation-catalog.ts` (`src/lib/__tests__/invocation-tripwire.test.ts` is an exact-set equality keyed on `file: pattern`; `line` is informational). Policy rule for new rows: a runnable `npx -y terum-skills@latest …` command a reader is meant to copy → `fixed`; a comment, doc sentence, or help text that merely names the package or a verb → `prose`; a print/error/question string, a constant, or a code line that is not a hint → `not-a-hint`. Run the tripwire after every edit that touches such a line: `npx vitest run src/lib/__tests__/invocation-tripwire.test.ts --maxWorkers=1` prints the exact diff (removed rows must be deleted, added rows inserted; keep the file's existing JSON-ish row style).
 - The seven new skill files (`.claude/skills/{list-skills,skill-info,search-skills,eval,eval-report,skill-status,sync-skills}/SKILL.md`) are **not** added to the tripwire's document list (spec §13); `src/__tests__/skill-prose.test.ts` (Task 9) is their gate. The manual stays in the list.
 - Gates before every commit: `npm run lint && npm run typecheck && npm test` — one vitest battery at a time on this machine, shared with other sessions: start a full `npm test` only when the 1-minute load average (`cut -d' ' -f1 /proc/loadavg`) is under 8; never two batteries at once; run gates in the **foreground** with an explicit `timeout` (the box swaps under load and the harness's low-memory watchdog kills background shells); if `bin.test.ts`/`bundle.test.ts` report 5 s timeouts, wait and re-run rather than raising timeouts. Per-file runs (`npx vitest run <file> --maxWorkers=1`) are fine between commits. `npm` needs `NODE_OPTIONS=--dns-result-order=ipv4first` on this box.
-- Commit messages: `type(scope): subject`, a wrapped body naming files, a `Verified …` paragraph stating what was run. No attribution trailers (withdrawn 2026-09-14: the `-m "Co-Authored-By: …"` and `-m "Claude-Session: …"` arguments in the commit commands below are to be omitted). Commit at the end of each task; never push.
+- Commit messages: `type(scope): subject`, a wrapped body naming files, a `Verified …` paragraph stating what was run. No attribution trailers (withdrawn 2026-09-14: the `` and `` arguments in the commit commands below are to be omitted). Commit at the end of each task; never push.
 - `desktop/` stays untouched except one added line in `desktop/GAPS.md` (Task 5); `git diff --stat desktop/` shows only that file. The desktop reads `wrapperRemoved` (boolean) through a `.passthrough()` zod object, so the additive `wrappersRemoved: string[]` needs no desktop change.
 
 ## File map
@@ -615,7 +615,7 @@ Run: `npx vitest run src/lib/__tests__/invocation-tripwire.test.ts --maxWorkers=
 
 ```bash
 git -C /home/teniroo/Projects/terum-skills-codex/skill-dashboard add src/lib/wrapper.ts src/lib/__tests__/wrapper.test.ts src/lib/__tests__/fixtures.ts src/lib/__tests__/invocation-catalog.ts
-git -C /home/teniroo/Projects/terum-skills-codex/skill-dashboard commit -m "feat(wrapper): manage the bundled skill set across the Claude Code and Codex roots" -m "src/lib/wrapper.ts discovers the bundled set from dist/claude/skills by the frontmatter marker, judges every (skill, root) with lstat, asks once for a first install, and refreshes or adds copies in roots that already hold one. Codex root is CODEX_HOME or ~/.codex, eligible only when its parent exists. Fixtures gain CANONICAL_SKILLS and the two-root wrapperFor." -m "Verified: npx vitest run src/lib/__tests__/wrapper.test.ts src/lib/__tests__/local-skills.test.ts src/lib/__tests__/invocation-tripwire.test.ts (green); eslint on the touched files (clean). Typecheck fails in the importers until Tasks 2–5." -m "Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>" -m "Claude-Session: https://claude.ai/code/session_013ctCaf1DNb9ajRTLKuqkQ9"
+git -C /home/teniroo/Projects/terum-skills-codex/skill-dashboard commit -m "feat(wrapper): manage the bundled skill set across the Claude Code and Codex roots" -m "src/lib/wrapper.ts discovers the bundled set from dist/claude/skills by the frontmatter marker, judges every (skill, root) with lstat, asks once for a first install, and refreshes or adds copies in roots that already hold one. Codex root is CODEX_HOME or ~/.codex, eligible only when its parent exists. Fixtures gain CANONICAL_SKILLS and the two-root wrapperFor." -m "Verified: npx vitest run src/lib/__tests__/wrapper.test.ts src/lib/__tests__/local-skills.test.ts src/lib/__tests__/invocation-tripwire.test.ts (green); eslint on the touched files (clean). Typecheck fails in the importers until Tasks 2–5."
 ```
 
 ---
@@ -669,7 +669,7 @@ Run the tripwire; replace the two `src/lib/skill-source.ts` rows (`// The /terum
 
 ```bash
 git -C /home/teniroo/Projects/terum-skills-codex/skill-dashboard add src/lib/skill-source.ts src/lib/__tests__/local-skills.test.ts src/lib/__tests__/invocation-catalog.ts
-git -C /home/teniroo/Projects/terum-skills-codex/skill-dashboard commit -m "fix(skill-source): reject any bundled terum-skills skill, not only the manual" -m "The managed-wrapper rejection wording no longer names /terum-skills; the marker already matched under any name." -m "Verified: npx vitest run src/lib/__tests__/local-skills.test.ts src/lib/__tests__/invocation-tripwire.test.ts (green)." -m "Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>" -m "Claude-Session: https://claude.ai/code/session_013ctCaf1DNb9ajRTLKuqkQ9"
+git -C /home/teniroo/Projects/terum-skills-codex/skill-dashboard commit -m "fix(skill-source): reject any bundled terum-skills skill, not only the manual" -m "The managed-wrapper rejection wording no longer names /terum-skills; the marker already matched under any name." -m "Verified: npx vitest run src/lib/__tests__/local-skills.test.ts src/lib/__tests__/invocation-tripwire.test.ts (green)."
 ```
 
 ---
@@ -785,7 +785,7 @@ Run the tripwire; replace the `src/commands/setup.ts` rows (the test-knob commen
 
 ```bash
 git -C /home/teniroo/Projects/terum-skills-codex/skill-dashboard add src/commands/setup.ts src/commands/install.ts src/cli.ts src/lib/__tests__/fixtures.ts src/commands/__tests__/setup.test.ts src/commands/__tests__/install.test.ts src/lib/__tests__/invocation-catalog.ts
-git -C /home/teniroo/Projects/terum-skills-codex/skill-dashboard commit -m "feat(setup): offer the terum-skills skills for Claude Code and Codex" -m "Setup, install's bootstrap and the uninstall help text name the skill set instead of the single /terum-skills skill; the tests read the bundled names from the canonical folder so they stay true as skills are added." -m "Verified: npx vitest run src/commands/__tests__/setup.test.ts src/commands/__tests__/install.test.ts src/__tests__/m3-setup-walkthrough.test.ts src/__tests__/cli.test.ts src/lib/__tests__/invocation-tripwire.test.ts (green)." -m "Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>" -m "Claude-Session: https://claude.ai/code/session_013ctCaf1DNb9ajRTLKuqkQ9"
+git -C /home/teniroo/Projects/terum-skills-codex/skill-dashboard commit -m "feat(setup): offer the terum-skills skills for Claude Code and Codex" -m "Setup, install's bootstrap and the uninstall help text name the skill set instead of the single /terum-skills skill; the tests read the bundled names from the canonical folder so they stay true as skills are added." -m "Verified: npx vitest run src/commands/__tests__/setup.test.ts src/commands/__tests__/install.test.ts src/__tests__/m3-setup-walkthrough.test.ts src/__tests__/cli.test.ts src/lib/__tests__/invocation-tripwire.test.ts (green)."
 ```
 
 ---
@@ -880,7 +880,7 @@ Run the tripwire: replace the `src/commands/refresh.ts` notice row (`not-a-hint`
 
 ```bash
 git -C /home/teniroo/Projects/terum-skills-codex/skill-dashboard add src/commands/refresh.ts src/commands/__tests__/refresh.test.ts src/lib/__tests__/execute.test.ts docs/frame-protocol.md src/lib/__tests__/invocation-catalog.ts
-git -C /home/teniroo/Projects/terum-skills-codex/skill-dashboard commit -m "feat(sync): the session hook adds and refreshes the bundled skills where consent is on record" -m "sync --hook writes every missing bundled skill and replaces every outdated one in a root that already holds a managed copy, and reports one notice; SyncArgs gains the wrapper knob." -m "Verified: npx vitest run src/commands/__tests__/refresh.test.ts src/lib/__tests__/execute.test.ts src/lib/__tests__/invocation-tripwire.test.ts (green)." -m "Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>" -m "Claude-Session: https://claude.ai/code/session_013ctCaf1DNb9ajRTLKuqkQ9"
+git -C /home/teniroo/Projects/terum-skills-codex/skill-dashboard commit -m "feat(sync): the session hook adds and refreshes the bundled skills where consent is on record" -m "sync --hook writes every missing bundled skill and replaces every outdated one in a root that already holds a managed copy, and reports one notice; SyncArgs gains the wrapper knob." -m "Verified: npx vitest run src/commands/__tests__/refresh.test.ts src/lib/__tests__/execute.test.ts src/lib/__tests__/invocation-tripwire.test.ts (green)."
 ```
 
 ---
@@ -1054,7 +1054,7 @@ Expected: all green — the typecheck failures of Tasks 1–4 are gone (every im
 
 ```bash
 git -C /home/teniroo/Projects/terum-skills-codex/skill-dashboard add src/commands/uninstallMachine.ts src/commands/__tests__/uninstallMachine.test.ts src/__tests__/bin.test.ts src/__tests__/bundle.test.ts desktop/GAPS.md src/lib/__tests__/invocation-catalog.ts
-git -C /home/teniroo/Projects/terum-skills-codex/skill-dashboard commit -m "feat(uninstall): inventory and remove the bundled skills per host root" -m "Machine uninstall lists every managed copy under ~/.claude/skills and ~/.codex/skills (and foreign folders at bundled names, left alone), removes the copies after the hook, and reports wrappersRemoved beside the boolean the desktop reads. bin and bundle tests read the bundled set from the canonical folder." -m "Verified: npm run lint, npm run typecheck, npm test -- --maxWorkers=4 (all green, load < 8 at start)." -m "Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>" -m "Claude-Session: https://claude.ai/code/session_013ctCaf1DNb9ajRTLKuqkQ9"
+git -C /home/teniroo/Projects/terum-skills-codex/skill-dashboard commit -m "feat(uninstall): inventory and remove the bundled skills per host root" -m "Machine uninstall lists every managed copy under ~/.claude/skills and ~/.codex/skills (and foreign folders at bundled names, left alone), removes the copies after the hook, and reports wrappersRemoved beside the boolean the desktop reads. bin and bundle tests read the bundled set from the canonical folder." -m "Verified: npm run lint, npm run typecheck, npm test -- --maxWorkers=4 (all green, load < 8 at start)."
 ```
 
 ---
@@ -1256,7 +1256,7 @@ Expected: PASS. Also run `node /home/teniroo/Projects/terum-skills-codex/skill-d
 
 ```bash
 git -C /home/teniroo/Projects/terum-skills-codex/skill-dashboard add scripts/bundle-skill.mjs .claude/skills/terum-skills/SKILL.md src/__tests__/bin.test.ts src/__tests__/release-tarball-list.test.ts
-git -C /home/teniroo/Projects/terum-skills-codex/skill-dashboard commit -m "build(bundle): bundle every marked skill after validating its frontmatter" -m "scripts/bundle-skill.mjs scans .claude/skills, refuses a marked file whose name, description scalar, keys or short-description break the contract (every problem listed), clears dist/claude/skills and copies the rest byte for byte. release-tarball-list.test.ts pins release.yml's must-list to the marked set." -m "Verified: npx vitest run src/__tests__/bin.test.ts src/__tests__/bundle.test.ts src/__tests__/release-tarball-list.test.ts (green); node scripts/bundle-skill.mjs --out <scratch> (one Bundled line, exit 0); eslint scripts/bundle-skill.mjs (clean)." -m "Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>" -m "Claude-Session: https://claude.ai/code/session_013ctCaf1DNb9ajRTLKuqkQ9"
+git -C /home/teniroo/Projects/terum-skills-codex/skill-dashboard commit -m "build(bundle): bundle every marked skill after validating its frontmatter" -m "scripts/bundle-skill.mjs scans .claude/skills, refuses a marked file whose name, description scalar, keys or short-description break the contract (every problem listed), clears dist/claude/skills and copies the rest byte for byte. release-tarball-list.test.ts pins release.yml's must-list to the marked set." -m "Verified: npx vitest run src/__tests__/bin.test.ts src/__tests__/bundle.test.ts src/__tests__/release-tarball-list.test.ts (green); node scripts/bundle-skill.mjs --out <scratch> (one Bundled line, exit 0); eslint scripts/bundle-skill.mjs (clean)."
 ```
 
 ---
@@ -1618,7 +1618,7 @@ Expected: PASS — the count-agnostic tests now see eight skills; the tripwire i
 
 ```bash
 git -C /home/teniroo/Projects/terum-skills-codex/skill-dashboard add .claude/skills/list-skills .claude/skills/skill-info .claude/skills/search-skills .claude/skills/eval .claude/skills/eval-report .claude/skills/skill-status .claude/skills/sync-skills .github/workflows/release.yml src/__tests__/release-tarball-list.test.ts
-git -C /home/teniroo/Projects/terum-skills-codex/skill-dashboard commit -m "feat(skills): ship list-skills, skill-info, search-skills, eval, eval-report, skill-status and sync-skills" -m "Seven marked skills under .claude/skills, one file each for Claude Code and Codex: the exact --format md command, what to confirm, how to show the board, the four rules and the Codex sandbox rule. release.yml's must-list names all eight bundled paths." -m "Verified: node scripts/bundle-skill.mjs --out <scratch> (eight Bundled lines); npx vitest run on release-tarball-list, bin, bundle, wrapper, local-skills and the tripwire (green)." -m "Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>" -m "Claude-Session: https://claude.ai/code/session_013ctCaf1DNb9ajRTLKuqkQ9"
+git -C /home/teniroo/Projects/terum-skills-codex/skill-dashboard commit -m "feat(skills): ship list-skills, skill-info, search-skills, eval, eval-report, skill-status and sync-skills" -m "Seven marked skills under .claude/skills, one file each for Claude Code and Codex: the exact --format md command, what to confirm, how to show the board, the four rules and the Codex sandbox rule. release.yml's must-list names all eight bundled paths." -m "Verified: node scripts/bundle-skill.mjs --out <scratch> (eight Bundled lines); npx vitest run on release-tarball-list, bin, bundle, wrapper, local-skills and the tripwire (green)."
 ```
 
 ---
@@ -1824,7 +1824,7 @@ Expected: PASS.
 
 ```bash
 git -C /home/teniroo/Projects/terum-skills-codex/skill-dashboard add .claude/skills/terum-skills/SKILL.md src/lib/__tests__/invocation-catalog.ts
-git -C /home/teniroo/Projects/terum-skills-codex/skill-dashboard commit -m "docs(skills): rewrite the terum-skills manual for --format md boards and the named skills" -m "The manual now routes common requests to the seven named skills, invokes every verb with --format md, adds skill fix and ls skill to Table A and team move to Table B, and carries the same Rules and Sandbox blocks as the other skills; its eval section moved into the eval skill." -m "Verified: node scripts/bundle-skill.mjs --out <scratch> (eight Bundled lines); npx vitest run on the tripwire, local-skills and wrapper tests (green)." -m "Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>" -m "Claude-Session: https://claude.ai/code/session_013ctCaf1DNb9ajRTLKuqkQ9"
+git -C /home/teniroo/Projects/terum-skills-codex/skill-dashboard commit -m "docs(skills): rewrite the terum-skills manual for --format md boards and the named skills" -m "The manual now routes common requests to the seven named skills, invokes every verb with --format md, adds skill fix and ls skill to Table A and team move to Table B, and carries the same Rules and Sandbox blocks as the other skills; its eval section moved into the eval skill." -m "Verified: node scripts/bundle-skill.mjs --out <scratch> (eight Bundled lines); npx vitest run on the tripwire, local-skills and wrapper tests (green)."
 ```
 
 ---
@@ -1978,7 +1978,7 @@ Expected: PASS. A failure names the skill and the rule; fix the skill file (or, 
 
 ```bash
 git -C /home/teniroo/Projects/terum-skills-codex/skill-dashboard add src/__tests__/skill-prose.test.ts
-git -C /home/teniroo/Projects/terum-skills-codex/skill-dashboard commit -m "test(skills): pin the shipped skills' frontmatter, commands, shared rules and host neutrality" -m "skill-prose.test.ts is the gate for the eight bundled skills: exact set, quoted descriptions, allowed keys, short-description, the Rules and Sandbox blocks verbatim, one \$ARGUMENTS, registered verbs, --format md commands that parse, and no host-specific tool names." -m "Verified: npx vitest run src/__tests__/skill-prose.test.ts (green)." -m "Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>" -m "Claude-Session: https://claude.ai/code/session_013ctCaf1DNb9ajRTLKuqkQ9"
+git -C /home/teniroo/Projects/terum-skills-codex/skill-dashboard commit -m "test(skills): pin the shipped skills' frontmatter, commands, shared rules and host neutrality" -m "skill-prose.test.ts is the gate for the eight bundled skills: exact set, quoted descriptions, allowed keys, short-description, the Rules and Sandbox blocks verbatim, one \$ARGUMENTS, registered verbs, --format md commands that parse, and no host-specific tool names." -m "Verified: npx vitest run src/__tests__/skill-prose.test.ts (green)."
 ```
 
 ---
@@ -2157,7 +2157,7 @@ Expected: gates green (load < 8 at start); the desktop diff lists only `desktop/
 
 ```bash
 git -C /home/teniroo/Projects/terum-skills-codex/skill-dashboard add .claude/commands .claude/skills/README.md README.md src/lib/__tests__/invocation-catalog.ts
-git -C /home/teniroo/Projects/terum-skills-codex/skill-dashboard commit -m "docs: point the repo commands and READMEs at the shipped skills" -m "The repo-local commands route ls to list-skills and eval to eval and add --format md to the rest; README gains 'From Claude Code and Codex'; the skills README documents the shipped set and the bundle contract. Includes the --prefer-offline transcript and the claude -p / codex exec check outcomes." -m "Verified: npm run lint, npm run typecheck, npm test -- --maxWorkers=4 (green, load < 8 at start); git diff --stat main -- desktop/ shows only desktop/GAPS.md; npm run build lists eight dist/claude/skills folders; --prefer-offline probe: <paste>; host checks: <paste or 'not installed here'>." -m "Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>" -m "Claude-Session: https://claude.ai/code/session_013ctCaf1DNb9ajRTLKuqkQ9"
+git -C /home/teniroo/Projects/terum-skills-codex/skill-dashboard commit -m "docs: point the repo commands and READMEs at the shipped skills" -m "The repo-local commands route ls to list-skills and eval to eval and add --format md to the rest; README gains 'From Claude Code and Codex'; the skills README documents the shipped set and the bundle contract. Includes the --prefer-offline transcript and the claude -p / codex exec check outcomes." -m "Verified: npm run lint, npm run typecheck, npm test -- --maxWorkers=4 (green, load < 8 at start); git diff --stat main -- desktop/ shows only desktop/GAPS.md; npm run build lists eight dist/claude/skills folders; --prefer-offline probe: <paste>; host checks: <paste or 'not installed here'>."
 ```
 
 ---
