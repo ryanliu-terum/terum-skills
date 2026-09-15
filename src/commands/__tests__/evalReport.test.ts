@@ -41,7 +41,9 @@ describe('eval-report offline read model', () => {
     const before = await readFile(join(store.root, 'config.json'), 'utf8');
     const result = await run({ ref: 'sample', config: store, runner }, io);
     expect(result).toMatchObject({ ok: true, value: { skill: { id: ID, name: 'sample' }, latestState: 'ok', latest: { ...receipt(tree, ids[1]!), path: join(clone, 'evals', ID, tree, `${ids[1]}.json`) }, versions: { teamCurrent: tree, evaluated: tree, placed: null }, localRuns: [] } });
-    expect(result.value?.history).toEqual([...ids].reverse().map(run_id => ({ version: tree, run_id, verdict: 'PASS', execution_status: 'complete', model: 'sonnet', cc_version: 'stub', runner_handle: 'seed', timestamp: '2026-09-07T00:00:00Z', comparison: null, committed: true })));
+    // EV-20 (amended 2026-09-14): each row also carries the receipt it was built from — its OWN file,
+    // so the app can open that run instead of only listing it. The row's summary fields are unchanged.
+    expect(result.value?.history).toEqual([...ids].reverse().map(run_id => ({ version: tree, run_id, verdict: 'PASS', execution_status: 'complete', model: 'sonnet', cc_version: 'stub', runner_handle: 'seed', timestamp: '2026-09-07T00:00:00Z', comparison: null, committed: true, receipt: { ...receipt(tree, run_id), path: join(clone, 'evals', ID, tree, `${run_id}.json`) } })));
     expect(io.asked).toEqual([]); expect(io.lines).toEqual([]);
     expect(await readFile(join(store.root, 'config.json'), 'utf8')).toBe(before);
   });

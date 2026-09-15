@@ -134,12 +134,12 @@ A second-team binding refused before any side effect:
 
 ## Versioning
 
-The current package reports version `0.19.0`, protocol `1`. The re-recorded 0.14.0
+The current package reports version `0.20.0`, protocol `1`. The re-recorded 0.14.0
 hello lines under `.planning/codex-runs/*/frames/` precede B5's three skill verbs;
 `src/lib/frames.ts` now advertises this complete verb list:
 
 ```json
-["skill move","skill copy","skill rename","skill delete","skill fix","skill enable","skill disable","project add","project remove","project list","login","setup","team create","team join","team remove","team leave","team move","team workflow-update","team project create","invite","ls","status","reconcile","publish","validate","eval","eval-report","install","uninstall-skill","uninstall","sync","prune","search","update","app","profile","app-update","serve"]
+["skill move","skill copy","skill rename","skill delete","skill fix","skill category","skill enable","skill disable","project add","project remove","project list","login","setup","team create","team join","team remove","team leave","team move","team workflow-update","team project create","team project delete","invite","ls","status","reconcile","publish","unpublish","validate","eval","eval-report","install","uninstall-skill","uninstall","sync","prune","search","update","app","profile","app-update","serve"]
 ```
 
 `team migrate` is registered but terminal-only: under `--frames` it fails before doing any work and tells the
@@ -238,8 +238,9 @@ frame `root` argument; project addition supplies its one-root restriction in-pro
 `publish <ref> [--project <name>] [--category <name>]` resolves a local Library folder, checks
 injected frontmatter, writes it back locally, and publishes directly to main as an immutable version.
 Identical bytes reuse the existing version and can still attach receipts or add project membership.
-A local FAIL receipt can trigger a confirm; multiple projects without `--project` trigger a
-`Which project?` select defaulting to Global. There is no unconditional publish confirmation.
+The version folder is the marketplace copy, so `--project` is optional and its absence asks nothing:
+publish has no project select. A local FAIL receipt can trigger a confirm; there is no
+unconditional publish confirmation. `project` in the result is the named project or `null`.
 The profile entry follows the team write, with no question: publish records the skill on the
 publisher's profile and prints `Your profile now lists <name> at <label>.` (D77). A failed team
 write can leave injected local frontmatter; a failed profile write does not undo publication.
@@ -293,6 +294,17 @@ fails with that list; when nothing remains it says hygiene passes. The result is
 `{ kind: 'fix', path, destination: null, quarantined: null, installed, notices }` shape as the other
 three, and `validate`'s result carries `repairs`, one sentence per change `skill fix` would make, and
 `repairable`, their count.
+
+`skill category <path> --to <name>` is a one-shot frame write with no ask. It rewrites
+`metadata.terum-category` in that folder's SKILL.md and stops: it never publishes, never reaches the
+network, and never writes to the team. The value is free text — `team.json` `categories` is advice,
+so an off-list name is written and printed with HYG7's own sentence, while a name the team spells
+differently takes the team's spelling. It refuses an empty `--to` and a value the file already
+declares. When the team's catalogue holds this name, the notices say what the team still shows (the
+category inside that version's immutable files), and print the `publish` that would mint the next
+version with the new one. The result is the same
+`{ kind: 'category', path, destination: null, quarantined: null, installed, notices }` shape the other
+file verbs return.
 
 `prune` lists quarantine paths and asks `Delete <n> quarantined item(s)?`; empty quarantine asks
 nothing. Its result is `{ deleted, declined }`. It does not clean old-skills.

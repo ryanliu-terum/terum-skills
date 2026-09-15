@@ -24,6 +24,15 @@ it('answers skill fix as the CLI does for a folder that already parses',async()=
  expect(await run.done).toEqual({ok:true,value:{kind:'fix',path,destination:null,quarantined:null,installed:false,notices:['deploy-check: SKILL.md frontmatter is already valid YAML; nothing changed.']}});
  expect(lines).toEqual(['deploy-check: SKILL.md frontmatter is already valid YAML; nothing changed.']);
 });
+it('answers skill category with the change line and refuses the empty name and the no-op',async()=>{
+ const backend=createMockBackend(),path='~/.claude/skills/deploy-check';
+ const current=(await backend.localSkill({path})).value!.category,lines:string[]=[];
+ expect(await backend.skillFile.category({path,to:'   '}).done).toMatchObject({ok:false,error:'--to must be a non-empty category name.'});
+ expect(await backend.skillFile.category({path,to:current}).done).toMatchObject({ok:false,error:`deploy-check already declares ${current}; nothing to change.`});
+ const run=backend.skillFile.category({path,to:'platform'});for await(const frame of run.frames)if(frame.t==='print')lines.push(frame.line);
+ expect(await run.done).toEqual({ok:true,value:{kind:'category',path,destination:null,quarantined:null,installed:false,notices:[`Changed deploy-check from ${current} to platform.`]}});
+ expect(lines).toEqual([`Changed deploy-check from ${current} to platform.`]);
+});
 it('keeps mock file operations visible in the Library and the path detail',async()=>{
  const backend=createMockBackend(),path='~/.claude/skills/deploy-check',renamed='~/.claude/skills/renamed';
  const before=await backend.library({scope:{kind:'global'}});expect(before.value?.skills.every(s=>!s.teamed&&s.installs==='—'&&s.latestVersion===null&&!s.flags.includes('update'))).toBe(true);

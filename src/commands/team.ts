@@ -13,9 +13,9 @@ import { githubOwnerRepo, hasEmbeddedCredentials, hostOperationAllowed, normaliz
 import { fromError, CancelledError, Result, failure, success } from '../lib/result.js';
 import { Runner, systemRunner } from '../lib/runner.js';
 import { adminLogins, paginatedItems } from '../lib/collaborators.js';
-import { githubLoginSchema, GLOBAL_PROJECT, Person, PROJECT_NAME_RULE, projectNameSchema, Team, handleSchema, parseJson, parseOrExplain, personSchema, TEAM_NAME_RULE, teamNameSchema, teamSchema } from '../lib/schema.js';
+import { githubLoginSchema, Person, PROJECT_NAME_RULE, projectNameSchema, Team, handleSchema, parseJson, parseOrExplain, personSchema, TEAM_NAME_RULE, teamNameSchema, teamSchema } from '../lib/schema.js';
 import { cloneTeam, describeClone, installPushGuard, MutableTree, openTeamRepo, refreshClone, type SafeWriteOptions, treeText } from '../lib/teamRepo.js';
-import { readRoster, RosterEntry } from '../lib/skills.js';
+import { readRoster, readTeam, RosterEntry } from '../lib/skills.js';
 import { teamForReference } from './install.js';
 import { SUCCESSOR_LOOKUP_DEADLINE_MS } from '../lib/successor.js';
 import { run as migrate, type MigrateArgs, type MigrateResult } from './teamMigrate.js';
@@ -47,14 +47,27 @@ export interface ProjectCreateArgs extends WithForm {
   runner?: Runner;
   safeWrite?: Pick<SafeWriteOptions, 'deadlineMs' | 'backoff' | 'now' | 'sleep'>;
 }
-export type TeamArgs = ({ kind: 'create' } & CreateArgs) | ({ kind: 'join' } & JoinArgs) | ({ kind: 'remove' } & RemoveArgs) | ({ kind: 'workflow-update' } & WorkflowUpdateArgs) | ({ kind: 'project-create' } & ProjectCreateArgs) | ({ kind: 'migrate' } & MigrateArgs) | ({ kind: 'move' } & MoveArgs);
+/** `team project delete` — the act that unnames a team project. Guard row (i′): one key removed, no skill touched. */
+export interface ProjectDeleteArgs extends WithForm {
+  /** Prompted when absent and interactive; a non-interactive caller must pass it. */
+  name?: string;
+  team?: string;
+  /** Pre-answers the confirmation, for the desktop and for scripts. */
+  yes?: boolean;
+  config?: ConfigStore;
+  runner?: Runner;
+  safeWrite?: Pick<SafeWriteOptions, 'deadlineMs' | 'backoff' | 'now' | 'sleep'>;
+}
+export type TeamArgs = ({ kind: 'create' } & CreateArgs) | ({ kind: 'join' } & JoinArgs) | ({ kind: 'remove' } & RemoveArgs) | ({ kind: 'workflow-update' } & WorkflowUpdateArgs) | ({ kind: 'project-create' } & ProjectCreateArgs) | ({ kind: 'project-delete' } & ProjectDeleteArgs) | ({ kind: 'migrate' } & MigrateArgs) | ({ kind: 'move' } & MoveArgs);
 export type CreateResult = { team: string; remote: string };
 export type JoinResult = { team: string; handle: string; rejoined: boolean; roster: RosterEntry[] };
 export type { RosterEntry } from '../lib/skills.js';
 export interface RemoveResult { team: string; handle: string; archiveOnly: boolean; }
 export interface WorkflowUpdateResult { workflow: string; }
 export interface ProjectCreated { team: string; name: string; remotes: string[]; skills: number; }
-export type TeamRunResult = CreateResult | JoinResult | RemoveResult | WorkflowUpdateResult | ProjectCreated | MigrateResult | MoveResult;
+/** `skills` is how many ids the deleted list held — every one of them still in the marketplace. */
+export interface ProjectDeleted { team: string; name: string; skills: number; }
+export type TeamRunResult = CreateResult | JoinResult | RemoveResult | WorkflowUpdateResult | ProjectCreated | ProjectDeleted | MigrateResult | MoveResult;
 export type { MoveArgs, MoveResult } from './teamMove.js';
 export type TeamCommand = (args: TeamArgs, io: Prompter) => Promise<Result<TeamRunResult>>;
 
@@ -73,6 +86,7 @@ export function run(args: { kind: 'join' } & JoinArgs, io: Prompter): Promise<Re
 export function run(args: { kind: 'remove' } & RemoveArgs, io: Prompter): Promise<Result<RemoveResult>>;
 export function run(args: { kind: 'workflow-update' } & WorkflowUpdateArgs, io: Prompter): Promise<Result<WorkflowUpdateResult>>;
 export function run(args: { kind: 'project-create' } & ProjectCreateArgs, io: Prompter): Promise<Result<ProjectCreated>>;
+export function run(args: { kind: 'project-delete' } & ProjectDeleteArgs, io: Prompter): Promise<Result<ProjectDeleted>>;
 export function run(args: { kind: 'migrate' } & MigrateArgs, io: Prompter): Promise<Result<MigrateResult>>;
 export function run(args: { kind: 'move' } & MoveArgs, io: Prompter): Promise<Result<MoveResult>>;
 export function run(args: TeamArgs, io: Prompter): Promise<Result<TeamRunResult>>;
@@ -81,6 +95,7 @@ export async function run(args: TeamArgs, io: Prompter): Promise<Result<TeamRunR
   if (args.kind === 'join') return join(args, io);
   if (args.kind === 'remove') return remove(args, io);
   if (args.kind === 'project-create') return projectCreate(args, io);
+  if (args.kind === 'project-delete') return projectDelete(args, io);
   if (args.kind === 'migrate') return migrate(args, io);
   if (args.kind === 'move') return move(args, io);
   return workflowUpdate(args, io);
@@ -564,7 +579,10 @@ async function bootstrap(remote: string, clone: string, teamName: string, identi
     await git('remote', 'add', 'origin', '--', remoteToGitUrl(remote));
     await git('config', 'user.name', identity.displayName);
     await git('config', 'user.email', identity.email);
-    const team: Team = { layout_version: 3, name: teamName, categories: CATEGORIES, projects: { [GLOBAL_PROJECT]: { remotes: [], skills: [] } }, archived: [], policy: { skill_license: 'UNLICENSED' } };
+    // Born with NO projects. A skill reaches the team by being published to the marketplace — the
+    // `skills/<name>/v<N>` folder — and `projects` is an optional membership list a team creates when
+    // it actually wants one. There is no reserved catch-all card any more.
+    const team: Team = { layout_version: 3, name: teamName, categories: CATEGORIES, projects: {}, archived: [], policy: { skill_license: 'UNLICENSED' } };
     const person: Person = { handle: identity.handle, display_name: identity.displayName, email: identity.email, github: identity.github, bio: '', installed: [] };
     await writeFile(pathJoin(staging, 'team.json'), `${JSON.stringify(team, null, 2)}\n`);
     await mkdir(pathJoin(staging, 'people'), { recursive: true });
@@ -730,6 +748,74 @@ async function projectCreate(args: ProjectCreateArgs, io: Prompter): Promise<Res
       ? `Its skills place when a teammate syncs inside ${remotes[0]}.`
       : 'No repository yet — its skills place nowhere automatically until it has one.');
     return success({ team, name, remotes, skills: 0 });
+  } catch (error) {
+    return fromError(error);
+  }
+}
+
+/**
+ * `team project delete` — remove a project card from the team repo. Guard row (i′).
+ *
+ * It deletes a LIST, never a skill: the marketplace copy of every id it named is the version folder
+ * in `skills/`, which no project ever owned and which this cannot reach. That is what makes the verb
+ * safe enough to exist, and it is what the confirmation says out loud. It is also how a team retires
+ * the `Global` card that older repos were created with, now that publishing targets the marketplace
+ * itself and nothing defaults into a project.
+ *
+ * Direct to `main` like `project create`, for the same reason: there is no endorsement here for a
+ * reviewer to weigh.
+ */
+async function projectDelete(args: ProjectDeleteArgs, io: Prompter): Promise<Result<ProjectDeleted>> {
+  try {
+    const store = args.config ?? createConfigStore();
+    const runner = args.runner ?? systemRunner;
+    const config = await store.read();
+    const team = await teamForReference(config, args.team, undefined, undefined, args.form);
+    const binding = config.teams[team]!;
+    if (!binding.handle) throw new Error(`Team ${team} has no joined handle.`);
+    const clone = store.teamClone(team);
+    // Refreshed before the name is resolved or anything is asked: the clone is what both read from.
+    await refreshClone(runner, clone, { label: team, ...lockWait(io) });
+
+    const typed = args.name ?? (io.interactive ? await io.text('Project name?') : undefined);
+    if (typed === undefined || typed.trim() === '') throw new Error('Specify a project name.');
+    const name = typed.trim();
+    const current = await readTeam(clone);
+    // Matched exactly, like every other reader of `team.projects` — a near-miss must not delete a card.
+    if (!Object.hasOwn(current.projects, name)) throw new Error(`${team} has no project named ${name}.`);
+    const listed = current.projects[name]!.skills.length;
+
+    // Asked BEFORE the write and only once. The sentence names what survives, because the whole
+    // question a person has here is "am I about to lose these skills?" — they are not.
+    if (!args.yes) {
+      const kept = listed === 1 ? 'Its 1 skill stays' : `Its ${listed} skills stay`;
+      if (!(await io.confirm(`Delete project ${name} from ${team}? ${kept} in the marketplace; only the project list is removed.`))) {
+        throw new CancelledError(`Project ${name} was not deleted.`);
+      }
+    }
+
+    const repo = openTeamRepo(clone, binding.remote, runner);
+    const written = await repo.safeWrite((tree) => {
+      const source = tree.before('team.json');
+      if (source === undefined) throw new Error('This repository has no team.json; it is not a terum-skills team repo.');
+      // Re-read inside the loop: safeWrite replays the mutation against a freshly reset tree, and a
+      // teammate may have deleted the same card in between.
+      const fresh = parseJson(teamSchema, treeText(source), 'team.json');
+      if (!Object.hasOwn(fresh.projects, name)) throw new Error(`${team} has no project named ${name}.`);
+      delete fresh.projects[name];
+      tree.set('team.json', `${JSON.stringify(fresh, null, 2)}\n`);
+    }, {
+      action: 'project-delete',
+      handle: binding.handle,
+      message: `${binding.handle}: delete project ${name}`,
+      ...args.safeWrite,
+      ...lockWait(io),
+    });
+    if (!written.changed) throw new Error(`Nothing was written for project ${name}; rerun the command.`);
+
+    io.print(`Deleted project ${name} from ${team}.`);
+    if (listed) io.print(`Its ${listed} skill(s) are still in the marketplace; install them by name.`);
+    return success({ team, name, skills: listed });
   } catch (error) {
     return fromError(error);
   }

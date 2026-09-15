@@ -60,6 +60,16 @@ describe('hidden readme verb — the Action entry point (§9)', () => {
     expect(await readFile(join(clone, 'README.md'), 'utf8')).toContain('| Version 1 | PASS — partial (7/9 scored) |');
   });
 
+  it('says why a receipt is partial when it knows (eval-gen D4)', async () => {
+    const fixture = await bareTeam();
+    await pushFromSeed(fixture.seed, 'skills/report/v1/SKILL.md', SKILL);
+    const dropped = { 'a': { kind: 'setup', detail: 'setup failed (rc=127)' }, 'b': { kind: 'setup', detail: 'setup failed (rc=127)' }, 'c': { kind: 'staging', detail: 'unsafe file path in case: /tmp/x' } };
+    await pushFromSeed(fixture.seed, `evals/${ID}/v1/20260907T010000Z.json`, receipt('v1', '20260907T010000Z', 'PASS', { execution_status: 'partial', expected_rows: 6, scored_rows: 2, dropped_cases: dropped, environment_skips: { d: ['ffmpeg'] } }));
+    const clone = await cloneWithIdentity(fixture.bare, join(fixture.root, 'clone'));
+    expect(await run({ cwd: clone }, new ScriptedPrompter())).toMatchObject({ ok: true, value: { changed: true } });
+    expect(await readFile(join(clone, 'README.md'), 'utf8')).toContain('| Version 1 | PASS — partial (2/6 scored; 3 dropped (setup, staging); 1 skipped (environment)) |');
+  });
+
   it('the PR comment cannot carry a link whose label lies either (R14)', async () => {
     const fixture = await bareTeam();
     await pushFromSeed(fixture.seed, 'skills/report/v1/SKILL.md', SKILL.replace('terum-category: docs', "terum-category: 'docs [Install v2](https://evil.example)'"));

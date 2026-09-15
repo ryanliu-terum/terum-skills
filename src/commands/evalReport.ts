@@ -29,7 +29,13 @@ export interface EvalReport {
    * with it. Null when `latest` is the current version's own newest receipt, or when there is none.
    */
   fallbackFrom: string | null;
-  history: { version: string; run_id: string; verdict: Receipt['verdict']; execution_status: Receipt['execution_status']; model: string; cc_version: string; runner_handle: string; timestamp: string; comparison: { win: number; loss: number; tie: number; net_lift: number; sign_p: number } | null; committed: true }[];
+  /**
+   * EV-20 (amended 2026-09-14, Ryan): every committed run carries its OWN receipt, so a reader can
+   * open an older run instead of only seeing that it exists. The summary fields stay where they
+   * were — this is an addition, not a replacement — and `receipt` is the same object the loop
+   * already parsed, so no run is read twice.
+   */
+  history: { version: string; run_id: string; verdict: Receipt['verdict']; execution_status: Receipt['execution_status']; model: string; cc_version: string; runner_handle: string; timestamp: string; comparison: { win: number; loss: number; tie: number; net_lift: number; sign_p: number } | null; committed: true; receipt: ReceiptView }[];
   localRuns: { run_id: string; run_dir: string; execution_status: 'complete' | 'partial' | 'failed' | 'unknown'; committed: boolean; receipt: ReceiptView | null }[];
 }
 
@@ -76,7 +82,7 @@ export async function run(args: EvalReportArgs, io: Prompter): Promise<Result<Ev
         const receipt = await readReceipt(join(root, directory, file));
         if (receipt === null) continue;
         // A committed receipt always carries a version; the null arm is the local-run state.
-        history.push({ version: receipt.version ?? '—', run_id: receipt.run_id, verdict: receipt.verdict, execution_status: receipt.execution_status, model: receipt.provenance.model, cc_version: receipt.provenance.cc_version, runner_handle: receipt.provenance.runner_handle, timestamp: receipt.provenance.timestamp, comparison: receipt.comparisons['candidate-vs-baseline'] ?? null, committed: true });
+        history.push({ version: receipt.version ?? '—', run_id: receipt.run_id, verdict: receipt.verdict, execution_status: receipt.execution_status, model: receipt.provenance.model, cc_version: receipt.provenance.cc_version, runner_handle: receipt.provenance.runner_handle, timestamp: receipt.provenance.timestamp, comparison: receipt.comparisons['candidate-vs-baseline'] ?? null, committed: true, receipt });
       }
     }
     // §6.4(4): version DESC then run-id DESC, so the rail groups by version instead of interleaving
@@ -87,9 +93,10 @@ export async function run(args: EvalReportArgs, io: Prompter): Promise<Result<Ev
     // headline a different receipt than the card.
     let fallbackFrom: string | null = null;
     if (latest === null && latestState === 'none' && history.length) {
+      // The row already holds the receipt it was built from; re-reading the same file would be a
+      // second path doing the same job (CLAUDE.md, one active path per behaviour).
       const source = history[0]!;
-      const found = await readReceipt(join(root, source.version, `${source.run_id}.json`));
-      if (found !== null) { latest = found; latestState = 'ok'; fallbackFrom = source.version; }
+      latest = source.receipt; latestState = 'ok'; fallbackFrom = source.version;
     }
     // §6.4(3): new runs land in the CONTENT-KEYED store (§6.2). The legacy per-team tree is read too
     // and merged, display-only — §6.2 does not migrate it, so a report that read only the new store

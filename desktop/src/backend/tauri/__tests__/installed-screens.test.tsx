@@ -1,6 +1,7 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { PublishRunProvider } from '../../../app/PublishRunProvider';
 import { Tooltip } from '@base-ui/react/tooltip';
 import { BackendContext } from '../../index';
 import { App } from '../../../app/App';
@@ -12,7 +13,7 @@ function open(member:string,route='#/marketplace/people/mira',local='on-disk-onl
  useUiStore.setState({railOpen:true,overviewHidden:false});
  const f=installedReplay(local,member,change,changeStatus),backend=createTauriBackend(f.bridge);
  location.hash=route;
- render(<BackendContext value={backend}><QueryClientProvider client={new QueryClient({defaultOptions:{queries:{retry:false}}})}><Tooltip.Provider><App/></Tooltip.Provider></QueryClientProvider></BackendContext>);
+ render(<BackendContext value={backend}><QueryClientProvider client={new QueryClient({defaultOptions:{queries:{retry:false}}})}><Tooltip.Provider><PublishRunProvider><App/></PublishRunProvider></Tooltip.Provider></QueryClientProvider></BackendContext>);
  return {backend,f};
 }
 it('shows the same empty-install status on the page and rail and no bulk button',async()=>{
@@ -54,7 +55,7 @@ it('abbreviates the real detail labels while Edit and Manage keep the absolute o
  fireEvent.click(screen.getByRole('button',{name:'Manage with Terum…'}));
  fireEvent.click(await screen.findByRole('menuitem',{name:'Publish to team…'}));
  fireEvent.click(await screen.findByRole('button',{name:'Publish'}));
- await waitFor(()=>expect(publish).toHaveBeenCalledWith({ref:'deploy-check',team:'acme',project:'Global'}));
+ await waitFor(()=>expect(publish).toHaveBeenCalledWith({ref:'deploy-check',team:'acme'}));
 });
 it('uses the resolved path label in the real Global Remove dialog',async()=>{
  open('none','#/skill/deploy-check?dialog=remove','placed');

@@ -73,8 +73,9 @@ export function installersById(people: readonly Person[]): Map<string, Installer
 }
 
 /**
- * Simplified in place, not deleted (§4.1c): `team.global` is gone and `Global` is now an ordinary
- * project key, so the projects list alone answers it — `Global` among them.
+ * Which project lists, if any, name this skill. There is no reserved project any more: a skill is in
+ * the team because the marketplace holds its bytes, so `—` means "the marketplace alone", never
+ * "unshared".
  */
 export function skillEndorsement(team: EndorsementTeam, id: string): string {
   const projects = Object.entries(team.projects).filter(([, project]) => project.skills.includes(id)).map(([name]) => name).sort();
@@ -321,11 +322,22 @@ function receiptVerdict(source: string, id: string, version: string): string | u
     const receipt = receiptSchema.safeParse(JSON.parse(source));
     // A null skill_id means a local run that was never attached; it is not this skill's testimony.
     if (!receipt.success || receipt.data.skill_id?.toLowerCase() !== id.toLowerCase() || receipt.data.version !== version) return undefined;
-    // §5.4: a partial receipt is never silently promoted to a full verdict.
+    // §5.4: a partial receipt is never silently promoted to a full verdict — and since eval-gen D4
+    // the tag says WHY it is partial, so a reader can tell a flaky skill from a case that never ran.
     return receipt.data.execution_status === 'partial'
-      ? `${receipt.data.verdict} — partial (${receipt.data.scored_rows}/${receipt.data.expected_rows} scored)`
+      ? `${receipt.data.verdict} — partial (${receipt.data.scored_rows}/${receipt.data.expected_rows} scored${partialReasons(receipt.data)})`
       : receipt.data.verdict;
   } catch { return undefined; }
+}
+
+/** `; 3 dropped (setup); 1 skipped (environment)` — counts by kind, empty when the receipt predates D4. */
+function partialReasons(receipt: { dropped_cases?: Record<string, { kind: string }> | undefined; environment_skips?: Record<string, string[]> | undefined }): string {
+  const parts: string[] = [];
+  const dropped = Object.values(receipt.dropped_cases ?? {});
+  if (dropped.length) parts.push(`${dropped.length} dropped (${[...new Set(dropped.map((entry) => entry.kind))].sort().join(', ')})`);
+  const skipped = Object.keys(receipt.environment_skips ?? {}).length;
+  if (skipped) parts.push(`${skipped} skipped (environment)`);
+  return parts.length ? `; ${parts.join('; ')}` : '';
 }
 
 /**

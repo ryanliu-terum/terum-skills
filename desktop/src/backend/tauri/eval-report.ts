@@ -31,7 +31,10 @@ const receipt = cliReceipt;
 export const cliEvalReport = z.object({
  versions:z.object({placed:z.string().nullable(),teamCurrent:z.string().nullable(),evaluated:z.string().nullable()}),
  latestState:z.enum(['ok','none','invalid']), latest:receipt.nullable(),
- history:z.array(z.object({version:z.string(),run_id:z.string(),timestamp:z.string(),runner_handle:z.string(),comparison:comparison.nullable(),verdict,execution_status:executionStatus})),
+ // EV-20 (amended): `receipt` is optional here because a CLI older than the amendment emits a row
+ // without one. A row that has none stays a listing and nothing else — it is never opened, and the
+ // report is never reconstructed from the summary fields (AGENTS invariant 6).
+ history:z.array(z.object({version:z.string(),run_id:z.string(),timestamp:z.string(),runner_handle:z.string(),comparison:comparison.nullable(),verdict,execution_status:executionStatus,receipt:receipt.nullish()})),
  localRuns:z.array(z.object({run_id:z.string(),run_dir:z.string(),execution_status:z.enum(['complete','partial','failed','unknown']),committed:z.boolean(),receipt:receipt.nullable()})),
 }).passthrough();
 type CliReceipt = z.infer<typeof receipt>;
@@ -68,14 +71,24 @@ function mapReceipt(r:CliReceipt):Receipt {
  coverage:`${r.scored_rows} of ${r.expected_rows} rounds scored; execution ${r.execution_status}. Run ${r.run_id} by ${p.runner_handle}, engine ${p.engine_version} (${p.engine_commit}), agent CLI ${p.cc_version}.`,
  };
 }
+/** EV-20 (amended 2026-09-14, Ryan): one history row's own report, built from that row's own receipt
+ *  and nothing else — the same `mapReceipt` the latest run goes through, so an opened older run is
+ *  the receipt's statement of itself, never a figure derived across runs (AGENTS invariant 6, and
+ *  eval-engine §12: one receipt on a surface at a time). A row whose receipt the CLI did not send
+ *  contributes nothing and stays unopenable. */
+function openable(r:CliReceipt|null|undefined):{report?:NonNullable<EvalReportModel['history'][number]['report']>} {
+ const s=receiptSummary(r);if(!r||!s)return {};
+ const holes=s.partial?r.expected_rows-r.scored_rows:0,inc=r.comparisons['candidate-vs-incumbent'],t=r.triggers;
+ return {report:{receipt:mapReceipt(r),summary:s,numbers:{holes,nRounds:s.n+holes,triggerTotal:t?t.fp+t.tn:0},incumbentLift:inc?[Math.round(inc.net_lift*100),inc.sign_p.toFixed(3)]:null}};
+}
 /** Format a single receipt's stated statistics; never reconstruct or combine runs. */
 export function mapEvalReport(report:z.infer<typeof cliEvalReport>,lines:readonly string[]=[]):EvalReportModel {
  const r=report.latestState==='ok'?report.latest:report.latestState==='none'?report.localRuns.find(run=>!run.committed&&run.receipt!==null)?.receipt??null:null;
  const s=receiptSummary(r),inc=r?.comparisons['candidate-vs-incumbent'],t=r?.triggers;
  const holes=s?.partial?r!.expected_rows-r!.scored_rows:0;
  const localRuns=report.localRuns.map(run=>({runId:run.run_id,runDir:run.run_dir,executionStatus:run.execution_status,committed:run.committed,receipt:run.receipt?mapReceipt(run.receipt):null,summary:receiptSummary(run.receipt)}));
- const history:EvalReportModel['history']=report.history.map(h=>({when:h.timestamp.slice(0,10),runner:h.runner_handle,version:versionText(h.version),wlt:h.comparison?wlt(h.comparison):[0,0,0],rows:'',summary:comparisonSummary(h.comparison,h.verdict)}));
- for(const run of report.localRuns.filter(run=>!run.committed)){const c=run.receipt?.comparisons['candidate-vs-baseline'];history.push({when:run.receipt?.provenance.timestamp.slice(0,10)??run.run_id,runner:'local',version:versionText(run.receipt?.version??'—'),wlt:c?wlt(c):[0,0,0],rows:'',summary:receiptSummary(run.receipt),local:true});}
+ const history:EvalReportModel['history']=report.history.map(h=>({when:h.timestamp.slice(0,10),runner:h.runner_handle,version:versionText(h.version),wlt:h.comparison?wlt(h.comparison):[0,0,0],rows:'',summary:comparisonSummary(h.comparison,h.verdict),runId:h.run_id,...openable(h.receipt)}));
+ for(const run of report.localRuns.filter(run=>!run.committed)){const c=run.receipt?.comparisons['candidate-vs-baseline'];history.push({when:run.receipt?.provenance.timestamp.slice(0,10)??run.run_id,runner:'local',version:versionText(run.receipt?.version??'—'),wlt:c?wlt(c):[0,0,0],rows:'',summary:receiptSummary(run.receipt),local:true,runId:run.run_id,...openable(run.receipt)});}
  let evalEstimate:EvalReportModel['evalEstimate']=null,evalEstimateText='';
  const latest=report.latest;
  if(report.latestState==='ok'&&latest?.provenance.model==='sonnet'&&Object.values(latest.efficiency).every(e=>e.cost_usd!=null&&e.duration_ms!=null)){

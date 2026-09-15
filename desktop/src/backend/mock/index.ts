@@ -198,6 +198,18 @@ export function createMockBackend(opts:{latencyMs?:number}={}):Backend & {readon
    move:({path,to})=>fileRun('move',path,to),copy:({path,to})=>fileRun('copy',path,to),rename:({path,to})=>fileRun('rename',path,to),delete:({path})=>fileRun('delete',path),
    // No fixture folder is broken, so the mock has nothing to rewrite: it answers as the CLI does for a file that already parses.
    fix:({path})=>long('library',async ctx=>{const line=path.split('/').at(-1)+': SKILL.md frontmatter is already valid YAML; nothing changed.';ctx.print(line);return ok({kind:'fix' as const,path,destination:null,quarantined:null,installed:false,notices:[line]});}),
+   // No bytes to rewrite here either, so the mock answers the CLI's own shape: its two refusals (an empty
+   // name and the one the file already declares) and the change line. It stops there — the CLI's remaining
+   // notices name the version the team still shows, and every fixture skill carries a pre-versioning hash
+   // rather than a `v<N>` ordinal, so there is no version number here to name and the mock invents none.
+   category:({path,to})=>long('library',async ctx=>{
+    const change=[...fileChanges.values()].find(change=>change.path===path),name=path.split('/').at(-1)??path;
+    const detail=skillByRef(change?.original??name),wanted=to.trim(),current=detail.ok?detail.value.category:'misc';
+    if(!wanted)return fail('--to must be a non-empty category name.');
+    if(wanted===current)return fail(`${name} already declares ${current}; nothing to change.`);
+    const line=`Changed ${name} from ${current} to ${wanted}.`;ctx.print(line);
+    return ok({kind:'category' as const,path,destination:null,quarantined:null,installed:false,notices:[line]});
+   }),
   },
   // Same shape as the CLI verb: the mock keeps the state in its preferences so every card and rail reads it back, as the real adapter reads skillOverrides.
   setSkillEnabled:({path,enabled}:{path:string;enabled:boolean})=>long('library',async ctx=>{const name=path.split(/[\\/]/).filter(Boolean).at(-1)??path;backend.prefs.set('enabled:'+name,enabled);for(const listener of listeners)listener('config');const line=enabled?`Enabled ${name}: Claude Code loads it again on this machine (skillOverrides in ~/.claude/settings.json).`:`Disabled ${name}: Claude Code no longer loads it on this machine (skillOverrides in ~/.claude/settings.json).`;ctx.print(line);return ok({kind:enabled?'enable' as const:'disable' as const,path,name,enabled,settingsFile:'~/.claude/settings.json',changed:true,notices:[]});}),
@@ -279,7 +291,10 @@ export function createMockBackend(opts:{latencyMs?:number}={}):Backend & {readon
   }),
   // §5.3: publish commits straight to the clone, so PublishResult has no PR/compare/branch field and the mock mints no
   // URL (B3 review high #1, D72). `endorsed` stays: catalog() reads it for the project cards, only its length-as-PR-number went.
-  publish:args=>long('share',async ctx=>{const name=args.ref.split(/[\\/]/).filter(Boolean).at(-1)??args.ref;const skill=skillByRef([...fileChanges.values()].find(change=>change.path===args.ref)?.original??name);if(!skill.ok)return fail(skill.error);ctx.print(`Publishing ${args.ref}…`);if(args.project){endorsed.push({project:args.project,name:args.ref});for(const listener of listeners)listener('clone');}return ok({name:args.ref,project:args.project??'Global',version:skill.value.version??design.DETAIL.version,created:true,identicalTo:null,attachedEvals:0,evalAssets:0,profileAdded:false,projectAdded:Boolean(args.project)});}),
+  // The mock's retraction: it reports what a real one would have removed for the named skill, so a
+  // dialog and its result line can be exercised without a team repo. Nothing in the mock is deleted.
+  unpublish:args=>long('share',async ctx=>{const skill=skillByRef(args.ref);if(!skill.ok)return fail(skill.error);ctx.print(`Unpublishing ${args.ref}…`);const listed=endorsed.filter(entry=>entry.name===args.ref).map(entry=>entry.project);for(let i=endorsed.length-1;i>=0;i-=1)if(endorsed[i]!.name===args.ref)endorsed.splice(i,1);for(const listener of listeners)listener('clone');const n=Number(String(skill.value.version??'v1').replace(/^v/,''))||1;return ok({name:args.ref,id:'00000000-0000-4000-8000-000000000000',versions:Array.from({length:n},(_,i)=>`v${n-i}`),evalAssets:0,receipts:0,projects:listed,profiles:0});}),
+  publish:args=>long('share',async ctx=>{const name=args.ref.split(/[\\/]/).filter(Boolean).at(-1)??args.ref;const skill=skillByRef([...fileChanges.values()].find(change=>change.path===args.ref)?.original??name);if(!skill.ok)return fail(skill.error);ctx.print(`Publishing ${args.ref}…`);if(args.project){endorsed.push({project:args.project,name:args.ref});for(const listener of listeners)listener('clone');}return ok({name:args.ref,project:args.project??null,version:skill.value.version??design.DETAIL.version,created:true,identicalTo:null,attachedEvals:0,evalAssets:0,profileAdded:false,projectAdded:Boolean(args.project)});}),
   sync:args=>long<SyncResult>('onboarding',async ctx=>{ctx.print('Fetching team clones…');return ok({notices:[],changed:true,teams:[{team:args.team??design.TEAMS[0]!.key,state:'refreshed'}]});}),
   prune:()=>long('settings',async ctx=>{const names=design.QUARANTINE.map(q=>q[1]??'');if(!await ctx.ask('confirm',`Delete ${names.length} quarantined item(s)?`)){ctx.print('Prune cancelled; nothing deleted.');return cancelled('Prune was cancelled.');}return ok(undefined);}),
   invite:args=>long<InviteResult>('share',async ctx=>{if(!args.logins.length||args.logins.some(login=>!login.trim()))return fail('At least one GitHub login is required.');ctx.print(`Inviting ${args.logins.join(', ')}…`);if(readScenario()==='partial'){const [first,...rest]=args.logins;const failed=rest.map(login=>({login,error:`Could not invite @${login} (GitHub status 422). gh: Validation Failed (HTTP 422)`}));return {ok:false,error:failed.map(f=>f.error).join('\n'),value:{invited:first?[first]:[],already:[],failed}};}return ok({invited:[...args.logins],already:[],failed:[]});}),

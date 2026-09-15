@@ -41,6 +41,84 @@ const refuse = (t: GuardTree, c: GuardContext, path: string) => expect(() => gua
 const publish: GuardContext = { action: 'publish', handle: 'me' };
 const migrate: GuardContext = { action: 'migrate', handle: 'me' };
 
+const personFile = (handle: string, profile: { id: string; name: string }[] = []) => JSON.stringify({
+  handle, display_name: handle, email: `${handle}@x.test`, github: handle, bio: '', installed: [],
+  profile: profile.map((entry) => ({ ...entry, version: 'v1', added: '2026-09-14', via: 'publish' })),
+});
+const unpublish: GuardContext = { action: 'unpublish', handle: 'me', targetSkill: 'x', targetSkillId: ID };
+
+describe('row k — unpublish, the only row that may remove a version folder', () => {
+  it('admits the retracted skill: its versions, its eval assets, and its receipts', () => {
+    const t = tree({
+      'skills/x/v1/SKILL.md': [skill(), undefined],
+      'skills/x/v2/SKILL.md': [skill(), undefined],
+      'skills/x/evals/cases/a.md': ['case', undefined],
+      [`evals/${ID}/v2/${RUN}.json`]: ['{}', undefined],
+    });
+    expect(() => guard(t, unpublish)).not.toThrow();
+  });
+
+  it('fails CLOSED without the skill name or its uuid, so a caller that forgets one removes nothing', () => {
+    const t = tree({ 'skills/x/v1/SKILL.md': [skill(), undefined] });
+    refuse(t, { action: 'unpublish', handle: 'me', targetSkillId: ID }, 'skills/x/v1/SKILL.md');
+    refuse(t, { action: 'unpublish', handle: 'me', targetSkill: 'x' }, 'skills/x/v1/SKILL.md');
+    refuse(t, { action: 'unpublish', handle: 'me' }, 'skills/x/v1/SKILL.md');
+  });
+
+  it('refuses another skill, whether named by folder or by receipt uuid', () => {
+    refuse(tree({ 'skills/other/v1/SKILL.md': [skill(), undefined] }), unpublish, 'skills/other/v1/SKILL.md');
+    refuse(tree({ [`evals/${ABSENT_ID}/v1/${RUN}.json`]: ['{}', undefined] }), unpublish, `evals/${ABSENT_ID}/v1/${RUN}.json`);
+  });
+
+  it('refuses a prefix that merely starts with the skill name', () => {
+    refuse(tree({ 'skills/x-ray/v1/SKILL.md': [skill(), undefined] }), unpublish, 'skills/x-ray/v1/SKILL.md');
+  });
+
+  it('cannot ADD or MODIFY anything under the skill it is retracting', () => {
+    refuse(tree({ 'skills/x/v3/SKILL.md': [undefined, skill()] }), unpublish, 'skills/x/v3/SKILL.md');
+    refuse(tree({ 'skills/x/v1/SKILL.md': [skill(), skill(ABSENT_ID)] }), unpublish, 'skills/x/v1/SKILL.md');
+  });
+
+  it('admits a people file that drops only this skill, including one that is not the actor own', () => {
+    const before = personFile('mira', [{ id: ID, name: 'x' }, { id: ABSENT_ID, name: 'y' }]);
+    const after = personFile('mira', [{ id: ABSENT_ID, name: 'y' }]);
+    expect(() => guard(tree({ 'people/mira.json': [before, after] }), unpublish)).not.toThrow();
+  });
+
+  it('refuses a people file that changes anything besides this skill endorsement', () => {
+    const before = personFile('mira', [{ id: ID, name: 'x' }, { id: ABSENT_ID, name: 'y' }]);
+    // The retraction is real, but another endorsement was smuggled out in the same write.
+    refuse(tree({ 'people/mira.json': [before, personFile('mira', [])] }), unpublish, 'people/mira.json');
+    // A bio edit riding along is refused for the same reason: the predicate is an exact equality.
+    const edited = JSON.parse(personFile('mira', [{ id: ABSENT_ID, name: 'y' }])) as Record<string, unknown>;
+    edited.bio = 'new';
+    refuse(tree({ 'people/mira.json': [before, JSON.stringify(edited)] }), unpublish, 'people/mira.json');
+  });
+
+  it('refuses a people file removal, and a no-op rewrite', () => {
+    const file = personFile('mira', [{ id: ABSENT_ID, name: 'y' }]);
+    refuse(tree({ 'people/mira.json': [file, undefined] }), unpublish, 'people/mira.json');
+    refuse(tree({ 'people/mira.json': [file, file] }), unpublish, 'people/mira.json');
+  });
+
+  it('admits dropping the uuid from project lists, and refuses any other team.json edit', () => {
+    const before = team({ projects: { p: { remotes: [], skills: [ID, ABSENT_ID] } } });
+    const after = team({ projects: { p: { remotes: [], skills: [ABSENT_ID] } } });
+    expect(() => guard(tree({ 'team.json': [before, after] }), unpublish)).not.toThrow();
+    const renamed = team({ projects: { q: { remotes: [], skills: [ABSENT_ID] } } });
+    expect(() => guard(tree({ 'team.json': [before, renamed] }), unpublish)).toThrow(GuardError);
+  });
+
+  it('does not open version removal for any other action', () => {
+    const removal = tree({ 'skills/x/v1/SKILL.md': [skill(), undefined] });
+    refuse(removal, publish, 'skills/x/v1/SKILL.md');
+    refuse(removal, migrate, 'skills/x/v1/SKILL.md');
+    refuse(removal, { action: 'uninstall', handle: 'me' }, 'skills/x/v1/SKILL.md');
+    // Even handed the scoping fields, a non-unpublish action gets nothing from row k.
+    refuse(removal, { action: 'publish', handle: 'me', targetSkill: 'x', targetSkillId: ID }, 'skills/x/v1/SKILL.md');
+  });
+});
+
 describe("row a' — a version folder is add-only, and ownership is never consulted", () => {
   // §14.1/OF-3, the clause the rest of this block cannot reach: every case above calls `tree()` with
   // no `unchanged` map, so the target version is never in the pre-image and the prefix property is
@@ -215,6 +293,31 @@ describe('row i — project create adds one key, born empty', () => {
   it('is the only action that may create a key, and creates nothing on its own', () => {
     refuse(tree({ 'team.json': [team(), team({ projects: { p: P, q: { remotes: [], skills: [] } } })] }), publish, 'team.json');
     refuse(tree({ 'team.json': [team(), team({ archived: ['x'] })] }), create, 'team.json');
+  });
+});
+
+describe("row i′ — project delete removes one key and nothing else", () => {
+  const P = { remotes: ['github.com/a/p'], skills: [] };
+  const remove: GuardContext = { action: 'project-delete', handle: 'me' };
+
+  it('admits exactly one removed key, whatever it listed', () => {
+    expect(() => guard(tree({ 'team.json': [team(), team({ projects: {} })] }), remove)).not.toThrow();
+    // A card with endorsements goes the same way: the skills live in `skills/<name>/v<N>`, which this
+    // diff cannot reach, so removing the list is never removing a skill.
+    expect(() => guard(tree({ 'team.json': [team({ projects: { p: { remotes: [], skills: [ID] }, q: P } }), team({ projects: { q: P } })] }), remove)).not.toThrow();
+  });
+
+  it('refuses two keys at once, an edit riding along, and a removal that is really a rename', () => {
+    refuse(tree({ 'team.json': [team({ projects: { p: P, q: P } }), team({ projects: {} })] }), remove, 'team.json');
+    refuse(tree({ 'team.json': [team({ projects: { p: P, q: P } }), team({ projects: { q: { remotes: [], skills: [ID] } } })] }), remove, 'team.json');
+    refuse(tree({ 'team.json': [team(), team({ categories: ['c'], projects: {} })] }), remove, 'team.json');
+    refuse(tree({ 'team.json': [team(), team({ projects: { renamed: P } })] }), remove, 'team.json');
+  });
+
+  it('is the only action that may remove a key, and removes nothing on its own', () => {
+    refuse(tree({ 'team.json': [team(), team({ projects: {} })] }), publish, 'team.json');
+    refuse(tree({ 'team.json': [team(), team({ projects: {} })] }), { action: 'project', handle: 'me' }, 'team.json');
+    refuse(tree({ 'team.json': [team(), team({ archived: ['x'] })] }), remove, 'team.json');
   });
 });
 

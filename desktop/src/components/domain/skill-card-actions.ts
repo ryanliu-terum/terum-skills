@@ -2,7 +2,7 @@ import type { SkillCard } from '../../backend/types';
 
 /** One row of the card's ⋯ menu. `to` is a router path; a disabled row carries the reason it
  *  cannot run instead, so the menu keeps a fixed shape and the card says why (Ryan, 2026-09-09). */
-export interface CardAction { key:'run-eval'|'move'|'copy'|'place'|'publish'|'rename'|'delete'; label:string; to:string|null; reason:string|null }
+export interface CardAction { key:'run-eval'|'move'|'copy'|'place'|'publish'|'unpublish'|'rename'|'delete'; label:string; to:string|null; reason:string|null }
 
 /** Every way into the detail page goes through here, so a folder that belongs to no team is
  *  addressed by path and a team skill by name. Never read `project` for this — it carries the root
@@ -38,7 +38,7 @@ export function cardActions(skill:SkillCard,{origin='',runEvalInApp=false}:{orig
  if(!skill.teamed){
   actions.push(moveAction(skill,at),copyAction(skill,at),{key:'rename',label:'Rename…',to:at('dialog=file-rename'),reason:null},{key:'delete',label:'Delete…',to:at('dialog=file-delete'),reason:null});
  }else actions.push(placeAction(skill,at));
- actions.push(publishAction(skill,at));
+ actions.push(publishAction(skill,at),unpublishAction(skill,at));
  return actions;
 }
 
@@ -68,6 +68,20 @@ function placeAction(skill:SkillCard,at:At):CardAction {
 function publishAction(skill:SkillCard,at:At):CardAction {
  const reason=localActionReason(skill,'publish');
  return {key:'publish',label:'Publish to team…',to:reason?null:at('dialog=publish'),reason};
+}
+
+/** The inverse of `publishAction`, and the only row that takes bytes back OUT of the team. Present on
+ *  every card and disabled with its reason when there is nothing published to retract, because a fixed
+ *  menu is clearer than a row that appears and disappears (Ryan, 2026-09-10).
+ *
+ *  The gate is the team's copy alone — the mirror image of `publishAction`, whose gate is the local
+ *  folder alone. A skill with no folder on this machine is still unpublishable: retracting is a write
+ *  to the team repository and never reads the local bytes. Anyone may retract any skill (2026-09-14),
+ *  so authorship is not consulted here either.
+ */
+function unpublishAction(skill:SkillCard,at:At):CardAction {
+ if(!skill.teamed)return {key:'unpublish',label:'Unpublish…',to:null,reason:'This skill is not in the team marketplace, so there is nothing to retract.'};
+ return {key:'unpublish',label:'Unpublish…',to:at('dialog=unpublish'),reason:null};
 }
 
 /** Shared path/inspection gate for the menu, detail buttons and pasted dialog URLs. */

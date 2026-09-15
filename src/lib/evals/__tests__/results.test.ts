@@ -54,6 +54,15 @@ describe('aggregation (§5.3)', () => {
     expect(text).toContain('skipped (environment): xlsx — missing python3:openpyxl');
     expect(text).toContain('[partial — 1/3 scored]');
   });
+
+  it('dropped cases grey the verdict and the report names each one with its kind (eval-gen D4)', () => {
+    const out = aggregate([row('win')], [sample('candidate', 1)], 3, {}, { 'no-agents-md': { kind: 'setup', detail: 'setup failed (rc=127): /bin/sh: No: command not found' }, 'abs-path': { kind: 'staging', detail: 'unsafe file path in case: /tmp/x' } });
+    expect(out).toMatchObject({ execution_status: 'partial', scored_rows: 1, expected_rows: 3 });
+    expect(Object.keys(out.dropped_cases)).toEqual(['no-agents-md', 'abs-path']);
+    const text = renderReport(out, null);
+    expect(text).toContain('dropped (setup): no-agents-md — setup failed (rc=127): /bin/sh: No: command not found');
+    expect(text).toContain('dropped (staging): abs-path — unsafe file path in case: /tmp/x');
+  });
 });
 
 describe('per-case rows and the case-run tally (§5.3 rev 20)', () => {

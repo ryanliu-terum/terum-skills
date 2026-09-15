@@ -24,6 +24,7 @@ import { run as runLs } from './commands/ls.js';
 import { run as readme } from './commands/readme.js';
 import { run as runLeave } from './commands/leave.js';
 import { run as runPublish } from './commands/publish.js';
+import { runUnpublish } from './commands/unpublish.js';
 import { run as runSetup } from './commands/setup.js';
 import { run as runGuardPush } from './commands/guardPush.js';
 import { run as runValidate } from './commands/validate.js';
@@ -38,10 +39,10 @@ import { failure, Result } from './lib/result.js';
  * to it. `execute` is injected so the mapping and the exit code are testable without a terminal.
  */
 export type Execute = (invoke: (io: Prompter) => Promise<Result<unknown>>, meta: { verb: string; notices: boolean }) => Promise<void>;
-export interface CliVerbs { skill?: typeof runSkill; skillToggle?: typeof runSkillToggle; project?: typeof runProject; reconcile?: typeof runReconcile; profile?: typeof profile; app?: typeof runApp; appUpdate?: typeof runAppUpdate; update?: typeof runUpdate; login: typeof login; team: TeamCommand; setup?: typeof runSetup; install?: typeof install; uninstall?: typeof uninstall; uninstallMachine?: typeof runUninstallMachine; sync?: typeof sync; prune?: typeof prune; search?: typeof search; invite?: typeof invite; ls?: typeof runLs; status?: typeof status; readme?: typeof readme; publish?: typeof runPublish; leave?: typeof runLeave; guardPush?: typeof runGuardPush; validate?: typeof runValidate; eval?: typeof runEval; evalReport?: typeof runEvalReport; }
+export interface CliVerbs { skill?: typeof runSkill; skillToggle?: typeof runSkillToggle; project?: typeof runProject; reconcile?: typeof runReconcile; profile?: typeof profile; app?: typeof runApp; appUpdate?: typeof runAppUpdate; update?: typeof runUpdate; login: typeof login; team: TeamCommand; setup?: typeof runSetup; install?: typeof install; uninstall?: typeof uninstall; uninstallMachine?: typeof runUninstallMachine; sync?: typeof sync; prune?: typeof prune; search?: typeof search; invite?: typeof invite; ls?: typeof runLs; status?: typeof status; readme?: typeof readme; publish?: typeof runPublish; unpublish?: typeof runUnpublish; leave?: typeof runLeave; guardPush?: typeof runGuardPush; validate?: typeof runValidate; eval?: typeof runEval; evalReport?: typeof runEvalReport; }
 
 export function buildProgram(execute: Execute, verbs: CliVerbs = { login, team: runTeam }, context: { form?: InvocationForm; launch?: Launch; noUpdateCheck?: boolean; frames?: boolean; serve?: () => Promise<void> } = {}): Command {
-  const active: Required<CliVerbs> = { skill: verbs.skill ?? runSkill, skillToggle: verbs.skillToggle ?? runSkillToggle, project: verbs.project ?? runProject, reconcile: verbs.reconcile ?? runReconcile, profile: verbs.profile ?? profile, app: verbs.app ?? runApp, appUpdate: verbs.appUpdate ?? runAppUpdate, update: verbs.update ?? runUpdate, login: verbs.login, team: verbs.team, setup: verbs.setup ?? runSetup, install: verbs.install ?? install, uninstall: verbs.uninstall ?? uninstall, uninstallMachine: verbs.uninstallMachine ?? runUninstallMachine, sync: verbs.sync ?? sync, prune: verbs.prune ?? prune, search: verbs.search ?? search, invite: verbs.invite ?? invite, ls: verbs.ls ?? runLs, status: verbs.status ?? status, readme: verbs.readme ?? readme, publish: verbs.publish ?? runPublish, leave: verbs.leave ?? runLeave, guardPush: verbs.guardPush ?? runGuardPush, validate: verbs.validate ?? runValidate, eval: verbs.eval ?? runEval, evalReport: verbs.evalReport ?? runEvalReport };
+  const active: Required<CliVerbs> = { skill: verbs.skill ?? runSkill, skillToggle: verbs.skillToggle ?? runSkillToggle, project: verbs.project ?? runProject, reconcile: verbs.reconcile ?? runReconcile, profile: verbs.profile ?? profile, app: verbs.app ?? runApp, appUpdate: verbs.appUpdate ?? runAppUpdate, update: verbs.update ?? runUpdate, login: verbs.login, team: verbs.team, setup: verbs.setup ?? runSetup, install: verbs.install ?? install, uninstall: verbs.uninstall ?? uninstall, uninstallMachine: verbs.uninstallMachine ?? runUninstallMachine, sync: verbs.sync ?? sync, prune: verbs.prune ?? prune, search: verbs.search ?? search, invite: verbs.invite ?? invite, ls: verbs.ls ?? runLs, status: verbs.status ?? status, readme: verbs.readme ?? readme, publish: verbs.publish ?? runPublish, unpublish: verbs.unpublish ?? runUnpublish, leave: verbs.leave ?? runLeave, guardPush: verbs.guardPush ?? runGuardPush, validate: verbs.validate ?? runValidate, eval: verbs.eval ?? runEval, evalReport: verbs.evalReport ?? runEvalReport };
   const program = new Command();
   program.version(packageVersion() ?? 'version unknown', '-v, --version');
   program.name('terum-skills').description('Share private Claude Code skills through a team git repository.').exitOverride();
@@ -76,7 +77,7 @@ export function buildProgram(execute: Execute, verbs: CliVerbs = { login, team: 
     .option('--no-evals', 'do not offer to evaluate the shared skills that have no receipt')
     .action(async (target: string | undefined, options: { app?: boolean; projects?: boolean; existing?: boolean; evals?: boolean }) => execute((io) => active.setup({ form: context.form, target, app: options.app, projects: options.projects, ...(options.existing === false ? { existing: false } : {}), evals: options.evals, cwd: process.cwd() }, io), { verb: 'setup', notices: true }));
 
-  const skill = program.command('skill').description('Move, copy, rename, delete, fix, enable, or disable a folder in your Library');
+  const skill = program.command('skill').description('Move, copy, rename, delete, fix, recategorise, enable, or disable a folder in your Library');
   for (const kind of ['move', 'copy', 'rename'] as const) skill.command(`${kind} <path>`)
     .description(kind === 'move' ? 'Move a Library folder to another root; the original is gone'
       : kind === 'copy' ? 'Copy a Library folder into another root; the original stays where it is'
@@ -87,6 +88,9 @@ export function buildProgram(execute: Execute, verbs: CliVerbs = { login, team: 
     .action(async (path: string) => execute(io => active.skill({ form: context.form, kind: 'delete', path }, io), { verb: 'skill delete', notices: true }));
   skill.command('fix <path>').description('Rewrite SKILL.md frontmatter that is not valid YAML by quoting the offending value; the text stays the same')
     .action(async (path: string) => execute(io => active.skill({ form: context.form, kind: 'fix', path }, io), { verb: 'skill fix', notices: true }));
+  skill.command('category <path>').description("Change a Library folder's metadata.terum-category in SKILL.md; nothing is published, so the team keeps showing the category its newest version carries")
+    .requiredOption('--to <name>', "the new category; your team's list is advice, not an enum, so any name is accepted")
+    .action(async (path: string, options: { to: string }) => execute(io => active.skill({ form: context.form, kind: 'category', path, to: options.to }, io), { verb: 'skill category', notices: true }));
   for (const kind of ['enable', 'disable'] as const) skill.command(`${kind} <path>`)
     .description(kind === 'disable' ? 'Stop Claude Code loading a Library folder on this machine; its files stay where they are (writes skillOverrides in Claude Code settings)' : 'Let Claude Code load a Library folder again on this machine (removes the skillOverrides entry)')
     .action(async (path: string) => execute(io => active.skillToggle({ form: context.form, kind, path }, io), { verb: `skill ${kind}`, notices: true }));
@@ -142,6 +146,10 @@ export function buildProgram(execute: Execute, verbs: CliVerbs = { login, team: 
     .option('--remote <url>', "the project's repository; its skills place when a teammate installs inside that folder")
     .addOption(new Option('--team <team>', 'configured team (required when more than one exists)').hideHelp())
     .action(async (name: string | undefined, options: { remote?: string; team?: string }) => execute(io => active.team({ form: context.form, kind: 'project-create', name, ...options }, io), { verb: 'team project create', notices: true }));
+  teamProject.command('delete [name]').description("Delete a team project: removes the list only — its skills stay in the team's marketplace")
+    .option('--yes', 'skip the confirmation (a script, or a shell that already asked)')
+    .addOption(new Option('--team <team>', 'configured team (required when more than one exists)').hideHelp())
+    .action(async (name: string | undefined, options: { yes?: boolean; team?: string }) => execute(io => active.team({ form: context.form, kind: 'project-delete', name, ...options }, io), { verb: 'team project delete', notices: true }));
   team
     .command('workflow-update')
     .description('Print the current workflow scaffold for manual migration; never writes a repository')
@@ -175,10 +183,18 @@ export function buildProgram(execute: Execute, verbs: CliVerbs = { login, team: 
   program
     .command('publish <ref>')
     .option('--category <name>', "the skill's terum-category; skips the model suggestion")
-    .description('Endorse a shared skill for the team: opens a pull request under policy "pr", commits directly under policy "push"')
-    .option('--project <project>', 'endorse into the project list instead of the global list')
+    .description("Publish a skill to the team's marketplace: opens a pull request under policy \"pr\", commits directly under policy \"push\"")
+    .option('--project <project>', "also list the skill under this team project; without it the skill goes to the marketplace alone")
     .addOption(new Option('--team <team>', 'configured team (required when more than one exists and the ref is bare)').hideHelp())
     .action(async (ref: string, options: { project?: string; team?: string; category?: string }) => execute((io) => active.publish({ form: context.form, ref, ...options, cwd: process.cwd() }, io), { verb: 'publish', notices: true }));
+
+  program
+    .command('unpublish <skill>')
+    .description("Retract a skill from the team's marketplace: removes every version, its eval assets and receipts, and drops it from project lists and member profiles")
+    .option('--yes', 'skip the typed-name confirmation')
+    .addOption(new Option('--team <team>', 'configured team (required when more than one exists)').hideHelp())
+    .addHelpText('after', '\nAnyone in the team may unpublish any skill; there is no ownership check. The git history is not rewritten, and installed copies keep working until each machine syncs, which then reports the skill as removed from the team. Republishing starts again at Version 1 under a new id.')
+    .action(async (skill: string, options: { yes?: boolean; team?: string }) => execute((io) => active.unpublish({ form: context.form, ref: skill, ...options }, io), { verb: 'unpublish', notices: true }));
 
   program.command('validate [path|name]').description("Check a skill's safety and formatting deterministically: a shared skill by name or its local source folder by path (requires a configured team)").addHelpText('after', '\nDeterministic and offline (no model, no network call): HYG1 frontmatter, HYG2 hidden characters, HYG3 credentials and foreign emails, HYG4 executables and extensions, HYG5 license agreement, HYG6 description (size over 20,000 is a warning), HYG7 off-list category (checked only at publish, where the team category list is in hand; never fires here). A folder that has never been connected fails HYG1 on the managed fields connect adds (license, metadata.id, metadata.author, metadata.terum-category); connect it first.' + '\n' + OUTPUT_HELP).addOption(new Option('--team <team>', 'configured team (required when more than one exists)').hideHelp()).option('--cwd <team-checkout>', 'read the skill and team policy directly from this team checkout').action(async (target: string | undefined, options: { team?: string; cwd?: string }) => execute((io) => active.validate({ form: context.form, workingDirectory: process.cwd(), ...(target === undefined ? {} : { target }), ...options }, io), { verb: 'validate', notices: true }));
   program.command('receipt-check', { hidden: true }).action(async () => execute(async (io) => { io.print('receipt-check is retired; publish records receipts when it mints a version.'); return { ok: true, value: undefined }; }, { verb: 'receipt-check', notices: false }));

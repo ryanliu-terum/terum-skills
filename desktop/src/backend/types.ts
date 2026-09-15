@@ -54,7 +54,7 @@ export type Receipt=NonNullable<Design['DETAIL']['receipt']>;
 export interface SkillMdBlock {kind:'h2'|'p'|'ol'|'code';content:string|string[]}
 export interface ReportNumbers {holes:number;nRounds:number;triggerTotal:number;precisionObserved?:string}
 export interface EvalEstimate {cases:number;k:number;arms:number;runs:number;minutes:number;dollars:number;model:string}
-export type SkillDetail=Omit<Design['DETAIL'],keyof SkillCard|'root'|'history'|'lines'|'version_full'|'repo'|'path'|'files'> & SkillCard & {path:string|null;repoPath:string;files:string[]|null;pathLabel:string;repo:string|null;version_full:string|null;team:string|null;installScopes:[string,string][];installScopePaths?:Record<string,string>;projectNames:string[]|null;favorites:number|null;lines:number|null;hygieneCaption:string|null;hygieneStatus:'pass'|'fail'|null;hygieneWhen:string|null;skillRef:string;root:'Global'|'Marketplace';history:(Design['DETAIL']['history'][number]&{summary:ReceiptSummary|null;local?:true})[];skillMd:{frontmatter:string;body:SkillMdBlock[];markdown?:string|null};evalEstimate:EvalEstimate|null;evalEstimateText:string;evalEstimateTip:string;evalCommand:string;shareCommand:string;incumbentLift:[number,string]|null;reportNumbers:ReportNumbers|null;scoreFractions:{routesExpected:number|null;roi:[number,number]|null};method:string;
+export type SkillDetail=Omit<Design['DETAIL'],keyof SkillCard|'root'|'history'|'lines'|'version_full'|'repo'|'path'|'files'> & SkillCard & {path:string|null;repoPath:string;files:string[]|null;pathLabel:string;repo:string|null;version_full:string|null;team:string|null;installScopes:[string,string][];installScopePaths?:Record<string,string>;projectNames:string[]|null;favorites:number|null;lines:number|null;hygieneCaption:string|null;hygieneStatus:'pass'|'fail'|null;hygieneWhen:string|null;skillRef:string;root:'Global'|'Marketplace';history:(Design['DETAIL']['history'][number]&{summary:ReceiptSummary|null;local?:true;runId?:string;report?:{receipt:Receipt;summary:ReceiptSummary;numbers:ReportNumbers;incumbentLift:[number,string]|null}})[];skillMd:{frontmatter:string;body:SkillMdBlock[];markdown?:string|null};evalEstimate:EvalEstimate|null;evalEstimateText:string;evalEstimateTip:string;evalCommand:string;shareCommand:string;incumbentLift:[number,string]|null;reportNumbers:ReportNumbers|null;scoreFractions:{routesExpected:number|null;roi:[number,number]|null};method:string;
  versions:{placed:string|null;teamCurrent:string|null;evaluated:string|null}|null;
  latestState:'ok'|'none'|'invalid';invalidReceiptFile:string|null;evalReportError:string|null;
  /** A same-named local folder the driving CLI is too old to identify: presence is unknown, so the
@@ -134,14 +134,25 @@ export interface InstalledResult {id:string;name:string;scope:Scope;path:string|
 export interface UninstallArgs {from?:string;team?:string;ref:string;kind?:'skill'|'member'|'project';member?:string;project?:string}
 export interface UninstalledResult {id:string;name:string}
 export interface MachineUninstallResult {removed:string[];removedPlacements:number;hookRemoved:boolean;wrapperRemoved:boolean;configRemoved:boolean;kept:string[];record:string;advice:string[]}
-export interface PublishArgs {team?:string;ref:string;message?:string;/** Endorse into `team.json projects[<project>].skills` instead of the global list. */project?:string;/** The skill's terum-category (`--category`): skips the CLI's model suggestion. A declared category in SKILL.md still wins. */category?:string}
+export interface PublishArgs {team?:string;ref:string;message?:string;/** ALSO list the skill in `team.json projects[<project>].skills`; publishing itself goes to the marketplace. */project?:string;/** The skill's terum-category (`--category`): skips the CLI's model suggestion. A declared category in SKILL.md still wins. */category?:string}
 /**
  * §5.3. `version` is the `v<N>` this publish minted, or — when the bytes were byte-identical to a
  * version already in the repo — the one it matched, which `identicalTo` names. `created` is the
  * honest "did anything new land" flag, and it is deliberately not the same question as "did
  * anything change": a publish can add the skill to a project without minting a version.
  */
-export interface PublishResult {name:string;project:string;version:string|null;created:boolean;identicalTo:string|null;attachedEvals:number;evalAssets:number;profileAdded:boolean;projectAdded:boolean}
+export interface PublishResult {name:string;/** The project also listed, or null — the marketplace alone. */project:string|null;version:string|null;created:boolean;identicalTo:string|null;attachedEvals:number;evalAssets:number;profileAdded:boolean;projectAdded:boolean}
+export interface UnpublishArgs {team?:string;/** The skill's marketplace name — the `skills/<name>/` folder, never a Library path. */ref:string}
+/**
+ * The inverse of `PublishResult`: what the retraction actually removed. Every count is reported so the
+ * app can say it plainly — a skill listed in no project and endorsed by nobody still unpublishes, and
+ * the zeroes are the honest answer rather than a reason to hide the line.
+ *
+ * `versions` is newest-first (`['v4','v3',…]`). Anyone in the team may unpublish any skill
+ * (2026-09-14); the CLI's only brake is the typed-name confirmation, which the app answers with
+ * `--yes` after its own dialog has made the person name the skill.
+ */
+export interface UnpublishResult {name:string;id:string;versions:string[];evalAssets:number;receipts:number;projects:string[];profiles:number}
 export interface SyncArgs {team?:string}
 // The fetch-only sync result (§10). `detail` is the CLI's own reason for a state other than 'refreshed';
 // it is spelled the same here as in the CLI so the popup can render it.
@@ -201,6 +212,6 @@ HOOK:Design['HOOK']|null;QUARANTINE:Design['QUARANTINE']|null;CLI_LATEST:string|
 INVITEE?:string;K:number|null;AGENT_CLI_AUTH:'signed-in'|'unknown';MACHINE:Machine;ME:Identity;TEAMS:TeamStatus[];TEAM_POLICY:{license:string|null;categories:string[]|null;categoriesNote:string;projects:string[]|null};SHARED_SPECIMEN:[string,string,string,string]|null;tools:{git:boolean;gh:boolean};syncNote:string|null};
 export type Onboarding = Pick<Design, 'ONBOARD_STEPS'|'ONBOARD_BASICS'|'GLOBAL_SET'|'BOOT_STEPS'|'ONBOARD_LATER'|'ONBOARD_COMMUNITY'|'ONBOARD_FETCH_ERROR'|'WELCOME_LINES'|'BASICS_COPY'|'BASICS_HINT'|'THEME_OPTIONS'|'LIBRARY_OVERVIEW'|'INVITEE'|'TEAM_REPO'|'INVITE_TIP'|'JOIN_BLOCK_NOTE'> & {skill:SkillCard;summary:ReceiptSummary|null;arm:Receipt['arm'];used_by:string[];installs_n:number;shareCommand:string;rosterInitials:string[];team:Design['TEAMS'][number];me:Design['ME'];teamN:number;searchResults:{kind:'skill'|'person'|'project';name:string;meta:string;initials?:string}[];joinBlock:string;bootRows:[string,string,string][];failedBootRows:[string,string,string][]};
 
-export interface SkillFileResult {kind:'move'|'copy'|'rename'|'delete'|'fix';path:string;destination:string|null;quarantined:string|null;installed:boolean;notices:string[]}
+export interface SkillFileResult {kind:'move'|'copy'|'rename'|'delete'|'fix'|'category';path:string;destination:string|null;quarantined:string|null;installed:boolean;notices:string[]}
 /** `skill enable|disable`: the per-machine switch. `settingsFile` is the Claude Code settings file whose `skillOverrides` now says so; `changed:false` means it already did. */
 export interface SkillToggleResult {kind:'enable'|'disable';path:string;name:string;enabled:boolean;settingsFile:string;changed:boolean;notices:string[]}

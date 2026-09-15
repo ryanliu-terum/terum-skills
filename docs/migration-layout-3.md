@@ -5,14 +5,17 @@ A human runs it from a terminal only after the release containing B1's auto-shar
 propagated to teammates (§13.1(b)). It is not an app/frame verb and has no automatic trigger.
 
 The command selects the configured team (`--team <name>` when necessary) and uses one guarded
-`safeWrite` commit to move every flat skill's bytes, including eval cases, into `v1`, fold the old
-global list into `projects.Global`, re-key matching receipts, archive the others verbatim, and
-rewrite all members' installed versions and adopted project references. It preserves executable
-modes and unknown JSON fields. The clone's push guard is re-armed; repeating the command on layout
+`safeWrite` commit to move every flat skill's bytes, including eval cases, into `v1`, drop the old
+global list, re-key matching receipts, archive the others verbatim, and rewrite all members'
+installed versions. It preserves executable modes and unknown JSON fields. The global list is
+dropped rather than folded into a project: under layout 3 a skill is in the team because
+`skills/<name>/v<N>` holds its bytes, and `projects` is an optional membership list. Existing
+project cards, whatever they are named, are carried across untouched; `team project delete`
+retires one. The clone's push guard is re-armed; repeating the command on layout
 3 creates no migration commit and repairs the hook if its refresh was interrupted.
 
-Malformed member files or current receipts, multiple case variants of Global, duplicate skill
-identities, and partially versioned input stop the migration for human repair. Archived receipts
+Malformed member files or current receipts, duplicate skill identities, and partially versioned
+input stop the migration for human repair. Archived receipts
 retain their original bytes, and schema-1 receipts acquire no invented content digest (OF-15);
 install's treatment of those receipts belongs to B6. Local config and local eval histories are
 not migrated by this command. Pending install/uninstall recovery belongs to those verbs, not B8.

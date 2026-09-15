@@ -98,7 +98,9 @@ describe('§13 migration (temporary bare repositories only)', () => {
     expect(await p.invoke()).toMatchObject({ ok: true, value: { changed: true, layoutVersion: 3, skills: 1, people: 2, rekeyedReceipts: 1, archivedReceipts: 1 } });
     expect((await git(['rev-list', '--count', `${before}..main`], p.fixture.bare)).trim()).toBe('1');
     const team = JSON.parse(await git(['show', 'main:team.json'], p.fixture.bare));
-    expect(team).toEqual({ ...legacyTeam, layout_version: 3, global: undefined, projects: { Global: { ...legacyTeam.projects.global, skills: [OTHER, ID] } }, policy: { skill_license: 'UNLICENSED', future: true } });
+    // `global[]` is dropped, not folded: the version folders ARE the marketplace. Every project card
+    // carries across byte-identical, including one a layout-2 repo happened to call `global`.
+    expect(team).toEqual({ ...legacyTeam, layout_version: 3, global: undefined, projects: legacyTeam.projects, policy: { skill_license: 'UNLICENSED', future: true } });
     expect(teamSchema.safeParse(team).success).toBe(true);
     const paths = (await git(['ls-tree', '-r', '--name-only', 'main'], p.fixture.bare)).trim().split('\n');
     expect(paths).not.toContain('skills/sample/SKILL.md');
@@ -129,8 +131,10 @@ describe('§13 migration (temporary bare repositories only)', () => {
     expect(other.installed.map(item => item.version)).toEqual([null, 'v2', null]);
     for (const member of [seed, other]) {
       expect(member.future).toBe(true);
-      expect(member.installed.every(item => item.scope.project === 'Global' && item.scope.future === true)).toBe(true);
-      expect(member.projects?.[0]).toBe('Global');
+      // No project is renamed any more, so an install scope and a person's project list carry across
+      // verbatim — only the version vocabulary changes.
+      expect(member.installed.every(item => item.scope.project === 'global' && item.scope.future === true)).toBe(true);
+      expect(member.projects?.[0]).toBe('global');
     }
     if (!github) expect(await readFile(join(p.clone, 'README.md'), 'utf8')).toContain('Version 1');
     expect(await readFile(join(p.clone, '.git/hooks/pre-push'), 'utf8')).toContain('guard-push');
@@ -177,7 +181,6 @@ describe('§13 migration (temporary bare repositories only)', () => {
 
   it.each([
     ['people/other.json', JSON.stringify(person('other', { installed: [entry(ID, OLD)], local_skills: -1 })), 'people/other.json'],
-    ['team.json', JSON.stringify({ ...legacyTeam, projects: { ...legacyTeam.projects, GLOBAL: { remotes: [], skills: [] } } }), 'multiple projects'],
     ['skills/sample/v1/already.txt', 'existing version', 'already contains a version'],
   ])('refuses %s loudly without a migration commit or partial conversion', async (path, bytes, message) => {
     const p = await prepared();
@@ -189,11 +192,15 @@ describe('§13 migration (temporary bare repositories only)', () => {
     expect(JSON.parse(await readFile(join(p.clone, 'team.json'), 'utf8')).layout_version).toBe(2);
   });
 
-  it('creates Global when absent and folds duplicate IDs once', async () => {
+  it('drops the layout-2 global list instead of minting a project for it', async () => {
     const p = await prepared();
     await pushFromSeed(p.fixture.seed, 'team.json', JSON.stringify({ ...legacyTeam, global: [ID, ID], projects: {} }));
     expect(await p.invoke()).toMatchObject({ ok: true });
-    expect(JSON.parse(await git(['show', 'main:team.json'], p.fixture.bare)).projects).toEqual({ Global: { remotes: [], skills: [ID] } });
+    const team = JSON.parse(await git(['show', 'main:team.json'], p.fixture.bare));
+    // Nothing is lost: skills/sample/v1 holds ID's bytes, which is what puts it in the marketplace.
+    expect(team.projects).toEqual({});
+    expect(team.global).toBeUndefined();
+    expect((await git(['ls-tree', '-r', '--name-only', 'main'], p.fixture.bare))).toContain('skills/sample/v1/SKILL.md');
   });
 
   it('the mode overlay also counts a mode-only change in the staged-diff proof', async () => {

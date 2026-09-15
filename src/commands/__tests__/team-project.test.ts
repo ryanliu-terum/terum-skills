@@ -115,3 +115,60 @@ describe('team project create (spec §3, §7.1)', () => {
     expect(result).toMatchObject({ ok: false, error: 'team already has a project named Payments.' });
   });
 });
+
+describe('team project delete — the list goes, the skills stay', () => {
+  const ID = '11111111-1111-4111-8111-111111111111';
+
+  it('removes the key and leaves every other project and the skills untouched', async () => {
+    const { fixture, store, runner } = await prepared({ Global: { remotes: [], skills: [ID] }, Payments: { remotes: ['github.com/acme/payments'], skills: [] } });
+    const io = new ScriptedPrompter([], [true]);
+
+    const result = await run({ kind: 'project-delete', name: 'Global', config: store, runner }, io);
+
+    expect(result).toMatchObject({ ok: true, value: { team: 'team', name: 'Global', skills: 1 } });
+    const team = await teamOnOrigin(fixture.seed);
+    expect(team.projects).toEqual({ Payments: { remotes: ['github.com/acme/payments'], skills: [] } });
+    // The question is the whole safety story, so it is asserted verbatim.
+    expect(io.asked).toContain('Delete project Global from team? Its 1 skill stays in the marketplace; only the project list is removed.');
+    expect(io.lines).toContain('Deleted project Global from team.');
+  });
+
+  it('a declined confirmation writes nothing', async () => {
+    const { fixture, store, runner } = await prepared({ Global: { remotes: [], skills: [] } });
+    const before = await originSha(fixture.bare);
+
+    const result = await run({ kind: 'project-delete', name: 'Global', config: store, runner }, new ScriptedPrompter([], [false]));
+
+    expect(result).toMatchObject({ ok: false, cancelled: true, error: 'Project Global was not deleted.' });
+    expect(await originSha(fixture.bare)).toBe(before);
+  });
+
+  it('--yes skips the question, which is what the app and a script need', async () => {
+    const { fixture, store, runner } = await prepared({ Global: { remotes: [], skills: [] } });
+    const io = new ScriptedPrompter();
+
+    expect(await run({ kind: 'project-delete', name: 'Global', yes: true, config: store, runner }, io)).toMatchObject({ ok: true });
+    expect(io.asked).toEqual([]);
+    expect(await teamOnOrigin(fixture.seed)).toMatchObject({ projects: {} });
+  });
+
+  it('refuses a name the team does not have, matched exactly, before anything is written', async () => {
+    const { fixture, store, runner } = await prepared({ Global: { remotes: [], skills: [] } });
+    const before = await originSha(fixture.bare);
+
+    expect(await run({ kind: 'project-delete', name: 'global', config: store, runner }, new ScriptedPrompter([], [true])))
+      .toMatchObject({ ok: false, error: 'team has no project named global.' });
+    expect(await originSha(fixture.bare)).toBe(before);
+  });
+
+  it('asks for the name only when it is interactive, and refuses otherwise', async () => {
+    const { store, runner } = await prepared({ Global: { remotes: [], skills: [] } });
+
+    expect(await run({ kind: 'project-delete', config: store, runner }, new ScriptedPrompter()))
+      .toMatchObject({ ok: false, error: 'Specify a project name.' });
+
+    const io = new ScriptedPrompter(['Global'], [true], true);
+    expect(await run({ kind: 'project-delete', config: store, runner }, io)).toMatchObject({ ok: true, value: { name: 'Global' } });
+    expect(io.askedAbout('Project name?')).toBe(true);
+  });
+});

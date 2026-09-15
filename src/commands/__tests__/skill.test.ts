@@ -8,7 +8,7 @@ import { run as list } from '../ls.js';
 import { createConfigStore } from '../../lib/config.js';
 import { fsForTests, lockTarget } from '../../lib/placer.js';
 import { snapshotSkillDirectory } from '../../lib/placer/vendor/skillhub/skill-fingerprint.js';
-import { bareTeam, cloneWithIdentity, person, pushFromSeed, ScriptedPrompter, temporaryDirectory } from '../../lib/__tests__/fixtures.js';
+import { bareTeam, cloneWithIdentity, person, pushFromSeed, ScriptedPrompter, TEAM_JSON, temporaryDirectory } from '../../lib/__tests__/fixtures.js';
 vi.mock('node:fs/promises', async original => ({ ...await original<typeof import('node:fs/promises')>() }));
 afterEach(()=>vi.restoreAllMocks());
 const id='11111111-1111-4111-8111-111111111111';
@@ -67,6 +67,61 @@ describe('skill fix',()=>{
   expect(await fix(f)).toMatchObject({ok:false,error:`${f.path} has no SKILL.md; nothing to fix.`});
   const link=join(f.root,'linked');await fs.symlink(f.path,link);
   expect(await fix(f,link)).toMatchObject({ok:false,error:expect.stringContaining('not a plain folder')});
+ });
+});
+describe('skill category',()=>{
+ // A plain clone on disk: `readTeam` and `skillRecords` only read files, and this verb never fetches.
+ async function team(f:Awaited<ReturnType<typeof fixture>>,categories:string[],published?:{version:number;category:string}){
+  const clone=f.store.teamClone('team');await fs.mkdir(clone,{recursive:true});
+  await fs.writeFile(join(clone,'team.json'),JSON.stringify({...TEAM_JSON,categories}));
+  if(published){const dir=join(clone,'skills','alpha','v'+published.version);await fs.mkdir(dir,{recursive:true});await fs.writeFile(join(dir,'SKILL.md'),raw().replace('terum-category: testing','terum-category: '+published.category));}
+  await f.store.update(c=>{c.teams.team={remote:'github.com/o/shared',handle:'seed'};});
+ }
+ const categorise=(f:Awaited<ReturnType<typeof fixture>>,to:string,path=f.path)=>run({kind:'category',path,to,home:f.home,config:f.store},new ScriptedPrompter([]));
+ it('rewrites only the category line, keeps every other byte, and refuses the second run as a no-op',async()=>{
+  const f=await fixture(false);await fs.writeFile(join(f.path,'SKILL.md'),raw().replace('terum-category: testing','terum-category: testing # kept'));
+  expect(await categorise(f,'infra')).toMatchObject({ok:true,value:{kind:'category',path:f.path,destination:null,quarantined:null,installed:false,notices:['Changed alpha from testing to infra.']}});
+  const after=await fs.readFile(join(f.path,'SKILL.md'),'utf8');
+  expect(YAML.parse(after.split('---')[1]!)).toMatchObject({name:'alpha',metadata:{id,'terum-category':'infra'}});
+  expect(after).toContain('  terum-category: infra # kept\n');expect(after.endsWith('---\nOriginal bytes\n')).toBe(true);
+  expect(await categorise(f,' infra ')).toMatchObject({ok:false,error:'alpha already declares infra; nothing to change.'});
+  expect(await categorise(f,'  ')).toMatchObject({ok:false,error:'--to must be a non-empty category name.'});
+  expect(await fs.readFile(join(f.path,'SKILL.md'),'utf8')).toBe(after);
+ });
+ it('writes a metadata block for a folder that declares none, and reports the placement as installed',async()=>{
+  const f=await fixture(true);await fs.writeFile(join(f.path,'SKILL.md'),'---\nname: alpha\ndescription: a skill\n---\nBody\n');
+  expect(await categorise(f,'infra')).toMatchObject({ok:true,value:{installed:true,notices:['Set alpha to infra; its SKILL.md declared no category.']}});
+  expect(YAML.parse((await fs.readFile(join(f.path,'SKILL.md'),'utf8')).split('---')[1]!)).toEqual({name:'alpha',description:'a skill',metadata:{'terum-category':'infra'}});
+  // The ledger keeps its fingerprint: the bytes now differ from the team's, which is what `ls` calls edited.
+  expect((await f.store.read()).placements[f.path]).toMatchObject({fingerprint:f.fingerprint});
+ });
+ it('takes the team’s spelling for a listed category and gives an off-list one HYG7’s own sentence',async()=>{
+  const f=await fixture(false);await team(f,['infra','ops']);
+  expect(await categorise(f,'INFRA')).toMatchObject({ok:true,value:{notices:['Changed alpha from testing to infra.']}});
+  expect(await categorise(f,'platform')).toMatchObject({ok:true,value:{notices:['Changed alpha from infra to platform.',"terum-category `platform` is not one of your team's categories (infra, ops). Browse will give it a bucket of its own; add it to team.json or change this line."]}});
+ });
+ it('names the version the team still shows and the publish that would mint the next one',async()=>{
+  const f=await fixture(false);await team(f,['workflow','infra'],{version:4,category:'workflow'});
+  expect(await categorise(f,'infra')).toMatchObject({ok:true,value:{notices:[
+   'Changed alpha from testing to infra.',
+   "The team still shows workflow: a published category lives inside Version 4's files, which never change.",
+   'Publish to mint Version 5 with the new category:',
+   "  npx -y terum-skills@latest publish 'alpha'"]}});
+  // Nothing was published and nothing in the clone was touched: the team's v4 still declares workflow.
+  expect(await fs.readFile(join(f.store.teamClone('team'),'skills','alpha','v4','SKILL.md'),'utf8')).toContain('terum-category: workflow');
+ });
+ it('says so instead when the local folder is catching up to what the team already shows',async()=>{
+  const f=await fixture(false);await team(f,['workflow'],{version:2,category:'workflow'});
+  expect(await categorise(f,'workflow')).toMatchObject({ok:true,value:{notices:['Changed alpha from testing to workflow.','The team already shows workflow: Version 2 declares it too, so there is nothing to publish.']}});
+ });
+ it('refuses a missing SKILL.md, frontmatter YAML cannot read, and a symlinked folder',async()=>{
+  const f=await fixture(false);
+  await fs.writeFile(join(f.path,'SKILL.md'),'---\nname: [\ndescription: x\n---\n');
+  expect(await categorise(f,'infra')).toMatchObject({ok:false,error:expect.stringMatching(/frontmatter is not readable YAML; run `npx -y terum-skills@latest skill fix /)});
+  const link=join(f.root,'linked');await fs.symlink(f.path,link);
+  expect(await categorise(f,'infra',link)).toMatchObject({ok:false,error:expect.stringContaining('not a plain folder')});
+  await fs.rm(join(f.path,'SKILL.md'));
+  expect(await categorise(f,'infra')).toMatchObject({ok:false,error:`${f.path} has no SKILL.md; there is no category to change.`});
  });
 });
 describe('D6 Library file operations',()=>{

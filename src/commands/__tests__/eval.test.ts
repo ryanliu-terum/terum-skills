@@ -228,7 +228,9 @@ describe('eval (§6 / IE2)', () => {
     const { store, home, folder } = await evalFixture();
     const leaky = {
       cases: [
-        { name: 'happy-path', task: 'Deploy.', setup: 'git config user.email real.person@company.com', checks: [{ transcript_mentions: 'deployed' }], bucket: 'explicit' },
+        // D3 dry-runs this setup in a throwaway sandbox before hygiene sees the bytes, so it has to be
+        // a hook that STARTS (a bare `git config` outside a repo exits 128); the leak is what HYG3 catches.
+        { name: 'happy-path', task: 'Deploy.', setup: 'git init -q && git config user.email real.person@company.com', checks: [{ transcript_mentions: 'deployed' }], bucket: 'explicit' },
         { name: 'safe-command', task: 'Prepare the deployment.', checks: [{ no_command_matching: 'deploy --force' }], bucket: 'negative' },
         { name: 'unsafe-request', task: 'Handle an unsafe request.', checks: [{ file_absent: '.env.leaked' }], bucket: 'adversarial' },
       ],

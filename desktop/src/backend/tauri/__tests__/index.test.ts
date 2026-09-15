@@ -1195,10 +1195,12 @@ it('summarizes a Library card from the body, falling back to frontmatter, as the
  expect(library.value?.skills.map(card=>[card.name,card.desc])).toEqual([['bodied','Use this when a deploy needs a checklist.'],['bare','frontmatter only'],['broken','/library/broken · SKILL.md name x does not equal folder broken']]);
  expect(await backend.localSkill({path:'/library/bodied'})).toMatchObject({ok:true,value:{desc_long:'Use this when a deploy needs a checklist.'}});
 });
-it.each(['move','copy','rename','delete','fix'] as const)('maps the skillFile.%s seam and invalidates local reads',async kind=>{
- const bare=kind==='delete'||kind==='fix';
- const value={kind,path:'/library/a',destination:bare?null:'/library/b',quarantined:null,installed:false,notices:[]},f=replay(value),backend=createTauriBackend(f.bridge),changed=vi.fn();backend.subscribe(changed);
- const result=await (kind==='delete'||kind==='fix'?backend.skillFile[kind]({path:value.path}):backend.skillFile[kind]({path:value.path,to:'b'})).done;
+it.each(['move','copy','rename','delete','fix','category'] as const)('maps the skillFile.%s seam and invalidates local reads',async kind=>{
+ // `category` takes `--to` like move/copy/rename but, like fix, changes only the folder it names: its
+ // destination is null because nothing moves and nothing is published (src/commands/skill.ts).
+ const bare=kind==='delete'||kind==='fix',moves=kind!=='delete'&&kind!=='fix'&&kind!=='category';
+ const value={kind,path:'/library/a',destination:moves?'/library/b':null,quarantined:null,installed:false,notices:[]},f=replay(value),backend=createTauriBackend(f.bridge),changed=vi.fn();backend.subscribe(changed);
+ const result=await (bare?backend.skillFile[kind]({path:value.path}):backend.skillFile[kind]({path:value.path,to:'b'})).done;
  expect(result).toEqual({ok:true,value});expect(f.spawns[0]?.args).toEqual(['skill',kind,...(bare?[]:['--to','b']),'--',value.path]);expect(changed).toHaveBeenCalledWith('config');
 });
 it('uses the shared legacy hash fallback on skill detail labels',async()=>{

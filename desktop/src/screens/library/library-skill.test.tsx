@@ -2,6 +2,7 @@ import { afterEach,beforeEach,expect,it,vi } from 'vitest';
 import { cleanup,fireEvent,render,screen,waitFor,within } from '@testing-library/react';
 import { App } from '../../app/App';
 import { Providers } from '../../app/providers';
+import { PublishRunProvider } from '../../app/PublishRunProvider';
 import { useUiStore } from '../../app/store';
 import { BackendContext } from '../../backend';
 import { createMockBackend } from '../../backend/mock';
@@ -63,7 +64,7 @@ it('says there is nowhere to move a folder when Global is the only root, and kee
  expect(within(dialog).queryByLabelText('Move to')).toBeNull();
  expect(within(dialog).getByRole('button',{name:'Move'})).toBeDisabled();
 });
-it('copies the local folder into the other root through skillFile.copy, leaves the source listed, and lands on the copy',async()=>{
+it('copies the local folder into the other root through skillFile.copy, leaves the source listed, and returns to the Library',async()=>{
  const backend=createMockBackend(),copy=vi.spyOn(backend.skillFile,'copy'),install=vi.spyOn(backend,'install'),uninstall=vi.spyOn(backend,'uninstallSkill');
  openWith('#/skill/local?path='+encodeURIComponent('~/.claude/skills/deploy-check')+'&dialog=file-copy',backend);
  const dialog=await screen.findByRole('dialog',{name:'Copy deploy-check'});
@@ -75,9 +76,8 @@ it('copies the local folder into the other root through skillFile.copy, leaves t
  expect(copy).toHaveBeenCalledWith({path:'~/.claude/skills/deploy-check',to:'/Users/you/code/ssm'});
  expect(install).not.toHaveBeenCalled();expect(uninstall).not.toHaveBeenCalled();
  fireEvent.click(within(dialog).getByRole('button',{name:'Done'}));
- await waitFor(()=>expect(location.hash).toBe('#/skill/local?path='+encodeURIComponent('/Users/you/code/ssm/.claude/skills/deploy-check')));
+ await waitFor(()=>expect(location.hash).toBe('#/library/global'));
  // The source is still a card in the root it was copied from: a copy takes nothing away.
- cleanup();openWith('#/library/global',backend);
  expect(await screen.findByTestId('skill-card-deploy-check')).toBeInTheDocument();
 });
 it('shows a failed local move without running install or uninstall',async()=>{
@@ -88,18 +88,20 @@ it('shows a failed local move without running install or uninstall',async()=>{
 
 // §5.2: there is no pull request any more. What the notice has to distinguish is the three things a
 // publish can actually have done — minted a version, matched one that already existed, or only added
-// the skill to a project — because they are not the same news.
+// the skill to a project — because they are not the same news. `project` is null for the ordinary
+// publish, which targets the marketplace and lists the skill under no project at all.
 it.each([
-  [{version:'v3',created:true,identicalTo:null,projectAdded:true},'deploy-check was published to Global as Version 3.'],
-  [{version:null,created:false,identicalTo:'v2',projectAdded:true},'deploy-check was added to Global; its bytes are identical to Version 2.'],
-  [{version:null,created:false,identicalTo:'v2',projectAdded:false,attachedEvals:2},'Attached 2 eval run(s) to Version 2 in Global; identical skill bytes minted no version.'],
-  [{version:null,created:false,identicalTo:'v2',projectAdded:false},'deploy-check is already Version 2 in Global; nothing to publish.'],
+  [{version:'v3',created:true,identicalTo:null,projectAdded:false,project:null},'deploy-check was published to the marketplace as Version 3.'],
+  [{version:'v3',created:true,identicalTo:null,projectAdded:true,project:'Payments'},'deploy-check was published to the marketplace and Payments as Version 3.'],
+  [{version:null,created:false,identicalTo:'v2',projectAdded:true,project:'Payments'},'deploy-check was added to Payments; its bytes are identical to Version 2.'],
+  [{version:null,created:false,identicalTo:'v2',projectAdded:false,attachedEvals:2,project:null},'Attached 2 eval run(s) to Version 2 in the marketplace; identical skill bytes minted no version.'],
+  [{version:null,created:false,identicalTo:'v2',projectAdded:false,project:null},'deploy-check is already Version 2 in the marketplace; nothing to publish.'],
 ])('names what the publish actually did: %j',async(outcome,text)=>{
  const backend=createMockBackend();
  const detail=await backend.skill({ref:'deploy-check'});
  if(!detail.ok)throw new Error('fixture detail unavailable');
  vi.spyOn(backend,'skill').mockResolvedValue({ok:true,value:{...detail.value,teamState:'shared'}});
- const publish=vi.spyOn(backend,'publish').mockImplementation(()=>createRun(async()=>({ok:true,value:{name:'deploy-check',project:'Global',attachedEvals:0,profileAdded:false,...outcome}})) as never);
+ const publish=vi.spyOn(backend,'publish').mockImplementation(()=>createRun(async()=>({ok:true,value:{name:'deploy-check',attachedEvals:0,profileAdded:false,...outcome}})) as never);
  openWith('#/skill/deploy-check?dialog=publish',backend);
  fireEvent.click(within(await screen.findByRole('dialog',{name:'Publish deploy-check to the team?'})).getByRole('button',{name:'Publish'}));
  await waitFor(()=>expect(publish).toHaveBeenCalledWith(expect.objectContaining({ref:'deploy-check'})));
@@ -219,7 +221,8 @@ it('keeps install and uninstall in the card menu alone, with no button of their 
  expect(document.querySelector('.card-install')).toBeNull();
 });
 
-function openWith(route:string,backend:Backend){location.hash=route;return render(<Providers><BackendContext value={backend}><App/></BackendContext></Providers>);}
+// The publish run lives in `Providers`, above this backend override, so a nearer `PublishRunProvider` keeps the run on the mock (see publishing.test.tsx).
+function openWith(route:string,backend:Backend){location.hash=route;return render(<Providers><BackendContext value={backend}><PublishRunProvider><App/></PublishRunProvider></BackendContext></Providers>);}
 it('preserves checkout root and URL state across search and overview changes',async()=>{
  const root='/Users/you/code/mrf';open('#/library/checkout?root='+encodeURIComponent(root)+'&q=migration&overview=0&__mock=missing-root&theme=light');
  expect(await screen.findByRole('link',{name:'MRF 2'})).toHaveAttribute('aria-current','page');
@@ -421,10 +424,19 @@ it.each(['','&'+terumOrigin])('preselects Global in the install dialog whatever 
  expect(within(dialog).getAllByRole('radio')).toHaveLength(4);
  expect(within(dialog).getByRole('radio',{name:/Global.*every session.*~\/.claude\/skills/})).toBeChecked();
 });
-it.each([true,false])('follows the moved folder by path from either Library root (%s)',async project=>{
+// 2026-09-14 (Ajay): a finished move returns to the list it was started from, whichever root that was —
+// the same place delete already went. Following `destination` to /skill/local?path=… made a by-path read
+// the landing page, which answers "Not in your library" until the moved folder is scanned again.
+it.each([true,false])('returns to the Library root the move was started from (project %s)',async project=>{
  const backend=createMockBackend(),dialog=await openMove(backend,project?'/Users/you/code/terum/.claude/skills/deploy-check':'~/.claude/skills/deploy-check');
  fireEvent.click(within(dialog).getByRole('button',{name:'Move'}));fireEvent.click(await within(dialog).findByRole('button',{name:'Done'}));
- await waitFor(()=>expect(location.hash).toBe('#/skill/local?path='+encodeURIComponent('/Users/you/code/ssm/.claude/skills/deploy-check')));
+ await waitFor(()=>expect(location.hash).toBe(project?'#/library/checkout?'+terumOrigin:'#/library/global'));
+ // The board that greets the reader is the Library, never a detail page that cannot find the folder it
+ // just moved; the card is gone from this root because the folder is, which is the truthful answer.
+ expect(await screen.findByText(/^\d+ skills?$/)).toBeVisible();
+ expect(screen.queryByTestId('skill-card-deploy-check')).toBeNull();
+ expect(screen.queryByText('Not in your library')).toBeNull();
+ expect(screen.queryByText(/^Couldn['’]t (find|read)/)).toBeNull();
 });
 // hybrid review r1 (high): after a successful move the dialog showed Done, but Escape or an outside
 // click fired onClose, so the page stayed on ?path=<old> and reported the moved folder as not in the
@@ -433,7 +445,7 @@ it('hands a finished file operation on when the dialog is dismissed with Escape'
  const backend=createMockBackend(),dialog=await openMove(backend);fireEvent.click(within(dialog).getByRole('button',{name:'Move'}));
  await within(dialog).findByRole('button',{name:'Done'});
  fireEvent.keyDown(document.activeElement??document.body,{key:'Escape'});
- await waitFor(()=>expect(location.hash).toBe('#/skill/local?path='+encodeURIComponent('/Users/you/code/ssm/.claude/skills/deploy-check')));
+ await waitFor(()=>expect(location.hash).toBe('#/library/global'));
 });
 // A cancelled or refused CLI result lands in useWorkflow.notice and closes the dialog; the dialog owned
 // the workflow, so the notice unmounted with it and the user saw nothing (AGENTS.md: a Result.ok===false

@@ -3,6 +3,7 @@ import { resolve } from 'node:path';
 import { createElement } from 'react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { cleanup, render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Tooltip } from '@base-ui/react/tooltip';
 import { BackendContext } from '../../index';
@@ -104,4 +105,62 @@ it('renders the installed/team version mismatch through the App using CLI invent
 it('does not label an already committed local receipt as an uncommitted run',async()=>{
  const r=await adapter({...report(),latestState:'none',latest:null,localRuns:[{run_id:'20260909T010000Z',run_dir:'/tmp/run',execution_status:'complete',committed:true,receipt:receipt()}]}).backend.evalReport({ref:'deploy-check'});
  expect(r.value?.receipt).toBeNull();expect(r.value?.localRuns[0]?.committed).toBe(true);
+});
+
+// EV-20 (amended 2026-09-14, Ryan): the History rail opens a prior run. Every assertion below is
+// about ONE receipt at a time — the opened run is rendered from its own receipt and labelled with
+// its own version, and no figure is derived across runs (eval-engine §12:503).
+function olderRun(){const base=receipt();return {version:'v1',run_id:'20260908T000000Z',timestamp:'2026-09-08T00:00:00Z',runner_handle:'sam',comparison:{win:4,loss:2,tie:3,net_lift:2/9,sign_p:0.34},verdict:'NEUTRAL',execution_status:'complete',
+ receipt:{...base,path:'/repo/evals/id/v1/20260908T000000Z.json',version:'v1',run_id:'20260908T000000Z',verdict:'NEUTRAL',comparisons:{'candidate-vs-baseline':{win:4,loss:2,tie:3,net_lift:2/9,sign_p:0.34}},provenance:{...base.provenance,timestamp:'2026-09-08T00:00:00Z',runner_handle:'sam'}}};}
+function reportText(){return document.querySelector('.evaluation-report')?.textContent??'';}
+function evalsApp(value:unknown,hash='#/skill/deploy-check?tab=evals'){
+ const f=fakeBridge((args,emit)=>{
+  if(args[0]==='eval-report'){emit({kind:'stdout',line:JSON.stringify({t:'result',verb:'eval-report',ok:true,exitCode:0,value})});return;}
+  const name=args[0]==='ls'?args.includes('--local')?'ls-local':'ls':args[0]==='validate'?'validate-deploy-check':args[0]!;
+  for(const line of readFileSync(resolve('../.planning/codex-runs/m7-S7g/frames',name+'.jsonl'),'utf8').trim().split('\n'))emit({kind:'stdout',line});
+ });
+ location.hash=hash;
+ render(createElement(BackendContext,{value:createTauriBackend(f.bridge)},createElement(QueryClientProvider,{client:new QueryClient({defaultOptions:{queries:{retry:false}}})},createElement(Tooltip.Provider,null,createElement(App)))));
+}
+it('EV-20: a history row carries its own receipt as its own report, and a row without one carries none',async()=>{
+ const older=olderRun();
+ const r=await adapter({...report(),history:[older,{...older,run_id:'20260907T000000Z',receipt:null}]}).backend.evalReport({ref:'deploy-check'});
+ if(!r.ok)throw new Error(r.error);
+ expect(r.value.history[0]).toMatchObject({runId:'20260908T000000Z',when:'2026-09-08',runner:'sam',version:'Version 1'});
+ // Its own receipt, not the latest one, and its own numbers — the same shape the latest run renders from.
+ expect(r.value.history[0]?.report?.receipt).toMatchObject({run_id:'20260908T000000Z',runner:'sam'});
+ expect(r.value.history[0]?.report?.summary).toEqual({w:4,l:2,t:3,n:9,lift:22,verdict:'NEUTRAL',partial:null,signP:'0.340'});
+ expect(r.value.history[0]?.report?.numbers).toEqual({holes:0,nRounds:9,triggerTotal:6});
+ // A CLI older than the amendment sends no receipt on the row: it stays a listing, never a reconstruction.
+ expect(r.value.history[1]?.report).toBeUndefined();
+ expect(r.value.history[1]?.summary).toMatchObject({verdict:'NEUTRAL'});
+});
+it('EV-20: opening a history row renders that run from its own receipt, and names its own version',async()=>{
+ evalsApp({...report(),history:[olderRun()]});
+ expect(await screen.findByText('run 20260909T010000Z')).toBeVisible();
+ await userEvent.click(screen.getByRole('button',{name:/sam · Version 1/}));
+ expect(await screen.findByText('run 20260908T000000Z')).toBeVisible();
+ expect(reportText()).toContain('Evaluation of deploy-check');
+ expect(reportText()).toContain('Version 1');
+ // One receipt on the surface (§12:503): the latest run is gone from the report, not beside it.
+ expect(reportText()).not.toContain('20260909T010000Z');
+ expect(screen.getByText(/Opened from History · run 20260908T000000Z by sam/)).toBeVisible();
+ await userEvent.click(screen.getByRole('button',{name:'Show latest run'}));
+ expect(await screen.findByText('run 20260909T010000Z')).toBeVisible();
+ expect(screen.queryByText(/Opened from History/)).toBeNull();
+});
+it('EV-20: ?run= opens the row directly, and an id no row carries falls back to the latest run',async()=>{
+ evalsApp({...report(),history:[olderRun()]},'#/skill/deploy-check?tab=evals&run=20260908T000000Z');
+ expect(await screen.findByText(/Opened from History · run 20260908T000000Z by sam/)).toBeVisible();
+ cleanup();
+ evalsApp({...report(),history:[olderRun()]},'#/skill/deploy-check?tab=evals&run=nothing-here');
+ expect(await screen.findByText('run 20260909T010000Z')).toBeVisible();
+ expect(screen.queryByText(/Opened from History/)).toBeNull();
+});
+it('EV-20: a version with no receipt of its own still opens an earlier run from History',async()=>{
+ evalsApp({...report(),latestState:'none',latest:null,history:[olderRun()]});
+ expect(await screen.findByText('No receipt for this version')).toBeVisible();
+ await userEvent.click(screen.getByRole('button',{name:/sam · Version 1/}));
+ expect(await screen.findByText(/this version has no receipt of its own/)).toBeVisible();
+ expect(reportText()).toContain('Version 1');
 });

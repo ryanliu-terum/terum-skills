@@ -9,6 +9,7 @@ import { LaunchCoordinator } from './LaunchCoordinator';
 import { routes } from './routes';
 import { MachineRemovalHost } from './MachineRemovalHost';
 import { EvalRunDialogHost } from './EvalRunDialogHost';
+import { PublishRunDialogHost } from './PublishRunDialogHost';
 function RouteView(){const location=useLocation(),setOverride=useContext(ThemeOverrideContext);useEffect(()=>{setOverride(themeOverride(location.search));},[location.search,setOverride]);const setLastRoute=useUiStore(s=>s.setLastRoute);useEffect(()=>setLastRoute(location.pathname+location.search),[location.pathname,location.search,setLastRoute]);return useRoutes(routes);}
 function Shortcuts(){
  const navigate=useNavigate(),location=useLocation(),sync=useSyncAction();
@@ -32,4 +33,4 @@ function Shortcuts(){
  },[navigate,location.pathname,sync,ctrl]);
  return sync.popup;
 }
-export function App(){const backend=useBackend(),[ready,setReady]=useState(!backend.prefs.ready);useEffect(()=>{void backend.prefs.ready?.then(()=>setReady(true));},[backend]);if(!ready)return null;return <HashRouter><span aria-hidden="true" style={{position:'absolute',width:0,height:0,overflow:'hidden',fontFamily:'var(--font-mono)'}}>0</span><Shortcuts/><LaunchCoordinator/><RouteView/><EvalRunDialogHost/><MachineRemovalHost/></HashRouter>;}
+export function App(){const backend=useBackend(),[ready,setReady]=useState(!backend.prefs.ready);useEffect(()=>{void backend.prefs.ready?.then(()=>setReady(true));},[backend]);if(!ready)return null;return <HashRouter><span aria-hidden="true" style={{position:'absolute',width:0,height:0,overflow:'hidden',fontFamily:'var(--font-mono)'}}>0</span><Shortcuts/><LaunchCoordinator/><RouteView/><EvalRunDialogHost/><PublishRunDialogHost/><MachineRemovalHost/></HashRouter>;}

@@ -3,28 +3,29 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { MachineRemovalProvider } from '../../app/MachineRemovalProvider';
 import { App } from '../../app/App';
 import { Providers } from '../../app/providers';
+import { PublishRunProvider } from '../../app/PublishRunProvider';
 import { useUiStore } from '../../app/store';
 import { BackendContext } from '../../backend';
 import { createMockBackend } from '../../backend/mock';
 import { createRun } from '../../backend/mock/run';
 import type { PublishResult, SkillCard } from '../../backend/types';
 import { detailPath, localActionReason } from '../../components/domain/skill-card-actions';
-import { CATEGORY_ASK, GLOBAL_LIST, PUBLISH_CATEGORY_KEY, PUBLISH_TARGET_KEY, TARGET_ASK, sharedState } from '../skill/publish-defaults';
+import { CATEGORY_ASK, MARKETPLACE_ONLY, PUBLISH_CATEGORY_KEY, PUBLISH_TARGET_KEY, sharedState } from '../skill/publish-defaults';
 
 // Settings ▸ Publishing (Teddy, 2026-09-14): Defaults the publish dialogs honour, the Global folders with their state
 // on the team, the CLI's own rules, and the promise that nothing is shared automatically.
 const backend = createMockBackend();
-function open(route: string) { location.hash = route; return render(<Providers><BackendContext value={backend}><MachineRemovalProvider><App/></MachineRemovalProvider></BackendContext></Providers>); }
+function open(route: string) { location.hash = route; return render(<Providers><BackendContext value={backend}><PublishRunProvider><MachineRemovalProvider><App/></MachineRemovalProvider></PublishRunProvider></BackendContext></Providers>); }
 beforeEach(() => { localStorage.clear(); useUiStore.getState().setTheme('dark'); });
 afterEach(() => { cleanup(); location.hash = ''; vi.restoreAllMocks(); });
 async function globalCards(): Promise<SkillCard[]> { const result = await backend.library({ scope: { kind: 'global' } }); if (!result.ok) throw new Error(result.error); return result.value.skills; }
-const published = (): PublishResult => ({ name: 'x', project: GLOBAL_LIST, version: 'v2', created: true, identicalTo: null, attachedEvals: 0, evalAssets: 0, profileAdded: false, projectAdded: false });
+const published = (): PublishResult => ({ name: 'x', project: null, version: 'v2', created: true, identicalTo: null, attachedEvals: 0, evalAssets: 0, profileAdded: false, projectAdded: false });
 
 it('draws the four groups with the CLI-backed defaults and rules', async () => {
   open('#/settings/publishing');
   expect(await screen.findByRole('heading', { name: 'Publishing' })).toBeInTheDocument();
   for (const label of ['Defaults', 'Shared from this machine', 'Rules', 'Nothing automatic']) expect(screen.getByText(label)).toBeInTheDocument();
-  expect(screen.getByRole('combobox', { name: 'Publish to' })).toHaveTextContent(TARGET_ASK);
+  expect(screen.getByRole('combobox', { name: 'Publish to' })).toHaveTextContent(MARKETPLACE_ONLY);
   expect(screen.getByRole('combobox', { name: 'Category' })).toHaveTextContent('Model suggests');
   for (const rule of ['Frontmatter', 'Hygiene', 'Regression gate', 'Identical bytes', 'Later edits', 'Sync only fetches']) expect(screen.getByText(rule)).toBeInTheDocument();
   expect(document.querySelector('.terminal-hint .board-mono')?.textContent).toBe('npx -y terum-skills@latest publish <ref>');
@@ -75,16 +76,16 @@ it('the skill page publish dialog sends the Settings target and a typed category
   expect(publish).toHaveBeenCalledWith(expect.objectContaining({ project: 'SSM', category: 'ops' }));
 });
 
-it('the skill page dialog starts on Global for "Ask each time" and sends no category when the field is empty', async () => {
+it('the skill page dialog starts on the marketplace and sends neither --project nor --category', async () => {
   await shareable();
   const publish = vi.spyOn(backend, 'publish').mockImplementation(() => createRun(async () => ({ ok: true, value: published() })));
   open('#/skill/deploy-check?dialog=publish');
   const dialog = await screen.findByRole('dialog');
-  expect(within(dialog).getByRole('combobox', { name: 'Publish to' })).toHaveTextContent(GLOBAL_LIST);
+  expect(within(dialog).getByRole('combobox', { name: 'Publish to' })).toHaveTextContent(MARKETPLACE_ONLY);
   expect(within(dialog).queryByRole('combobox', { name: 'Category' })).toBeNull();
   await act(async () => { fireEvent.click(within(dialog).getByRole('button', { name: 'Publish' })); });
   const args = publish.mock.calls[0]![0];
-  expect(args.project).toBe(GLOBAL_LIST); expect(args.category).toBeUndefined();
+  expect(args.project).toBeUndefined(); expect(args.category).toBeUndefined();
 });
 
 it('the bulk dialog sends the target to every row and leaves categories to the model', async () => {
