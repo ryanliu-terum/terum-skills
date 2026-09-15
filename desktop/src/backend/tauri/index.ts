@@ -15,7 +15,7 @@ import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import { writeText, writeImage } from '@tauri-apps/plugin-clipboard-manager';
 import { Image } from '@tauri-apps/api/image';
 import type { Backend } from '../Backend';
-import type { Root, LibraryScope, IdentityWrite, Catalog, Roster, Person, Library, SkillCard, SkillDetail, UpdateAdvice, StatusResult, Settings, Capabilities, Surfaces, ReadOptions, ChangeSource, EvalArgs, EvalManyArgs, EvalResult, InstallArgs, InstalledResult, InviteArgs, InviteResult, MachineUninstallResult, PublishArgs, PublishResult, ReconcileResult, Result, Run, SearchArgs, SearchHit, SetupArgs, SetupResult, Subscription, SyncArgs, SyncResult, TeamArgs, TeamResult, UninstallArgs, UninstalledResult, ValidateArgs, ValidateResult } from '../types';
+import type { Root, LibraryScope, IdentityWrite, Catalog, Roster, Person, Library, SkillCard, SkillDetail, UpdateAdvice, StatusResult, Settings, Capabilities, Surfaces, ReadOptions, ChangeSource, EvalArgs, EvalManyArgs, EvalResult, InstallArgs, InstalledResult, InviteArgs, InviteResult, MachineUninstallResult, PublishArgs, PublishResult, UnpublishArgs, UnpublishResult, ReconcileResult, Result, Run, SearchArgs, SearchHit, SetupArgs, SetupResult, Subscription, SyncArgs, SyncResult, TeamArgs, TeamResult, UninstallArgs, UninstalledResult, ValidateArgs, ValidateResult } from '../types';
 import { tauriBridge, type AppState, type Bridge } from './bridge';
 import { cliRun } from './run';
 import { createReadSession } from './session.js';
@@ -56,6 +56,9 @@ export const cliMachine = z.object({ teams: z.array(z.string()), removedPlacemen
 // more, so `version` is the `v<N>` it minted — or null when the bytes were identical to one that
 // already exists, which `identicalTo` then names.
 export const cliPublish = z.object({ team: z.string(), id: z.string(), name: z.string(), project: z.string().nullable(), version: z.string().nullable(), created: z.boolean(), identicalTo: z.string().nullable(), attachedEvals: z.number(), evalAssets: z.number().default(0), profileAdded: z.boolean(), projectAdded: z.boolean() }).passthrough();
+// The inverse of cliPublish. Every count is required: a zero is a real answer the app prints, and a
+// CLI too old to report one should fail the parse rather than silently render "removed 0 versions".
+export const cliUnpublish = z.object({ team: z.string(), id: z.string(), name: z.string(), versions: z.array(z.string()), evalAssets: z.number(), receipts: z.number(), projects: z.array(z.string()), profiles: z.number() }).passthrough();
 const cliInvite = z.object({ team: z.string(), invited: z.array(z.string()), already: z.array(z.string()).default([]), failed: z.array(z.object({ login: z.string(), error: z.string() })).default([]) }).passthrough();
 const cliTeam = z.object({ team: z.string() }).passthrough();
 const cliTeamMove = z.object({ from: z.string(), to: z.string(), handle: z.string(), restored: z.array(z.string()), missing: z.array(z.string()), failed: z.array(z.object({ name: z.string(), error: z.string() })) }).passthrough();
@@ -981,6 +984,9 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
     // profile writes the clone's people file and, for --name, config.display_name.
     profile: args => run(['profile', ...(args.name === undefined ? [] : ['--name', args.name]), ...(args.bio === undefined ? [] : ['--bio', args.bio]), ...(args.role === undefined ? [] : ['--role', args.role]), ...(args.projects ?? []).flatMap(project => ['--project', project])], cliProfile, value => value, args.name === undefined ? ['clone'] : ['config', 'clone']),
     // publish writes clone team.json/PR branches and registers the current checkout in config.
+    // Destructive and team-wide. `--yes` is safe here ONLY because the caller opened a confirm dialog
+    // first: the CLI's typed-name prompt is the terminal's brake, and the dialog is the app's.
+    unpublish: (args: UnpublishArgs) => run(['unpublish', ...(args.team ? ['--team', args.team] : []), '--yes', '--', args.ref], cliUnpublish, (value): UnpublishResult => ({ name: value.name, id: value.id, versions: value.versions, evalAssets: value.evalAssets, receipts: value.receipts, projects: value.projects, profiles: value.profiles }), ['clone', 'marketplace']),
     publish: (args: PublishArgs) => run(['publish', ...(args.team ? ['--team', args.team] : []), ...(args.project ? ['--project', args.project] : []), ...(args.category ? ['--category', args.category] : []), '--', args.ref], cliPublish, (value): PublishResult => ({ name: value.name, project: value.project, version: value.version, created: value.created, identicalTo: value.identicalTo, attachedEvals: value.attachedEvals, evalAssets: value.evalAssets, profileAdded: value.profileAdded, projectAdded: value.projectAdded }), ['config', 'clone']),
     // Sync fetches team clones; it never changes the local Library or places a skill.
     sync: (args: SyncArgs) => run(['sync', ...(args.team ? ['--team', args.team] : [])], cliRefresh, (value): SyncResult => ({ notices:value.notices,changed:value.changed,teams:value.teams.map(team=>({team:team.team,state:team.state,...(team.detail===undefined?{}:{detail:team.detail}),...(team.missing?{missing:true as const,successors:(team.successors??[]).map(entry=>({ownerRepo:entry.ownerRepo,source:entry.source,teamName:entry.teamName??null,at:entry.at??null})),...(team.lookup===undefined?{}:{lookup:team.lookup}),...(team.summary===undefined?{}:{summary:team.summary})}:{})})) }), ['marketplace', 'stamp']),

@@ -760,6 +760,12 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "pattern": "try { if (await removeEditHook(editHook) === 'removed') io.print(`Removed the terum-skills edit hook from ${editHookPath} and ${editHook.settingsFile}.`); }"
   },
   {
+    "file": "src/commands/unpublish.ts",
+    "line": 140,
+    "policy": "prose",
+    "pattern": "if (source === undefined) throw new Error('This repository has no team.json; it is not a terum-skills team repo.');"
+  },
+  {
     "file": "src/commands/update.ts",
     "line": 26,
     "policy": "not-a-hint",
@@ -1406,6 +1412,12 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "line": 390,
     "policy": "prose",
     "pattern": "| | `serve` | Answer read requests on one long-lived process instead of starting a new one per call (`--frames` only; the desktop app drives it). Reads only: `status`, `ls`, `eval-report`, `search`, `validate`, `update` |"
+  },
+  {
+    "file": "README.md",
+    "line": 392,
+    "policy": "prose",
+    "pattern": "| | `unpublish <skill> [--yes]` | Retract a skill from the team's marketplace: removes every version, the eval assets beside them, the receipts attached to them, and drops the skill from every project list and member profile. Anyone in the team may unpublish any skill; there is no ownership check. Confirms by typing the skill name (`--yes` skips it). The git history is not rewritten, and installed copies keep working until each machine syncs, which then reports the skill as removed from the team; republishing starts again at Version 1 under a new id |"
   },
   {
     "file": "README.md",
