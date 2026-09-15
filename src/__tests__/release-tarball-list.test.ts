@@ -37,7 +37,7 @@ async function markedSkills(): Promise<string[]> {
 it('the release tarball must-list names every marked skill under .claude/skills, nothing else under dist/claude/skills, and the fixed files', async () => {
   const must = await mustList();
   const marked = await markedSkills();
-  expect(marked.length).toBeGreaterThan(0);
-  expect(must.filter((path) => path.startsWith('dist/claude/skills/')).sort()).toEqual(marked.map((name) => `dist/claude/skills/${name}/SKILL.md`));
+  expect(marked).toEqual(['eval', 'eval-report', 'list-skills', 'search-skills', 'skill-info', 'skill-status', 'sync-skills', 'terum-skills']);
+  expect(must.filter((path) => path.startsWith('dist/claude/skills/')).sort()).toEqual(marked.map((name) => `dist/claude/skills/${name}/SKILL.md`).sort());
   for (const fixed of ['package.json', 'README.md', 'LICENSE', 'NOTICE', 'dist/index.js', 'dist/claude/hooks/terum-skills-edit.mjs']) expect(must).toContain(fixed);
 });
