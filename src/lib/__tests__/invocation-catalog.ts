@@ -1789,7 +1789,19 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "file": "docs/frame-protocol.md",
     "line": 280,
     "policy": "prose",
-    "pattern": "so. Every `ls --local` row carries `enabled` read from those same files, so a shell renders state it read, not"
+    "pattern": "so. Every `ls --local` row, and every `notOffered` entry (a symlinked or half-broken folder Claude Code still"
+  },
+  {
+    "file": "docs/frame-protocol.md",
+    "line": 282,
+    "policy": "prose",
+    "pattern": "the switch belongs to any folder under a skills root, placed by Terum or not. `skill delete` drops the folder's"
+  },
+  {
+    "file": "docs/frame-protocol.md",
+    "line": 283,
+    "policy": "prose",
+    "pattern": "`\"off\"` the way `uninstall-skill` does, and `skill rename` / `skill move` carry it to the new name or the new"
   },
   {
     "file": "docs/frame-protocol.md",
