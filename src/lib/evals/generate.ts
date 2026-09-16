@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import YAML from 'yaml';
 import { AgentRunError, type AgentApi } from './agent.js';
-import { casePathViolation, dryRunCase, loadCase } from './execution.js';
+import { casePathViolation, dryRunCase, dryRunSuite, loadCase, loadSuite, patchApplies } from './execution.js';
 import { parseTriggers } from './triggers.js';
 import { failure, success, type Result } from '../result.js';
 
@@ -37,6 +37,7 @@ export interface GeneratedCases {
 
 export interface GeneratedAssets {
   cases?: GeneratedCases;
+  suite?: { file: string };
   triggers?: string;
 }
 
@@ -53,6 +54,8 @@ export interface GenerateOptions {
   now: Date;
   cases?: boolean;
   triggers?: boolean;
+  /** Optional lenient `metadata.eval.shape` value; validity is owned by this generation boundary. */
+  shape?: unknown;
   /** Where D3's dry-run sandboxes live; a private temp dir, removed afterwards, when omitted. */
   scratch?: string;
 }
@@ -69,18 +72,43 @@ export async function generate(options: GenerateOptions): Promise<Result<Generat
   }
   if (options.cases) {
     const scratch = options.scratch ?? await mkdtemp(join(tmpdir(), 'terum-eval-gen-'));
-    let generated: Result<Record<string, Record<string, unknown>>>;
+    let generated: Result<{ kind: 'cases'; cases: Record<string, Record<string, unknown>> } | { kind: 'suite'; file: string }>;
     try {
-      generated = await askWithValidation(options.agent, casePrompt(options), options.model, skillBytes, (raw) => validateCases(raw, scratch));
+      const shape = generationShape(options.shape);
+      if (!shape.ok) return failure(`Could not generate execution cases: ${shape.error}. Retry the command or pass --no-gen.`);
+      generated = await askWithValidation(options.agent, suitePrompt(options, shape.value), options.model, skillBytes, (raw) => validateExecutionAssets(raw, scratch, shape.value));
     } finally {
       if (options.scratch === undefined) await rm(scratch, { recursive: true, force: true });
     }
     if (!generated.ok) return failure(`Could not generate execution cases: ${generated.error}. Retry the command or pass --no-gen.`);
-    const files: Record<string, string> = {};
-    for (const [name, value] of Object.entries(generated.value)) files[`${name}.yaml`] = header + YAML.stringify(value);
-    out.cases = { files, names: Object.keys(generated.value) };
+    if (generated.value.kind === 'cases') {
+      const files: Record<string, string> = {};
+      for (const [name, value] of Object.entries(generated.value.cases)) files[`${name}.yaml`] = header + YAML.stringify(value);
+      out.cases = { files, names: Object.keys(generated.value.cases) };
+    } else out.suite = { file: header + generated.value.file };
   }
   return success(out);
+}
+
+type GenerationShape = 'suite' | 'cases' | undefined;
+
+function generationShape(value: unknown): Result<GenerationShape> {
+  if (value === undefined || value === null) return success(undefined);
+  if (value === 'suite' || value === 'cases') return success(value);
+  return failure("SKILL.md metadata.eval.shape must be 'suite' or 'cases'");
+}
+
+async function validateExecutionAssets(raw: Record<string, unknown>, scratch: string, fixedShape: GenerationShape): Promise<Result<{ kind: 'cases'; cases: Record<string, Record<string, unknown>> } | { kind: 'suite'; file: string }>> {
+  const isSuite = Object.hasOwn(raw, 'suite');
+  const isCases = Object.hasOwn(raw, 'cases');
+  if (isSuite === isCases) return failure("generated execution assets need exactly one of 'suite' or 'cases'");
+  if (fixedShape !== undefined && (fixedShape === 'suite') !== isSuite) return failure(`The shape is fixed: return {"${fixedShape}": ${fixedShape === 'suite' ? '...}' : '[...]}'}`);
+  if (isCases) {
+    const cases = await validateCases(raw, scratch);
+    return cases.ok ? success({ kind: 'cases', cases: cases.value }) : failure(cases.error);
+  }
+  const suite = await validateSuite(raw, scratch);
+  return suite.ok ? success({ kind: 'suite', file: suite.value }) : failure(suite.error);
 }
 
 /**
@@ -163,6 +191,89 @@ async function validateCases(raw: Record<string, unknown>, scratch: string): Pro
   return success(files);
 }
 
+const SUITE_SETUP = `git init -q && git add -A -- . ':!.probes' ':!.plants.diff' && git -c user.name=t -c user.email=t@t commit -qm base
+for p in .probes/*; do sh "$p" || exit 1; done
+git apply .plants.diff
+for p in .probes/*; do if sh "$p"; then exit 1; fi; done
+rm -rf .probes .plants.diff`;
+
+/** Validate, materialize, load, and dry-run a model-provided ground-truth suite. */
+async function validateSuite(raw: Record<string, unknown>, scratch: string): Promise<Result<string>> {
+  if (Object.keys(raw).length !== 1 || raw['suite'] === null || typeof raw['suite'] !== 'object' || Array.isArray(raw['suite'])) return failure("generated suite needs a single 'suite' object");
+  const suite = raw['suite'] as Record<string, unknown>;
+  const allowedSuite = new Set(['task', 'files', 'plants_diff', 'probes', 'cases']);
+  const unknown = Object.keys(suite).find((key) => !allowedSuite.has(key));
+  if (unknown !== undefined) return failure(`generated suite may not carry '${unknown}'`);
+  if (typeof suite['task'] !== 'string' || !suite['task'].trim()) return failure("generated suite needs a non-empty 'task'");
+  if (suite['files'] === null || typeof suite['files'] !== 'object' || Array.isArray(suite['files']) || Object.keys(suite['files'] as object).length === 0) return failure("generated suite needs a non-empty 'files' map");
+  const files: Record<string, string> = {};
+  for (const [path, content] of Object.entries(suite['files'] as Record<string, unknown>)) {
+    const violation = casePathViolation(path);
+    if (violation !== null) return failure(violation);
+    if (path === '.plants.diff' || path === '.probes' || path.startsWith('.probes/')) return failure(`generated suite files may not include '${path}'`);
+    if (typeof content !== 'string') return failure(`generated suite file '${path}' must be a string`);
+    files[path] = content;
+  }
+  if (typeof suite['plants_diff'] !== 'string' || !suite['plants_diff'].trim()) return failure("generated suite needs a non-empty 'plants_diff'");
+  const probesRaw = suite['probes'];
+  if (probesRaw === null || typeof probesRaw !== 'object' || Array.isArray(probesRaw) || Object.keys(probesRaw as object).length === 0) return failure("generated suite needs a non-empty 'probes' map");
+  const probes: Record<string, string> = {};
+  for (const [name, command] of Object.entries(probesRaw as Record<string, unknown>)) {
+    if (!CASE_NAME.test(name)) return failure(`generated suite probe '${name}' needs a lowercase-hyphenated name`);
+    if (typeof command !== 'string' || !command.trim() || /[\r\n]/.test(command)) return failure(`generated suite probe '${name}' must be a non-empty one-line string`);
+    probes[name] = command;
+  }
+  if (!Array.isArray(suite['cases'])) return failure("generated suite needs a 'cases' list");
+  const defects: Record<string, unknown>[] = [];
+  const distractors: Record<string, unknown>[] = [];
+  const names = new Set<string>();
+  const cases: Array<{ name: string; checks: Array<Record<string, string>> }> = [];
+  for (const item of suite['cases']) {
+    if (item === null || typeof item !== 'object' || Array.isArray(item)) return failure('each generated suite case must be an object');
+    const candidate = item as Record<string, unknown>;
+    const allowedCase = new Set(['name', 'kind', 'probe', 'checks']);
+    const extra = Object.keys(candidate).find((key) => !allowedCase.has(key));
+    if (extra !== undefined) return failure(`generated suite case may not carry '${extra}'`);
+    const name = candidate['name'];
+    if (typeof name !== 'string' || !CASE_NAME.test(name)) return failure("each generated suite case needs a unique lowercase-hyphenated 'name'");
+    if (names.has(name)) return failure(`generated suite case name '${name}' is duplicated`);
+    names.add(name);
+    const kind = candidate['kind'];
+    if (kind !== 'defect' && kind !== 'distractor') return failure(`generated suite case '${name}' needs kind defect or distractor`);
+    if (kind === 'defect') {
+      if (typeof candidate['probe'] !== 'string' || !Object.hasOwn(probes, candidate['probe'])) return failure(`generated suite defect '${name}' names an unknown probe`);
+      defects.push(candidate);
+    } else {
+      if (candidate['probe'] !== undefined) return failure(`generated suite distractor '${name}' may not carry 'probe'`);
+      distractors.push(candidate);
+    }
+    if (!Array.isArray(candidate['checks']) || candidate['checks'].length === 0) return failure(`generated suite case '${name}' needs a non-empty checks list`);
+    const checks: Array<Record<string, string>> = [];
+    for (const check of candidate['checks']) {
+      if (check === null || typeof check !== 'object' || Array.isArray(check)) return failure(`generated suite case '${name}' has a malformed check`);
+      const entries = Object.entries(check as Record<string, unknown>);
+      if (entries.length !== 1 || (entries[0]![0] !== 'transcript_mentions' && entries[0]![0] !== 'transcript_omits')) return failure(`generated suite case '${name}' uses a check outside the suite whitelist`);
+      const [checkKind, anchor] = entries[0]!;
+      if (typeof anchor !== 'string' || !anchor.trim()) return failure(`generated suite case '${name}' needs a non-empty check anchor`);
+      if ((kind === 'defect' && checkKind !== 'transcript_mentions') || (kind === 'distractor' && checkKind !== 'transcript_omits')) return failure(`generated suite ${kind} '${name}' has the wrong check kind`);
+      checks.push({ [checkKind]: anchor });
+    }
+    cases.push({ name, checks });
+  }
+  if (defects.length < 2 || defects.length > 6) return failure(`generated suite needs between 2 and 6 defect cases (got ${defects.length})`);
+  if (distractors.length !== 1) return failure(`generated suite needs exactly 1 distractor case (got ${distractors.length})`);
+  const patchError = await patchApplies(files, suite['plants_diff'] as string, scratch);
+  if (patchError !== null) return failure(patchError);
+  const materializedFiles: Record<string, string> = { ...files, '.plants.diff': suite['plants_diff'] as string };
+  for (const [name, command] of Object.entries(probes)) materializedFiles[`.probes/${name}.sh`] = `${command}\n`;
+  const materialized = YAML.stringify({ task: suite['task'], files: materializedFiles, timeout_minutes: 120, requires: [], setup: SUITE_SETUP, cases });
+  const loaded = loadSuite(materialized, 'suite');
+  if (!loaded.ok) return failure(loaded.error);
+  const dryRunError = await dryRunSuite(loaded.value, scratch);
+  if (dryRunError !== null) return failure(`generated suite dry run failed: ${dryRunError}`);
+  return success(materialized);
+}
+
 /**
  * Generated assets are re-read by every hygiene caller (HYG2/HYG3), so the generator must not write
  * anything its own gate refuses. `git config user.email test@test.com` is the idiomatic fixture line
@@ -189,6 +300,72 @@ function triggerPrompt(options: GenerateOptions): string {
   return `Generate trigger evaluation assets for this Claude Code skill. Return ONLY JSON with exactly this shape:\n{"should_trigger":["five non-empty prompts"],"should_not_trigger":["five non-empty near-miss prompts"]}\nA should_not_trigger prompt must be a plausible near miss drawn from the endorsed catalog, not an unrelated request.\n${FIXTURE_RULE}\n\nENDORSED CATALOG:\n${options.catalog}\n\n${context(options)}`;
 }
 
-function casePrompt(options: GenerateOptions): string {
+export function casePrompt(options: GenerateOptions): string {
   return `Generate headlessly answerable execution evaluation cases for this Claude Code skill. Return ONLY JSON: {"cases":[{"name":"lowercase-hyphenated-stem","task":"...","files":{},"setup":"optional shell","checks":[{"transcript_mentions":"..."}],"bucket":"explicit"}]}.\nChoose how many cases this skill needs, between ${MIN_CASES} and ${MAX_CASES} inclusive, from its own complexity: a skill with one behaviour and one way to get it wrong wants ${MIN_CASES}; a skill with several distinct surfaces, decision branches, or refusal modes wants more, one case per thing that can independently go wrong. Do not pad — a case that tests nothing the others do not is worse than no case.\nEvery case needs a bucket from explicit, implicit, contextual, negative, adversarial; at least one must be adversarial, and a set larger than ${MIN_CASES} should spread across several buckets rather than repeat one. Do not include fixture. Checks may use ONLY transcript_mentions, transcript_omits, command_matching, no_command_matching, file_exists, file_absent. Do not use command_succeeds. Tasks must not demand magic-string incantations and must be answerable without human follow-up.\n${SETUP_RULE}\n${FIXTURE_RULE}\n\n${context(options)}`;
+}
+
+/** §4.1's ground-truth prompt. The contract portion before the case-shape appendix is verbatim. */
+function suitePrompt(options: GenerateOptions, fixedShape: GenerationShape): string {
+  const fixed = fixedShape === undefined ? '' : `The shape is fixed: return {"${fixedShape}": ${fixedShape === 'suite' ? '...}' : '[...]}'}.\n\n`;
+  return `${fixed}Generate evaluation assets for this Claude Code skill so that running it measures
+whether the skill does its job, not whether it restates its instructions.
+
+First decide the SHAPE. If you can build a world containing a hidden ground truth the
+skill must recover (a repository with planted defects for a reviewer or fixer, a spec
+with planted contradictions for an auditor, a session log with facts that must and
+must not appear for a summariser), and can name a literal identifier a correct output
+must cite, return {"suite": ...} as below. If the skill's behaviour depends on how it
+is asked (flags, refusals, protocol steps, wrapping a command), return {"cases": [...]}
+in the case shape instead, one case per behaviour. If neither, return cases with a
+short "judge" rubric each.
+
+Suite shape — a repository is the example; a spec or log is a single file in files/
+with the same rules:
+
+{"suite": {
+  "task": "one headlessly answerable instruction, e.g. 'Review the uncommitted diff in this repository before I commit it.'",
+  "files": { "<path>": "<full file contents>", ... },
+  "plants_diff": "<a unified diff that applies cleanly to files/ with \`git apply\`>",
+  "probes": { "<name>": "<shell command, exit 0 on the clean base and non-zero after plants_diff is applied>", ... },
+  "cases": [
+    { "name": "lowercase-hyphenated-stem", "kind": "defect", "probe": "<probe name>",
+      "checks": [ { "transcript_mentions": "<identifier or file:line a correct finding must cite>" } ] },
+    { "name": "lowercase-hyphenated-stem", "kind": "distractor",
+      "checks": [ { "transcript_omits": "<identifier of the correct code that looks wrong>" } ] }
+  ]
+}}
+
+Rules.
+- The repository: 3 to 6 source files in one language, realistic enough that a
+  reviewer must read call sites to judge a change. No package installs; anything the
+  probes run must work with the language's standard toolchain already on PATH.
+- The defects: between 2 and 6, spread across at least 2 files, each a genuine bug a
+  maintainer would fix (wrong sign, off-by-one, broken caller contract, unchecked
+  null, swapped arguments, stale invariant). No style issues, no "could be clearer".
+  If the SKILL.md states a maximum number of findings, plant fewer than that.
+- Exactly one distractor: a change in plants_diff that looks wrong at a glance and is
+  correct. Its case uses transcript_omits on an identifier only that change touches.
+- Anchors: every defect case's transcript_mentions is an identifier (function, variable,
+  constant) or a file:line that a finding about that defect would have to cite. Never
+  prose, never a sentence the skill might paraphrase.
+- Probes: one per defect. Each is a shell command that exits 0 on the clean base and
+  non-zero once plants_diff is applied, proving the defect is real and observable.
+  Keep them to one line; \`node -e\`, \`python3 -c\`, or a direct test runner call.
+- plants_diff must apply with \`git apply\` to files/ exactly as given. Do not include
+  the probes or the diff itself inside files/.
+- The task must be answerable with no human follow-up and must not tell the agent
+  what to look for.
+- Checks may use ONLY transcript_mentions and transcript_omits.
+- Do not include fixture, setup, judge, or bucket; the engine writes setup itself.
+
+SKILL.md:
+${options.skill}
+
+CANDIDATE FILE LISTING (names only):
+${options.files.join('\n')}
+
+Case shape (when you return {"cases": [...]})
+Return ONLY JSON: {"cases":[{"name":"lowercase-hyphenated-stem","task":"...","files":{},"setup":"optional shell","checks":[{"transcript_mentions":"..."}],"bucket":"explicit"}]}.
+Choose between ${MIN_CASES} and ${MAX_CASES} inclusive from the skill's complexity. Every case needs a bucket from explicit, implicit, contextual, negative, adversarial; at least one must be adversarial. Checks may use ONLY transcript_mentions, transcript_omits, command_matching, no_command_matching, file_exists, file_absent. Do not use command_succeeds. Do not include fixture. ${SETUP_RULE}
+${FIXTURE_RULE}`;
 }

@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { AgentRunError, Transcript, type AgentApi } from '../agent.js';
-import { loadCase } from '../execution.js';
+import { loadCase, loadSuite } from '../execution.js';
 import { GENERATION_TIMEOUT_MS, generate } from '../generate.js';
 import { parseTriggers } from '../triggers.js';
 
@@ -16,6 +16,22 @@ const validCases = {
   ],
 };
 const validTriggers = { should_trigger: ['deploy 1', 'deploy 2', 'deploy 3', 'deploy 4', 'deploy 5'], should_not_trigger: ['other 1', 'other 2', 'other 3', 'other 4', 'other 5'] };
+const validSuite = {
+  suite: {
+    task: 'Review the uncommitted diff.',
+    files: { 'src/a.js': 'const alpha = 1;\n', 'src/b.js': 'const beta = 2;\n', 'src/c.js': 'const safeThing = 3\n' },
+    plants_diff: 'diff --git a/src/a.js b/src/a.js\nindex 4d2f306..420571d 100644\n--- a/src/a.js\n+++ b/src/a.js\n@@ -1 +1 @@\n-const alpha = 1;\n+const alpha = -1;\ndiff --git a/src/b.js b/src/b.js\nindex 1b6f5ad..c29348b 100644\n--- a/src/b.js\n+++ b/src/b.js\n@@ -1 +1 @@\n-const beta = 2;\n+const beta = -2;\ndiff --git a/src/c.js b/src/c.js\nindex 4711eef..4f1de12 100644\n--- a/src/c.js\n+++ b/src/c.js\n@@ -1 +1 @@\n-const safeThing = 3\n+const safeThing = 3;\n',
+    probes: {
+      alpha: "node -e \"process.exit(require('fs').readFileSync('src/a.js','utf8').includes('alpha = 1') ? 0 : 1)\"",
+      beta: "node -e \"process.exit(require('fs').readFileSync('src/b.js','utf8').includes('beta = 2') ? 0 : 1)\"",
+    },
+    cases: [
+      { name: 'wrong-alpha', kind: 'defect', probe: 'alpha', checks: [{ transcript_mentions: 'alpha' }] },
+      { name: 'wrong-beta', kind: 'defect', probe: 'beta', checks: [{ transcript_mentions: 'beta' }] },
+      { name: 'distractor-safe', kind: 'distractor', checks: [{ transcript_omits: 'safeThing' }] },
+    ],
+  },
+};
 
 function agent(responses: (Record<string, unknown> | Error)[], prompts: string[] = [], options: Record<string, unknown>[] = []): AgentApi {
   return {
@@ -32,6 +48,68 @@ const at = (now = '2026-09-14T00:00:00Z') => ({ skill, files: ['SKILL.md'], cata
 const withCase = (extra: Record<string, unknown>) => ({ cases: [{ ...validCases.cases[0]!, ...extra }, validCases.cases[1], validCases.cases[2]] });
 
 describe('eval generation (IE5)', () => {
+  it('materializes, loads, and dry-runs a valid ground-truth suite with probes and a patch', async () => {
+    const result = await generate({ ...at(), agent: agent([validSuite]) });
+    expect(result).toMatchObject({ ok: true });
+    if (!result.ok) return;
+    expect(result.value.suite?.file).toContain('timeout_minutes: 120');
+    expect(result.value.suite?.file).toContain('.probes/alpha.sh');
+    expect(result.value.suite?.file).toContain('.plants.diff');
+    expect(result.value.suite?.file).toContain("git init -q && git add -A -- . ':!.probes' ':!.plants.diff'");
+    expect(loadSuite(result.value.suite!.file, 'suite')).toMatchObject({ ok: true, value: { cases: [{ name: 'wrong-alpha' }, { name: 'wrong-beta' }, { name: 'distractor-safe' }] } });
+  });
+
+  it.each([
+    ['one defect', { ...validSuite, suite: { ...validSuite.suite, cases: [validSuite.suite.cases[0], validSuite.suite.cases[2]] } }, 'between 2 and 6 defect'],
+    ['seven defects', { ...validSuite, suite: { ...validSuite.suite, cases: [...Array.from({ length: 7 }, (_v, i) => ({ name: `bad-${i}`, kind: 'defect', probe: 'alpha', checks: [{ transcript_mentions: 'alpha' }] })), validSuite.suite.cases[2]] } }, 'between 2 and 6 defect'],
+    ['zero distractors', { ...validSuite, suite: { ...validSuite.suite, cases: validSuite.suite.cases.slice(0, 2) } }, 'exactly 1 distractor'],
+    ['two distractors', { ...validSuite, suite: { ...validSuite.suite, cases: [...validSuite.suite.cases, { name: 'another-distractor', kind: 'distractor', checks: [{ transcript_omits: 'beta' }] }] } }, 'exactly 1 distractor'],
+    ['unknown probe', { ...validSuite, suite: { ...validSuite.suite, cases: [{ ...validSuite.suite.cases[0], probe: 'missing' }, ...validSuite.suite.cases.slice(1)] } }, 'unknown probe'],
+    ['forbidden judge', { ...validSuite, suite: { ...validSuite.suite, judge: 'no' } }, "may not carry 'judge'"],
+    ['forbidden setup', { ...validSuite, suite: { ...validSuite.suite, setup: 'true' } }, "may not carry 'setup'"],
+    ['forbidden fixture', { ...validSuite, suite: { ...validSuite.suite, fixture: 'elsewhere' } }, "may not carry 'fixture'"],
+    ['non-suite check', { ...validSuite, suite: { ...validSuite.suite, cases: [{ ...validSuite.suite.cases[0], checks: [{ command_matching: 'git diff' }] }, ...validSuite.suite.cases.slice(1)] } }, 'outside the suite whitelist'],
+    ['empty anchor', { ...validSuite, suite: { ...validSuite.suite, cases: [{ ...validSuite.suite.cases[0], checks: [{ transcript_mentions: '' }] }, ...validSuite.suite.cases.slice(1)] } }, 'non-empty check anchor'],
+    ['bad patch', { ...validSuite, suite: { ...validSuite.suite, plants_diff: 'diff --git a/nope b/nope\n--- a/nope\n+++ b/nope\n@@ -1 +1 @@\n-x\n+y\n' } }, 'plants_diff does not apply'],
+  ])('corrects suite validation failures: %s', async (_label, reply, message) => {
+    const prompts: string[] = [];
+    const result = await generate({ ...at(), agent: agent([reply, reply, reply], prompts) });
+    expect(result).toMatchObject({ ok: false, error: expect.stringContaining(message) });
+    expect(prompts).toHaveLength(3);
+    expect(prompts[1]).toContain(message);
+  });
+
+  it('re-asks when a probe passes after the patch', async () => {
+    const prompts: string[] = [];
+    const disagree = { ...validSuite, suite: { ...validSuite.suite, probes: { alpha: 'true', beta: validSuite.suite.probes.beta } } };
+    const result = await generate({ ...at(), agent: agent([disagree, validSuite], prompts) });
+    expect(result).toMatchObject({ ok: true });
+    expect(prompts).toHaveLength(2);
+    expect(prompts[1]).toContain('dry run failed');
+  });
+
+  it('keeps the case validator, including transcript_omits, when the model selects cases', async () => {
+    const result = await generate({ ...at(), agent: agent([{ cases: [{ ...validCases.cases[0], checks: [{ transcript_omits: 'wrong' }] }, validCases.cases[1], validCases.cases[2]] }]) });
+    expect(result).toMatchObject({ ok: true, value: { cases: expect.anything() } });
+  });
+
+  it('enforces metadata.eval.shape before and after the call', async () => {
+    await expect(generate({ ...at(), shape: 'cases', agent: agent([validSuite, validSuite, validSuite]) })).resolves.toMatchObject({ ok: false, error: expect.stringContaining('shape is fixed') });
+    await expect(generate({ ...at(), shape: 'suite', agent: agent([validCases, validCases, validCases]) })).resolves.toMatchObject({ ok: false, error: expect.stringContaining('shape is fixed') });
+    const prompts: string[] = [];
+    await expect(generate({ ...at(), shape: 'other', agent: agent([validSuite], prompts) })).resolves.toMatchObject({ ok: false, error: expect.stringContaining("metadata.eval.shape must be 'suite' or 'cases'") });
+    expect(prompts).toEqual([]);
+  });
+
+  it('carries the §4.1 suite prompt verbatim before its case-shape appendix', async () => {
+    const prompts: string[] = [];
+    await generate({ ...at(), agent: agent([validSuite], prompts) });
+    expect(prompts[0]).toContain('whether the skill does its job, not whether it restates its instructions.');
+    expect(prompts[0]).toContain('The defects: between 2 and 6, spread across at least 2 files');
+    expect(prompts[0]).toContain('Do not include fixture, setup, judge, or bucket; the engine writes setup itself.');
+    expect(prompts[0]).toContain('Case shape (when you return {"cases": [...]})');
+  });
+
   it('accepts transcript_omits in the generated check whitelist', async () => {
     const generated = { cases: [{ ...validCases.cases[0], checks: [{ transcript_omits: 'distractor' }] }, validCases.cases[1], validCases.cases[2]] };
     await expect(generate({ ...at(), agent: agent([generated]) })).resolves.toMatchObject({ ok: true });
