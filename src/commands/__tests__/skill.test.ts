@@ -281,3 +281,42 @@ it('rekeys ledger provenance when the registered root is reached through an alia
  expect((await f.store.read()).placements).toEqual({[destination]:expect.objectContaining({id,fingerprint:f.fingerprint})});
  expect(await run({kind:'rename',path,to:'beta',config:f.store,home:alias},new ScriptedPrompter())).toMatchObject({ok:true});
 });
+
+describe('skill overrides follow the folder',()=>{
+ // A self-authored folder is switchable (skill disable) since the switch stopped requiring a ledger placement, so
+ // the file verbs must keep Claude Code's skillOverrides truthful: delete drops our `off` the way uninstall does,
+ // and rename/move carry it to the new name or the new root's settings file. Copy leaves both files alone.
+ const overrides=async(file:string)=>{try{return (JSON.parse(await fs.readFile(file,'utf8')) as {skillOverrides?:Record<string,string>}).skillOverrides??{};}catch(error){if((error as NodeJS.ErrnoException).code==='ENOENT')return {};throw error;}};
+ async function switchedOff(f:Awaited<ReturnType<typeof fixture>>){const file=join(f.home,'.claude','settings.json');await fs.writeFile(file,JSON.stringify({skillOverrides:{alpha:'off',other:'off'}}));return file;}
+ it('delete clears the off entry for a folder no ledger placed',async()=>{
+  const f=await fixture(false),user=await switchedOff(f);
+  expect(await f.invoke('delete')).toMatchObject({ok:true,value:{kind:'delete',installed:false}});
+  expect(await overrides(user)).toEqual({other:'off'});
+ });
+ it('rename carries the off entry to the new name',async()=>{
+  const f=await fixture(false),user=await switchedOff(f);
+  expect(await f.invoke('rename','beta')).toMatchObject({ok:true,value:{destination:join(f.root,'beta')}});
+  expect(await overrides(user)).toEqual({other:'off',beta:'off'});
+ });
+ it('move carries the off entry into the destination root\'s settings file and clears the source root\'s',async()=>{
+  const f=await fixture(false),user=await switchedOff(f),local=join(f.project,'.claude','settings.local.json');
+  const runner={run:vi.fn(async()=>({code:0,stdout:'.git/info/exclude\n',stderr:''}))};
+  expect(await run({kind:'move',path:f.path,to:f.project,home:f.home,config:f.store,runner},new ScriptedPrompter())).toMatchObject({ok:true});
+  expect(await overrides(user)).toEqual({other:'off'});
+  expect(await overrides(local)).toEqual({alpha:'off'});
+ });
+ it('an enabled folder moves without touching either settings file',async()=>{
+  const f=await fixture(false),user=join(f.home,'.claude','settings.json'),local=join(f.project,'.claude','settings.local.json');
+  await fs.writeFile(user,JSON.stringify({skillOverrides:{other:'off'}}));
+  const runner={run:vi.fn(async()=>({code:0,stdout:'.git/info/exclude\n',stderr:''}))};
+  expect(await run({kind:'move',path:f.path,to:f.project,home:f.home,config:f.store,runner},new ScriptedPrompter())).toMatchObject({ok:true});
+  expect(await overrides(user)).toEqual({other:'off'});
+  await expect(fs.lstat(local)).rejects.toMatchObject({code:'ENOENT'});
+ });
+ it('copy leaves the source off and writes nothing for the copy',async()=>{
+  const f=await fixture(false),user=await switchedOff(f),local=join(f.project,'.claude','settings.local.json');
+  expect(await f.invoke('copy',f.project)).toMatchObject({ok:true});
+  expect(await overrides(user)).toEqual({alpha:'off',other:'off'});
+  await expect(fs.lstat(local)).rejects.toMatchObject({code:'ENOENT'});
+ });
+});

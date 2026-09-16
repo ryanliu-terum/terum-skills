@@ -24,6 +24,8 @@ import { versionLabel } from '../lib/versions.js';
 import { inspectSkillSource, scanSkillFolder, sourceFiles } from '../lib/skill-source.js';
 import { invocation, type WithForm } from '../lib/invocation.js';
 import { uninstallMany } from './uninstall.js';
+import { defaultHookOptions } from '../lib/hook.js';
+import { carrySkillOverride, overrideTargetFor, writeSkillEnabled } from '../lib/skill-overrides.js';
 
 export interface SkillArgs extends WithForm { kind: 'move' | 'copy' | 'rename' | 'delete' | 'fix' | 'category'; path: string; to?: string; config?: ConfigStore; home?: string; runner?: Runner }
 export interface SkillResult { kind: SkillArgs['kind']; path: string; destination: string | null; quarantined: string | null; installed: boolean; notices: string[] }
@@ -271,6 +273,15 @@ export async function run(args: SkillArgs, io: Prompter): Promise<Result<SkillRe
         } else quarantined = op.destination;
       } finally { await release(); }
       if (quarantined) notices.push(`Moved ${source} to ${quarantined}. Undo by moving it back before prune.`);
+      // The switch is Claude Code's skillOverrides, and it governs this folder whoever put it there (the
+      // switch stopped requiring a ledger placement, 2026-09-15). Drop our `off` the way uninstall does for a
+      // placed folder, so a folder written again under this name is not born disabled. Best effort: the
+      // folder is what was asked for, so a malformed settings file is reported, not fatal.
+      const target = overrideTargetFor(source, home);
+      if (target) {
+        try { await writeSkillEnabled({ settingsFile: target.files.write, backupDir: defaultHookOptions(store.root, home).backupDir }, target.name, true); }
+        catch (error) { notices.push(`Deleted ${source} but could not clear its skillOverrides entry: ${error instanceof Error ? error.message : String(error)}`); }
+      }
     } else {
       const dest = destination!;
       if (await present(op.source) && op.source !== dest) {
@@ -317,6 +328,14 @@ export async function run(args: SkillArgs, io: Prompter): Promise<Result<SkillRe
         if (op!.source !== dest) delete c.placements[op!.source];
       });
       if (targetRoot.repoRoot && op.kept) await appendExclude(targetRoot.repoRoot, '.claude/old-skills/', runner);
+      // A renamed or moved folder keeps its switch (see delete above); a copy is a second, enabled folder.
+      if (args.kind !== 'copy') {
+        const from = overrideTargetFor(source, home), to = overrideTargetFor(dest, home);
+        if (from && to) {
+          try { if (await carrySkillOverride(from, to, defaultHookOptions(store.root, home).backupDir)) notices.push(`${name} stays switched off on this machine (skillOverrides in ${to.files.write}).`); }
+          catch (error) { notices.push(`${args.kind === 'rename' ? 'Renamed' : 'Moved'} ${source} but could not carry its skillOverrides entry: ${error instanceof Error ? error.message : String(error)}`); }
+        }
+      }
       if (op.kept) notices.push(`Your previous copy is kept at ${op.kept}.`);
       notices.push(`${args.kind === 'rename' ? 'Renamed' : args.kind === 'copy' ? 'Copied' : 'Moved'} ${source} to ${dest}.`);
     }

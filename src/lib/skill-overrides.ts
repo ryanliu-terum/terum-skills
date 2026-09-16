@@ -112,3 +112,20 @@ export async function writeSkillEnabled(options: { settingsFile: string; backupD
     return true;
   });
 }
+
+export interface OverrideCarry { settingsFile: string; backupDir: string }
+
+/**
+ * A folder that moves or is renamed keeps its switch: when the file this tool writes for the source
+ * root says `off` for the old name, that `off` is written for the new name into the destination
+ * root's file and removed from the source's. Only our `off` travels — a `name-only` set by hand stays
+ * where it was — and a folder that was on leaves both files untouched. Returns whether anything moved.
+ */
+export async function carrySkillOverride(from: OverrideTarget, to: OverrideTarget, backupDir: string): Promise<boolean> {
+  const source = await loadOverrides([from.files.write]);
+  if (source.problems.length) throw new Error(source.problems.map((problem) => problem.reason).join('; '));
+  if (source.enabled(from.name)) return false;
+  await writeSkillEnabled({ settingsFile: to.files.write, backupDir }, to.name, false);
+  if (from.files.write !== to.files.write || normalize(from.name) !== normalize(to.name)) await writeSkillEnabled({ settingsFile: from.files.write, backupDir }, from.name, true);
+  return true;
+}

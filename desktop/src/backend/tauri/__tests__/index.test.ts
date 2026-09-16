@@ -367,6 +367,14 @@ it('resolves a name whose frontmatter the CLI could not parse',async()=>{
   const local=unsharedLocal([{root:'/work/ops/.claude/skills',repoRoot:'/work/ops',scope:'project',rows:[],notOffered:[{name:'codex-implement',path:'/work/ops/.claude/skills/codex-implement',reason:'invalid-yaml'}],problems:[]}]);
   expect(await createTauriBackend(inventoryBridge({local}).bridge).skill({ref:'codex-implement',team:'acme'})).toMatchObject({ok:true,value:{name:'codex-implement',team:null,project:'ops',teamed:false,path:'/work/ops/.claude/skills/codex-implement',flags:['broken'],flagText:{broken:'invalid-yaml'}}});
 });
+it('reads enabled on a folder the CLI does not offer, and defaults it on when an older CLI omits the key',async()=>{
+  const section=(enabled:boolean|undefined)=>unsharedLocal([{root:'/home/.claude/skills',scope:'global',rows:[],notOffered:[{name:'brandkit',path:'/home/.claude/skills/brandkit',reason:'symlink',detail:'symbolic link',...(enabled===undefined?{}:{enabled})}],problems:[]}]);
+  expect(await createTauriBackend(inventoryBridge({local:section(false)}).bridge).skill({ref:'brandkit',team:'acme'})).toMatchObject({ok:true,value:{name:'brandkit',enabled:false,installed:'placed',placed:false,onDiskOnly:true,path:'/home/.claude/skills/brandkit'}});
+  expect(await createTauriBackend(inventoryBridge({local:section(undefined)}).bridge).skill({ref:'brandkit',team:'acme'})).toMatchObject({ok:true,value:{name:'brandkit',enabled:true}});
+  const library=await createTauriBackend(inventoryBridge({local:section(false)}).bridge).library({scope:{kind:'global'}});
+  expect(library).toMatchObject({ok:true});if(!library.ok)throw new Error(library.error);
+  expect(library.value.skills.find(s=>s.name==='brandkit')).toMatchObject({enabled:false,installed:'placed',placed:false});
+});
 it('prefers Global over a checkout when a bare name carries no root',async()=>{
   const local=unsharedLocal([
     {root:'/work/ops/.claude/skills',repoRoot:'/work/ops',scope:'project',rows:[unsharedRow('shared-name','/work/ops/.claude/skills/shared-name')],notOffered:[],problems:[]},
