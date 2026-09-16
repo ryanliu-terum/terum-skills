@@ -1,5 +1,5 @@
 /**
- * Eval spec §5.1 / §7.1: the six deterministic check kinds — five ported verbatim from skilldeck
+ * Eval spec §5.1 / §7.1: deterministic check kinds — five ported verbatim from skilldeck
  * `evals/checks.py` (commit 42084dc) plus `command_succeeds` (rev 9, for SkillsBench-style script
  * verifiers). Checks run first, always — they are the only signal that doesn't drift with judge
  * models; the LLM judge only sees cases the checks can't decide. Unknown check kinds FAIL (they
@@ -69,6 +69,10 @@ const CHECKS: Record<string, Check> = {
   transcript_mentions: (arg, transcript) => {
     const ok = transcript.allText().toLowerCase().includes(String(arg).toLowerCase());
     return { name: `transcript_mentions:${String(arg)}`, passed: ok, detail: ok ? '' : `'${String(arg)}' never appeared in the transcript` };
+  },
+  transcript_omits: (arg, transcript) => {
+    const ok = !transcript.allText().toLowerCase().includes(String(arg).toLowerCase());
+    return { name: `transcript_omits:${String(arg)}`, passed: ok, detail: ok ? '' : `'${String(arg)}' appeared in the transcript` };
   },
   no_command_matching: (arg, transcript) => {
     const pattern = new RegExp(String(arg));

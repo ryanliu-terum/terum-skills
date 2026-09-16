@@ -16,6 +16,7 @@ import { openTeamRepo, refreshClone, SafeWriteOptions, treeText, lockWait } from
 import { teamForReference } from './install.js';
 import { assertNotInsideStateRoot, assertSkillDirectory, sourceFiles } from '../lib/skill-source.js';
 import { assessHygiene, HygieneRefused, reportHygieneWarnings } from '../lib/evals/hygiene.js';
+import { dependencyPlan } from '../lib/evals/dependencies.js';
 import { versionFolderName, versionLabel, versionsInTree } from '../lib/versions.js';
 import { localReceiptsFor } from '../lib/evals/receipt-store.js';
 import { recordProfileEntry } from '../lib/profile-entry.js';
@@ -227,7 +228,8 @@ export async function run(args: PublishArgs, io: Prompter): Promise<Result<Publi
     // 5. Hygiene on the INJECTED map, never before — `skillFrontmatterSchema` is strict and requires
     //    the managed fields, so a never-published folder would fail HYG1 on fields publish is about
     //    to write.
-    const assessment = assessHygiene(found.name, { files, executable }, teamJson.policy.skill_license, true, false, teamJson.categories);
+    const dependencies = await dependencyPlan(found.path);
+    const assessment = assessHygiene(found.name, { files, executable }, teamJson.policy.skill_license, true, false, teamJson.categories, dependencies.staged.length + dependencies.skipped.length);
     reportHygieneWarnings((line) => io.print(line), assessment);
 
     // 6. The comparison digest, taken AFTER injection so it is post-normalization.

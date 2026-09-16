@@ -31,6 +31,11 @@ describe('the five check kinds (§5.1, verbatim port)', () => {
     expect(runChecks([{ transcript_mentions: 'ROLLBACK' }], transcript, sandbox)[0]).toMatchObject({ passed: false, detail: expect.stringContaining('never appeared') });
   });
 
+  it('transcript_omits is the case-insensitive inverse', () => {
+    expect(runChecks([{ transcript_omits: 'rollback' }], transcript, sandbox)[0]).toMatchObject({ passed: true });
+    expect(runChecks([{ transcript_omits: 'stripe_KEY' }], transcript, sandbox)[0]).toMatchObject({ passed: false, detail: expect.stringContaining('appeared') });
+  });
+
   it('command_matching / no_command_matching are regexes over Bash commands', () => {
     expect(runChecks([{ command_matching: 'npm t.st' }], transcript, sandbox)[0]).toMatchObject({ passed: true });
     expect(runChecks([{ command_matching: 'docker' }], transcript, sandbox)[0]).toMatchObject({ passed: false });

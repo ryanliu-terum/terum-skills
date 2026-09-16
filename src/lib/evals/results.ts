@@ -75,7 +75,8 @@ export interface Aggregate {
 export function aggregate(rows: readonly ComparisonRow[], arms: readonly ArmSample[], expectedRows: number, environmentSkips: Record<string, string[]> = {}, droppedCases: Record<string, DroppedCase> = {}): Aggregate {
   const comparisons: Record<string, ComparisonSummary> = {};
   const counts = new Map<string, { win: number; loss: number; tie: number }>();
-  for (const row of rows) {
+  const scoredRows = rows.filter((row) => row.decided_by !== 'both-arms-failed' && !row.decided_by.endsWith('-run-failed'));
+  for (const row of scoredRows) {
     const count = counts.get(row.comparison) ?? { win: 0, loss: 0, tie: 0 };
     count[row.outcome] += 1;
     counts.set(row.comparison, count);
@@ -86,8 +87,12 @@ export function aggregate(rows: readonly ComparisonRow[], arms: readonly ArmSamp
 
   const armScores: Record<string, number | null> = {};
   const efficiency: Record<string, EfficiencySummary> = {};
-  for (const arm of new Set(arms.map((sample) => sample.arm))) {
-    const mine = arms.filter((sample) => sample.arm === arm);
+  const scoredKeys = new Set(scoredRows.map((row) => `${row.case}\u0000${row.rep}`));
+  // §2.2: a dead arm (no transcript) is unscored, so its empty-transcript fraction never enters an arm
+  // score or an efficiency mean; the paired (case, rep) stays only where a row was actually scored.
+  const scoredArms = arms.filter((sample) => !sample.failed && scoredKeys.has(`${sample.case}\u0000${sample.rep}`));
+  for (const arm of new Set(scoredArms.map((sample) => sample.arm))) {
+    const mine = scoredArms.filter((sample) => sample.arm === arm);
     const fractions = mine.map((sample) => sample.fraction).filter((value): value is number => value !== null);
     armScores[arm] = fractions.length ? fractions.reduce((sum, value) => sum + value, 0) / fractions.length : null;
     efficiency[arm] = {
@@ -97,14 +102,14 @@ export function aggregate(rows: readonly ComparisonRow[], arms: readonly ArmSamp
     };
   }
 
-  const scored = rows.filter((row) => row.decided_by !== 'both-arms-failed').length;
+  const scored = scoredRows.length;
   const executionStatus = expectedRows === 0 ? 'complete' : scored === 0 ? 'failed' : scored < expectedRows ? 'partial' : 'complete';
   const headline = comparisons['candidate-vs-baseline'];
   const verdict = headline ? verdictBand(headline.win, headline.loss, headline.tie) : 'NEUTRAL';
-  const perCase = perCaseRows(rows, arms);
+  const perCase = perCaseRows(scoredRows, scoredArms);
   return {
     verdict,
-    attribution: attributionLine(rows),
+    attribution: attributionLine(scoredRows),
     execution_status: executionStatus,
     expected_rows: expectedRows,
     scored_rows: scored,

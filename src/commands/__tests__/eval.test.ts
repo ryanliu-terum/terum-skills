@@ -6,7 +6,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { createConfigStore, type ConfigStore } from '../../lib/config.js';
 import { type AgentApi, Transcript } from '../../lib/evals/agent.js';
 import { success } from '../../lib/result.js';
-import { bareTeam, cloneWithIdentity, git, holdCloneLock, pushFromSeed, ScriptedPrompter, temporaryDirectory } from '../../lib/__tests__/fixtures.js';
+import { bareTeam, cloneWithIdentity, git, holdCloneLock, NonInteractivePrompter, pushFromSeed, ScriptedPrompter, temporaryDirectory } from '../../lib/__tests__/fixtures.js';
 import { receiptSchema } from '../../lib/evals/receipt.js';
 import { skillContentDigest } from '../../lib/skills.js';
 import { sourceFiles } from '../../lib/skill-source.js';
@@ -84,6 +84,13 @@ async function evalFixture(options: { source?: string; assets?: Record<string, s
 const args = (store: ConfigStore, home: string, extra: Record<string, unknown> = {}) => ({ ref: 'sample', config: store, home, preflight: stub, ...extra });
 
 describe('eval (§6 / IE2)', () => {
+  it('refuses a detected heavy skill on a closed channel, while --no-heavy does not prompt', async () => {
+    const fixture = await evalFixture({ source: skill('Use the Workflow tool.'), assets: { 'evals/cases/happy.yaml': CASE } });
+    await expect(run(args(fixture.store, fixture.home, { agent: armAgent, noGen: true }), new NonInteractivePrompter())).resolves.toMatchObject({ ok: false, error: expect.stringContaining('this command needs an interactive terminal') });
+    const io = new ScriptedPrompter();
+    await expect(run(args(fixture.store, fixture.home, { agent: armAgent, noGen: true, heavy: false }), io)).resolves.toMatchObject({ ok: true });
+    expect(io.asked).toEqual([]);
+  });
   it('waits out a busy clone, says so, and then runs the eval', async () => {
     const { store, home } = await evalFixture({ assets: { 'evals/triggers.yaml': TRIGGERS, 'evals/cases/happy.yaml': CASE } });
     const release = await holdCloneLock(store.teamClone('team'));

@@ -32,6 +32,7 @@ describe('Transcript parsing (port of runner.py)', () => {
   it('collects text and tool_use blocks, bash commands, the result, efficiency, and the init skill list', () => {
     const transcript = Transcript.fromStream(STREAM);
     expect(transcript.bashCommands()).toEqual(['npm test']);
+    expect(transcript.toolUses()).toEqual(['Bash']);
     expect(transcript.allText()).toContain('hello');
     expect(transcript.allText()).toContain('done');
     expect(transcript.allText()).toContain('npm test'); // tool inputs are searchable text

@@ -3,7 +3,7 @@ import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { AgentRunError, Transcript, type AgentApi } from '../agent.js';
+import { AgentRunError, AgentTimeoutError, Transcript, type AgentApi } from '../agent.js';
 import { casePathViolation, ContaminationError, decide, dryRunCase, loadCase, missingRequirements, runCase, seedSandbox, type EvalCase } from '../execution.js';
 
 let scratch: string;
@@ -160,8 +160,8 @@ describe('row verdicts (§7.1, port of _decide)', () => {
 
   it('failure ladder first, then checks, then tie or judge', async () => {
     expect(await decide(deps, caseOf(), null, null, [], [])).toMatchObject({ result: 'tie', decidedBy: 'both-arms-failed' });
-    expect(await decide(deps, caseOf(), null, t, [], [])).toMatchObject({ result: 'loss', decidedBy: 'candidate-run-failed' });
-    expect(await decide(deps, caseOf(), t, null, [], [])).toMatchObject({ result: 'win', decidedBy: 'opponent-run-failed' });
+    expect(await decide(deps, caseOf(), null, t, [], [])).toMatchObject({ result: 'tie', decidedBy: 'candidate-run-failed' });
+    expect(await decide(deps, caseOf(), t, null, [], [])).toMatchObject({ result: 'tie', decidedBy: 'opponent-run-failed' });
     expect(await decide(deps, caseOf(), t, t, passed, failed)).toMatchObject({ result: 'win', decidedBy: 'checks' });
     expect(await decide(deps, caseOf(), t, t, failed, passed)).toMatchObject({ result: 'loss', decidedBy: 'checks' });
     expect(await decide(deps, caseOf(), t, t, failed, failed)).toMatchObject({ result: 'tie', decidedBy: 'checks-equal-no-judge' });
@@ -240,7 +240,7 @@ describe('the three-arm matrix (§7.1 / §7.3)', () => {
       caseOf({ checks: [{ transcript_mentions: 'PREFLIGHT' }] }),
       { k: 1, skillName: 's', caseDir: scratch, arms: { candidate: skillDir }, scratch, transcriptDir: scratch },
     );
-    expect(rows[0]).toMatchObject({ outcome: 'win', decided_by: 'opponent-run-failed' });
+    expect(rows[0]).toMatchObject({ outcome: 'tie', decided_by: 'opponent-run-failed' });
     expect(arms.find((sample) => sample.arm === 'baseline')).toMatchObject({ failed: true, retried: true, fraction: 0, turns: null });
   });
 
@@ -273,6 +273,22 @@ describe('the three-arm matrix (§7.1 / §7.3)', () => {
     // §17.3: the failed attempt survives under the suffix; the retry holds the canonical §4.2 path.
     await expect(readFile(join(scratch, 'c.baseline.0.attempt-1.jsonl'), 'utf8')).resolves.toBe('failed-attempt');
     await expect(readFile(join(scratch, 'c.baseline.0.jsonl'), 'utf8')).resolves.toBe('success');
+  });
+
+  it('does not retry a timeout and passes the case session cap to runAgent', async () => {
+    const skillDir = await skillFixture();
+    const calls: { arm: string; timeoutMs?: number; maxTurns?: number }[] = [];
+    const agent: AgentApi = { runAgent: (_task, cwd, options) => {
+      const arm = existsSync(join(cwd, '.claude', 'skills', 's')) ? 'candidate' : 'baseline';
+      calls.push({ arm, timeoutMs: options?.timeoutMs, maxTurns: options?.maxTurns });
+      return arm === 'candidate' ? Promise.reject(new AgentTimeoutError('cap')) : Promise.resolve(transcriptWith('nope', [{ type: 'system', subtype: 'init', skills: [] }]));
+    }, askJson: () => Promise.resolve({}) };
+    const out = await runCase({ agent, rng: () => 0.9 }, caseOf({ timeout_minutes: 15, max_turns: 77 }), { k: 1, skillName: 's', caseDir: scratch, arms: { candidate: skillDir }, scratch, transcriptDir: scratch });
+    expect(calls).toContainEqual({ arm: 'candidate', timeoutMs: 900_000, maxTurns: 77 });
+    expect(calls.filter((call) => call.arm === 'candidate')).toHaveLength(1);
+    expect(out.rows[0]).toMatchObject({ outcome: 'tie', decided_by: 'candidate-run-failed' });
+    await runCase({ agent, rng: () => 0.9 }, caseOf(), { k: 1, skillName: 's', caseDir: scratch, arms: { candidate: skillDir }, scratch, transcriptDir: scratch });
+    expect(calls).toContainEqual({ arm: 'baseline', timeoutMs: 7_200_000, maxTurns: 200 });
   });
 
   it('a staged arm that fails both attempts is scored empty, not refused as contamination (§17.7 scope)', async () => {
