@@ -153,3 +153,32 @@ describe('renderReport — §7 output', () => {
     expect(renderReport(report([row('a', 0, 1, 'partial')]))[0]).toContain('placed mid-window');
   });
 });
+
+describe('usage — a skill Terum did not place still has observable firings', () => {
+  it('reports counts for a hand-installed skill instead of withholding them behind --all', async () => {
+    // The `decision-walk` regression: it lives at ~/.claude/skills/decision-walk with four recorded
+    // firings and no placements row, and `usage decision-walk` said only that something unnamed had
+    // fired somewhere. Asked about one skill, answer about that skill.
+    const m = await machine([typed('decision-walk', '2026-09-01T00:00:00.000Z'), firing('decision-walk', '2026-09-02T00:00:00.000Z')], PLACED);
+    const result = await run({ config: m.store, projectsRoot: m.projectsRoot, ref: 'decision-walk', now: () => NOW }, io);
+    expect(result.value!.rows).toEqual([]);
+    expect(result.value!.unrecognised).toEqual([{ skill: 'decision-walk', d1: 1, d2: 1 }]);
+  });
+
+  it('scopes the tail to the named skill rather than every unplaced name on the machine', async () => {
+    const m = await machine([typed('decision-walk', '2026-09-01T00:00:00.000Z'), firing('artifact-design', '2026-09-02T00:00:00.000Z')], PLACED);
+    const result = await run({ config: m.store, projectsRoot: m.projectsRoot, ref: 'decision-walk', now: () => NOW }, io);
+    expect(result.value!.unrecognised.map((row) => row.skill)).toEqual(['decision-walk']);
+  });
+
+  it('renders those counts inline for a single skill, with no --all hint', () => {
+    const rendered = renderReport({
+      since: 'a', until: 'b', rows: [], unused: 0, unrecognised: [{ skill: 'decision-walk', d1: 1, d2: 3 }],
+      archived: 0, problems: [], usedArchive: false, caveats: ['c'],
+    }, { single: true }).join('\n');
+    expect(rendered).toContain('decision-walk');
+    expect(rendered).toContain('1 autonomous');
+    expect(rendered).not.toContain('--all');
+    expect(rendered).not.toContain('No placed skill fired');
+  });
+});

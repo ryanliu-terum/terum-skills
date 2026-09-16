@@ -79,7 +79,7 @@ export type SkillDetail=Omit<Design['DETAIL'],keyof SkillCard|'root'|'history'|'
  *  so it was never in a position to be passed over. That is not the same as `{d1:0,d2:0}`, which
  *  means it was installed and the model ignored it anyway. The second is the case this whole
  *  feature exists to find; a panel that renders both as "no firings" throws it away. */
-export interface UsageModel{firings:{d1:number;d2:number;autonomy:number|null;availability:'full'|'partial'|'unknown'}|null;since:string;until:string;caveats:string[]}
+export interface UsageModel{firings:{d1:number;d2:number;autonomy:number|null;availability:'full'|'partial'|'unknown';placed:boolean}|null;since:string;until:string;caveats:string[]}
 export type EvalReportModel=Pick<SkillDetail,'receipt'|'summary'|'incumbentLift'|'reportNumbers'|'history'|'versions'|'latestState'|'invalidReceiptFile'|'localRuns'|'evalEstimate'|'evalEstimateText'|'evalEstimateTip'|'scoreFractions'|'wlt'>;
 // D22: `update` (update-available) and `review` (PR review) are the two mechanisms this refactor
 // deletes, so they are no longer item kinds. design.json still records their canvas rows; the mock

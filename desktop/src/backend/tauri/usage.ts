@@ -27,14 +27,25 @@ export type CliUsage = z.infer<typeof cliUsage>;
  * (measured 2026-09-15: 1.3s either way over 706 transcripts / 160 MB), and `cached()` keys on argv,
  * so per-skill calls would be per-skill cache entries and per-skill rescans.
  *
- * `firings: null` means **no placement on this machine** — a different statement from "placed and
- * never fired", which is `{d1: 0, d2: 0}`. The panel must say different things about them: the
- * second is the interesting case this feature exists to surface, the first is just absence.
+ * Three sources, in order, because an observed firing is evidence no matter who placed the copy:
+ *
+ *  1. a **row** — this skill is in Terum's `placements` ledger, so its availability is known;
+ *  2. the **`unrecognised` tail** — it fired here but Terum did not place it (a hand-installed
+ *     folder under `~/.claude/skills/`, which the app itself labels "yours, not placed by Terum").
+ *     `placed: false`, availability unknown, because no ledger row means no `placed_at`;
+ *  3. neither — nothing was observed. That is NOT the same as "not installed", and the panel must
+ *     not claim it is: this model sees firings, not the filesystem.
+ *
+ * Dropping case 2 was a real bug — `decision-walk` had four recorded firings and the tab said there
+ * was nothing to observe, while the rail beside it read "Installed · on this machine".
  */
 export function mapUsage(report: CliUsage, skill: string): UsageModel {
-  const found = report.rows.find(r => r.skill === skill) ?? null;
-  return {
-    firings: found === null ? null : { d1: found.d1, d2: found.d2, autonomy: found.autonomy, availability: found.availability },
-    since: report.since, until: report.until, caveats: report.caveats,
-  };
+  const row = report.rows.find(r => r.skill === skill);
+  const loose = row === undefined ? report.unrecognised.find(r => r.skill === skill) : undefined;
+  const firings = row !== undefined
+    ? { d1: row.d1, d2: row.d2, autonomy: row.autonomy, availability: row.availability, placed: true }
+    : loose !== undefined
+      ? { d1: loose.d1, d2: loose.d2, autonomy: loose.d1 + loose.d2 === 0 ? null : loose.d1 / (loose.d1 + loose.d2), availability: 'unknown' as const, placed: false }
+      : null;
+  return { firings, since: report.since, until: report.until, caveats: report.caveats };
 }
