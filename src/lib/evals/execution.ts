@@ -45,11 +45,26 @@ export interface EvalCase {
   max_turns?: number;
 }
 
+/** One independently scored row from a suite's single shared agent session. */
+export interface SuiteCase {
+  name: string;
+  checks: CheckSpec[];
+}
+
+/** `evals/suite.yaml`: shared sandbox/session input plus independently checked rows. */
+export interface EvalSuite extends Omit<EvalCase, 'checks' | 'judge' | 'bucket'> {
+  cases: SuiteCase[];
+}
+
 /** Parse one `evals/cases/<case>.yaml` (§5.1); the stem is the case name. */
 export function loadCase(source: string, name: string): Result<EvalCase> {
   let raw: unknown;
   try { raw = YAML.parse(source); } catch (error) { return failure(`case '${name}': ${error instanceof Error ? error.message : String(error)}`); }
-  const record = (raw ?? {}) as Record<string, unknown>;
+  return parseCaseRecord((raw ?? {}) as Record<string, unknown>, name);
+}
+
+/** Shared loader for ordinary cases and a suite's common fields. */
+function parseCaseRecord(record: Record<string, unknown>, name: string): Result<EvalCase> {
   if (typeof record['task'] !== 'string' || !record['task'].trim()) return failure(`case '${name}' needs a 'task'`);
   const bucket = record['bucket'] === undefined ? undefined : String(record['bucket']);
   if (bucket !== undefined && !(BUCKETS as readonly string[]).includes(bucket)) return failure(`case '${name}': unknown bucket '${bucket}'`);
@@ -76,6 +91,41 @@ export function loadCase(source: string, name: string): Result<EvalCase> {
     requires: Array.isArray(record['requires']) ? record['requires'].map(String) : [],
     ...(timeoutMinutes === undefined ? {} : { timeout_minutes: timeoutMinutes }),
     ...(maxTurns === undefined ? {} : { max_turns: maxTurns }),
+  });
+}
+
+/** Parse `evals/suite.yaml`; the file stem is its one provenance/session name. */
+export function loadSuite(source: string, name: string): Result<EvalSuite> {
+  let raw: unknown;
+  try { raw = YAML.parse(source); } catch (error) { return failure(`suite '${name}': ${error instanceof Error ? error.message : String(error)}`); }
+  const record = (raw ?? {}) as Record<string, unknown>;
+  const shared = parseCaseRecord(record, name);
+  if (!shared.ok) return failure(shared.error);
+  if (!Array.isArray(record['cases']) || record['cases'].length === 0) return failure(`suite '${name}' needs a non-empty 'cases' list`);
+  const cases: SuiteCase[] = [];
+  const names = new Set<string>();
+  const prohibited = ['judge', 'task', 'files', 'fixture', 'setup', 'bucket'];
+  for (const item of record['cases']) {
+    if (item === null || typeof item !== 'object' || Array.isArray(item)) return failure(`suite '${name}': each sub-case must be a map`);
+    const sub = item as Record<string, unknown>;
+    for (const field of prohibited) {
+      if (sub[field] !== undefined) return failure(`suite '${name}': sub-case must not carry '${field}'`);
+    }
+    if (typeof sub['name'] !== 'string' || !sub['name'].trim()) return failure(`suite '${name}': sub-case needs a non-empty 'name'`);
+    if (names.has(sub['name'])) return failure(`suite '${name}': duplicate sub-case name '${sub['name']}'`);
+    if (!Array.isArray(sub['checks'])) return failure(`suite '${name}': sub-case '${sub['name']}' needs a 'checks' list`);
+    names.add(sub['name']);
+    // Checks deliberately retain loadCase's deferred behavior: unknown kinds fail when run.
+    cases.push({ name: sub['name'], checks: sub['checks'] as CheckSpec[] });
+  }
+  return success({
+    name: shared.value.name, task: shared.value.task, files: shared.value.files,
+    requires: shared.value.requires,
+    ...(shared.value.fixture === undefined ? {} : { fixture: shared.value.fixture }),
+    ...(shared.value.setup === undefined ? {} : { setup: shared.value.setup }),
+    ...(shared.value.timeout_minutes === undefined ? {} : { timeout_minutes: shared.value.timeout_minutes }),
+    ...(shared.value.max_turns === undefined ? {} : { max_turns: shared.value.max_turns }),
+    cases,
   });
 }
 
@@ -274,12 +324,67 @@ export interface RunCaseOptions {
   dependencies?: DependencyPlan;
 }
 
+type RunOutput = { rows: ComparisonRow[]; arms: ArmSample[]; skipped?: string[]; dropped?: DroppedCase };
+
+/**
+ * The one arm path for case and suite sessions: fresh seed, crash-only retry with preserved
+ * transcript, then the unchanged resolved-skill contamination assertion.
+ */
+async function runArm(
+  deps: RunCaseDeps, evalCase: Pick<EvalCase, 'name' | 'task' | 'timeout_minutes' | 'max_turns'>,
+  options: RunCaseOptions, arm: Arm, skillDir: string | null, rep: number, transcriptStem: string,
+): Promise<{ sandbox: string; transcript: Transcript | null; retried: boolean }> {
+  const log = deps.log ?? (() => undefined);
+  let sandbox = '';
+  let transcript: Transcript | null = null;
+  let retried = false;
+  const transcriptPath = join(options.transcriptDir, `${transcriptStem}.${arm}.${rep}.jsonl`);
+  for (let attempt = 0; attempt < 2 && transcript === null; attempt++) {
+    sandbox = await seedSandbox(evalCase as EvalCase, { caseDir: options.caseDir, skillName: options.skillName, skillDir, scratch: options.scratch, ...(options.dependencies === undefined ? {} : { dependencies: options.dependencies }) });
+    try {
+      transcript = await deps.agent.runAgent(evalCase.task, sandbox, {
+        transcriptPath, model: deps.model ?? DEFAULT_MODEL,
+        timeoutMs: (evalCase.timeout_minutes ?? 120) * 60_000,
+        maxTurns: evalCase.max_turns ?? 200,
+      });
+    } catch (error) {
+      if (!(error instanceof AgentRunError)) throw error;
+      if (error instanceof AgentTimeoutError) {
+        log(`  ${evalCase.name} rep${rep} ${arm}: timed out, not retried: ${error.message}`);
+        break;
+      }
+      if (attempt === 0) {
+        retried = true;
+        try { await rename(transcriptPath, join(options.transcriptDir, `${transcriptStem}.${arm}.${rep}.attempt-1.jsonl`)); }
+        catch (renameError) { if ((renameError as NodeJS.ErrnoException).code !== 'ENOENT') throw renameError; }
+      }
+      log(`  ${evalCase.name} rep${rep} ${arm}: agent run failed${attempt === 0 ? ', retrying once' : ' twice, scoring empty'}: ${error.message}`);
+    }
+  }
+  const skillList = transcript?.skillList() ?? null;
+  const staged = skillDir !== null;
+  if (transcript !== null && staged && skillList === null) {
+    throw new ContaminationError(`arm '${arm}' did not report its resolved skill list; refusing the run (§7.3)`);
+  }
+  if (skillList !== null && skillList.includes(options.skillName) !== staged) {
+    throw new ContaminationError(`arm '${arm}' resolved skills [${skillList.join(', ')}] — '${options.skillName}' ${staged ? 'is missing from an arm that staged it' : 'leaked into an arm without it staged'}; refusing the run (§7.3)`);
+  }
+  return { sandbox, transcript, retried };
+}
+
+function sampleFor(arm: Arm, caseName: string, rep: number, transcript: Transcript | null, retried: boolean, checks: CheckResult[]): ArmSample {
+  const efficiency = transcript?.efficiency() ?? { turns: null, duration_ms: null, cost_usd: null };
+  const spawnsAgents = transcript === null ? null : transcript.toolUses().some((name) => ['Task', 'Agent', 'Workflow'].includes(name))
+    || transcript.bashCommands().some((command) => /\bcodex\b|claude -p/.test(command));
+  return { kind: 'arm', case: caseName, rep, arm, failed: transcript === null, retried, fraction: fractionPassed(checks), ...efficiency, skill_list: transcript?.skillList() ?? null, model_id: transcript?.modelId() ?? null, spawns_agents: spawnsAgents };
+}
+
 /**
  * Run one case, k reps × available arms. Returns one row per (rep × opponent) plus per-arm
  * samples; a case whose host requirements are missing runs nothing and returns `skipped` with
  * the missing entries (rev 8) — its absent rows grey the verdict as unscored holes.
  */
-export async function runCase(deps: RunCaseDeps, evalCase: EvalCase, options: RunCaseOptions): Promise<{ rows: ComparisonRow[]; arms: ArmSample[]; skipped?: string[]; dropped?: DroppedCase }> {
+export async function runCase(deps: RunCaseDeps, evalCase: EvalCase, options: RunCaseOptions): Promise<RunOutput> {
   const log = deps.log ?? (() => undefined);
   const missing = await missingRequirements(evalCase.requires);
   if (missing.length) {
@@ -296,59 +401,11 @@ export async function runCase(deps: RunCaseDeps, evalCase: EvalCase, options: Ru
     const transcripts = new Map<Arm, Transcript | null>();
     const checksByArm = new Map<Arm, CheckResult[]>();
     for (const [arm, skillDir] of armDirs) {
-      // Rev 7: one retry on AgentRunError, in a FRESH sandbox (a timed-out attempt leaves side
-      // effects) — an infra flake scored against the empty transcript is a spurious loss.
-      let sandbox = '';
-      let transcript: Transcript | null = null;
-      let retried = false;
-      const transcriptPath = join(options.transcriptDir, `${evalCase.name}.${arm}.${rep}.jsonl`);
-      for (let attempt = 0; attempt < 2 && transcript === null; attempt++) {
-        sandbox = await seedSandbox(evalCase, { caseDir: options.caseDir, skillName: options.skillName, skillDir, scratch: options.scratch, ...(options.dependencies === undefined ? {} : { dependencies: options.dependencies }) });
-        try {
-          transcript = await deps.agent.runAgent(evalCase.task, sandbox, {
-            transcriptPath, model: deps.model ?? DEFAULT_MODEL,
-            timeoutMs: (evalCase.timeout_minutes ?? 120) * 60_000,
-            maxTurns: evalCase.max_turns ?? 200,
-          });
-        } catch (error) {
-          if (!(error instanceof AgentRunError)) throw error;
-          if (error instanceof AgentTimeoutError) {
-            log(`  ${evalCase.name} rep${rep} ${arm}: timed out, not retried: ${error.message}`);
-            break;
-          }
-          if (attempt === 0) {
-            retried = true;
-            // §17.3: the failed attempt's transcript survives under a distinct suffix; the retry
-            // takes the canonical §4.2 path (missing file = the run died before writing one).
-            try { await rename(transcriptPath, join(options.transcriptDir, `${evalCase.name}.${arm}.${rep}.attempt-1.jsonl`)); }
-            catch (renameError) { if ((renameError as NodeJS.ErrnoException).code !== 'ENOENT') throw renameError; }
-          }
-          log(`  ${evalCase.name} rep${rep} ${arm}: agent run failed${attempt === 0 ? ', retrying once' : ' twice, scoring empty'}: ${error.message}`);
-        }
-      }
-      const skillList = transcript?.skillList() ?? null;
-      // §7.3 (rev 6): the CLI's init event always lists its built-in skills, so the contamination
-      // signal is membership of the skill under eval, never list equality. Everything else in the
-      // list is CLI-provided; user/global skills are excluded by construction (--setting-sources
-      // project), measured on CC 2.1.236 (VE1).
-      const staged = skillDir !== null;
-      // §17.7 targets a transcript whose init event omits `skills`. A fully failed arm
-      // (transcript null) stays on the rev-7 scored-empty path and greys the verdict instead.
-      if (transcript !== null && staged && skillList === null) {
-        throw new ContaminationError(`arm '${arm}' did not report its resolved skill list; refusing the run (§7.3)`);
-      }
-      if (skillList !== null) {
-        if (skillList.includes(options.skillName) !== staged) {
-          throw new ContaminationError(`arm '${arm}' resolved skills [${skillList.join(', ')}] — '${options.skillName}' ${staged ? 'is missing from an arm that staged it' : 'leaked into an arm without it staged'}; refusing the run (§7.3)`);
-        }
-      }
-      const checks = runChecks(evalCase.checks, transcript ?? emptyTranscript, sandbox);
-      transcripts.set(arm, transcript);
+      const session = await runArm(deps, evalCase, options, arm, skillDir, rep, evalCase.name);
+      const checks = runChecks(evalCase.checks, session.transcript ?? emptyTranscript, session.sandbox);
+      transcripts.set(arm, session.transcript);
       checksByArm.set(arm, checks);
-      const efficiency = transcript?.efficiency() ?? { turns: null, duration_ms: null, cost_usd: null };
-      const spawnsAgents = transcript === null ? null : transcript.toolUses().some((name) => ['Task', 'Agent', 'Workflow'].includes(name))
-        || transcript.bashCommands().some((command) => /\bcodex\b|claude -p/.test(command));
-      samples.push({ kind: 'arm', case: evalCase.name, rep, arm, failed: transcript === null, retried, fraction: fractionPassed(checks), ...efficiency, skill_list: skillList, model_id: transcript?.modelId() ?? null, spawns_agents: spawnsAgents });
+      samples.push(sampleFor(arm, evalCase.name, rep, session.transcript, session.retried, checks));
     }
 
     for (const opponent of ['baseline', 'incumbent'] as const) {
@@ -371,6 +428,59 @@ export async function runCase(deps: RunCaseDeps, evalCase: EvalCase, options: Ru
     const dropped = seedFailure(evalCase.name, error);
     if (dropped !== null) {
       log(`  ${evalCase.name}: ABORTED (${dropped.kind}) — ${dropped.detail}`);
+      return { rows: [], arms: [], dropped };
+    }
+    throw error;
+  }
+  return { rows, arms: samples };
+}
+
+/**
+ * Run one shared session per arm and score every suite sub-case against that transcript. The
+ * session mechanics intentionally route through `runArm`, the same path ordinary cases use.
+ */
+export async function runSuite(deps: RunCaseDeps, suite: EvalSuite, options: RunCaseOptions): Promise<RunOutput> {
+  const log = deps.log ?? (() => undefined);
+  const missing = await missingRequirements(suite.requires);
+  if (missing.length) {
+    log(`  ${suite.name}: SKIPPED (environment) — missing ${missing.join(', ')}`);
+    return { rows: [], arms: [], skipped: missing };
+  }
+  const armDirs: Array<[Arm, string | null]> = [['baseline', null], ['candidate', options.arms.candidate]];
+  if (options.arms.incumbent !== undefined) armDirs.push(['incumbent', options.arms.incumbent]);
+  const rows: ComparisonRow[] = [];
+  const samples: ArmSample[] = [];
+  try {
+    for (let rep = 0; rep < options.k; rep++) {
+      const sessions = new Map<Arm, { sandbox: string; transcript: Transcript | null; retried: boolean }>();
+      for (const [arm, skillDir] of armDirs) sessions.set(arm, await runArm(deps, suite, options, arm, skillDir, rep, suite.name));
+      for (const subCase of suite.cases) {
+        const checksByArm = new Map<Arm, CheckResult[]>();
+        for (const [arm] of armDirs) {
+          const session = sessions.get(arm)!;
+          const checks = runChecks(subCase.checks, session.transcript ?? emptyTranscript, session.sandbox);
+          checksByArm.set(arm, checks);
+          // The session-level efficiency values are deliberately repeated for every defect row.
+          samples.push(sampleFor(arm, subCase.name, rep, session.transcript, session.retried, checks));
+        }
+        for (const opponent of ['baseline', 'incumbent'] as const) {
+          if (!armDirs.some(([arm]) => arm === opponent)) continue;
+          // Suites never have a rubric; an equal check result is therefore the no-judge tie.
+          const outcome = await decide(deps, { ...suite, name: subCase.name, checks: subCase.checks }, sessions.get('candidate')!.transcript, sessions.get(opponent)!.transcript, checksByArm.get('candidate') ?? [], checksByArm.get(opponent) ?? []);
+          rows.push({
+            skill: options.skillName, kind: 'execution', case: subCase.name, rep,
+            comparison: `candidate-vs-${opponent}`,
+            outcome: outcome.result, decided_by: outcome.decidedBy, reason: outcome.reason,
+            checks_candidate: checksByArm.get('candidate') ?? [], checks_opponent: checksByArm.get(opponent) ?? [],
+          });
+          log(`  ${subCase.name} rep${rep} candidate-vs-${opponent}: ${outcome.result} (${outcome.decidedBy})`);
+        }
+      }
+    }
+  } catch (error) {
+    const dropped = seedFailure(suite.name, error);
+    if (dropped !== null) {
+      log(`  ${suite.name}: ABORTED (${dropped.kind}) — ${dropped.detail}`);
       return { rows: [], arms: [], dropped };
     }
     throw error;

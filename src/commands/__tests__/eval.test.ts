@@ -4,7 +4,7 @@ import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { dirname, join, sep } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { createConfigStore, type ConfigStore } from '../../lib/config.js';
-import { type AgentApi, Transcript } from '../../lib/evals/agent.js';
+import { AgentTimeoutError, type AgentApi, Transcript } from '../../lib/evals/agent.js';
 import { success } from '../../lib/result.js';
 import { bareTeam, cloneWithIdentity, git, holdCloneLock, NonInteractivePrompter, pushFromSeed, ScriptedPrompter, temporaryDirectory } from '../../lib/__tests__/fixtures.js';
 import { receiptSchema } from '../../lib/evals/receipt.js';
@@ -40,6 +40,7 @@ function generationAgent(prompts: string[]): AgentApi {
 /** `transcript` with the resolved-skills list and the assistant text set independently: §7.3's contamination guard reads the first, a `transcript_mentions` check reads the second. */
 const armTranscript = (skills: string[], text: string): Transcript => Transcript.fromStream(`${JSON.stringify({ type: 'system', subtype: 'init', skills })}\n${JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text }] } })}\n${JSON.stringify({ type: 'result', result: 'done' })}`);
 const CASE = 'task: deploy\nchecks:\n  - transcript_mentions: deployed\n';
+const SUITE = 'task: deploy\ncases:\n  - name: suite-finds-deploy\n    checks:\n      - transcript_mentions: deployed\n  - name: suite-omits-wrong\n    checks:\n      - transcript_omits: wrong\n';
 const TRIGGERS = 'should_trigger: [deploy now]\nshould_not_trigger: [chat]\n';
 const armAgent: AgentApi = {
   runAgent: (_task, cwd) => Promise.resolve(transcript(existsSync(join(cwd, '.claude', 'skills', 'sample')) ? ['sample'] : [])),
@@ -207,6 +208,58 @@ describe('eval (§6 / IE2)', () => {
     const result = await run(args(store, home, { noGen: true, agent, k: 1 }), new ScriptedPrompter());
     if(!result.ok) throw new Error(result.error);
     expect(runs).toBe(2); // baseline + candidate only
+  });
+
+  it('treats suite.yaml as an authored execution asset: it generates nothing and writes a schema-valid per-defect receipt', async () => {
+    const { store, home } = await evalFixture({ team: false, assets: { 'evals/suite.yaml': SUITE } });
+    let asks = 0;
+    const agent: AgentApi = {
+      runAgent: (_task, cwd) => armAgent.runAgent(_task, cwd),
+      askJson: () => { asks += 1; return Promise.resolve({}); },
+    };
+    const result = await run(args(store, home, { agent, k: 1, executionOnly: true }), new ScriptedPrompter());
+    if (!result.ok) throw new Error(result.error);
+    expect(asks).toBe(0);
+    const receipt = receiptSchema.parse(JSON.parse(await readFile(join(result.value.runDir, 'receipt.json'), 'utf8')));
+    expect(receipt.expected_rows).toBe(2);
+    expect(receipt.provenance.cases).toEqual(['suite']);
+    expect(receipt.per_case!.map((entry) => entry.case)).toEqual(['suite-finds-deploy', 'suite-omits-wrong']);
+    expect(receipt.comparisons['candidate-vs-baseline']!.sign_p).toBe(1);
+  });
+
+  it('runs authored cases first and then a suite, counts suite rows, and records the suite once', async () => {
+    const { store, home } = await evalFixture({ team: false, assets: { 'evals/cases/happy.yaml': CASE, 'evals/suite.yaml': SUITE } });
+    let calls = 0;
+    const agent: AgentApi = { runAgent: async (task, cwd) => { calls += 1; return armAgent.runAgent(task, cwd); }, askJson: () => Promise.resolve({}) };
+    const result = await run(args(store, home, { agent, k: 1, noGen: true }), new ScriptedPrompter());
+    expect(result).toMatchObject({ ok: true }); if (!result.ok) return;
+    expect(calls).toBe(4);
+    const receipt = receiptSchema.parse(JSON.parse(await readFile(join(result.value.runDir, 'receipt.json'), 'utf8')));
+    expect(receipt.expected_rows).toBe(3);
+    expect(receipt.provenance.cases).toEqual(['happy', 'suite']);
+    expect(receipt.per_case!.map((entry) => entry.case)).toEqual(['happy', 'suite-finds-deploy', 'suite-omits-wrong']);
+  });
+
+  it('refuses a suite sub-case name that collides with any authored case name', async () => {
+    const collision = 'task: deploy\ncases:\n  - name: happy\n    checks: []\n';
+    const { store, home } = await evalFixture({ assets: { 'evals/cases/happy.yaml': CASE, 'evals/suite.yaml': collision } });
+    await expect(run(args(store, home, { agent: armAgent, k: 1, noGen: true }), new ScriptedPrompter())).resolves.toMatchObject({ ok: false, error: expect.stringContaining("sub-case name 'happy' collides") });
+  });
+
+  it('a dead suite session empties every sub-case row at once: nothing scored, nothing in per_case (§2.2, spec rev 2)', async () => {
+    const { store, home } = await evalFixture({ team: false, assets: { 'evals/suite.yaml': SUITE } });
+    const agent: AgentApi = {
+      runAgent: (_task, cwd) => existsSync(join(cwd, '.claude', 'skills', 'sample'))
+        ? Promise.reject(new AgentTimeoutError('cap'))
+        : Promise.resolve(transcript([])),
+      askJson: () => Promise.resolve({}),
+    };
+    const result = await run(args(store, home, { agent, k: 1, noGen: true }), new ScriptedPrompter());
+    expect(result).toMatchObject({ ok: true, value: { executionStatus: 'failed' } }); if (!result.ok) return;
+    const receipt = receiptSchema.parse(JSON.parse(await readFile(join(result.value.runDir, 'receipt.json'), 'utf8')));
+    expect(receipt).toMatchObject({ execution_status: 'failed', scored_rows: 0, expected_rows: 2 });
+    expect(receipt.per_case).toEqual([]);
+    expect(receipt.provenance.cases).toEqual(['suite']);
   });
 
   it('§6.3/D9: generation writes the missing assets back into the LOCAL folder, announced before it writes', async () => {

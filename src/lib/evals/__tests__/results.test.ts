@@ -65,6 +65,11 @@ describe('aggregation (§5.3)', () => {
     expect(aggregate([], [], 0)).toMatchObject({ verdict: 'NEUTRAL', execution_status: 'complete', attribution: 'no execution comparisons ran' });
   });
 
+  it('fixes sign p at 1.0 for any receipt containing suite rows because a session is not independent', () => {
+    expect(aggregate([row('win'), row('win')], [sample('candidate', 1), sample('baseline', 0)], 2).comparisons['candidate-vs-baseline']!.sign_p).not.toBe(1);
+    expect(aggregate([row('win'), row('win')], [sample('candidate', 1), sample('baseline', 0)], 2, {}, {}, true).comparisons['candidate-vs-baseline']!.sign_p).toBe(1);
+  });
+
   it('environment skips grey the verdict and print in the report (§7.1 rev 8)', () => {
     const out = aggregate([row('win')], [sample('candidate', 1)], 3, { xlsx: ['python3:openpyxl'] });
     expect(out.execution_status).toBe('partial'); // skipped case's rows are unscored holes

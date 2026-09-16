@@ -72,7 +72,7 @@ export interface Aggregate {
  * Roll rows and arm samples up into receipt numbers. `expectedRows` is k × opponents × cases;
  * a row decided by `both-arms-failed` is an unscored hole, and holes grey the verdict (§5.4).
  */
-export function aggregate(rows: readonly ComparisonRow[], arms: readonly ArmSample[], expectedRows: number, environmentSkips: Record<string, string[]> = {}, droppedCases: Record<string, DroppedCase> = {}): Aggregate {
+export function aggregate(rows: readonly ComparisonRow[], arms: readonly ArmSample[], expectedRows: number, environmentSkips: Record<string, string[]> = {}, droppedCases: Record<string, DroppedCase> = {}, suiteRan = false): Aggregate {
   const comparisons: Record<string, ComparisonSummary> = {};
   const counts = new Map<string, { win: number; loss: number; tie: number }>();
   const scoredRows = rows.filter((row) => row.decided_by !== 'both-arms-failed' && !row.decided_by.endsWith('-run-failed'));
@@ -82,7 +82,8 @@ export function aggregate(rows: readonly ComparisonRow[], arms: readonly ArmSamp
     counts.set(row.comparison, count);
   }
   for (const [comparison, { win, loss, tie }] of counts) {
-    comparisons[comparison] = { win, loss, tie, net_lift: netLift(win, loss, tie), sign_p: signTest(win, loss) };
+    // Suite rows share one agent session, so they are not independent sign-test observations.
+    comparisons[comparison] = { win, loss, tie, net_lift: netLift(win, loss, tie), sign_p: suiteRan ? 1.0 : signTest(win, loss) };
   }
 
   const armScores: Record<string, number | null> = {};
@@ -106,6 +107,8 @@ export function aggregate(rows: readonly ComparisonRow[], arms: readonly ArmSamp
   const executionStatus = expectedRows === 0 ? 'complete' : scored === 0 ? 'failed' : scored < expectedRows ? 'partial' : 'complete';
   const headline = comparisons['candidate-vs-baseline'];
   const verdict = headline ? verdictBand(headline.win, headline.loss, headline.tie) : 'NEUTRAL';
+  // §2.2 (spec rev 2): an unscored row is omitted from per_case and the case_runs tally and shows only
+  // as expected_rows − scored_rows; a dead suite session therefore empties every sub-case row at once.
   const perCase = perCaseRows(scoredRows, scoredArms);
   return {
     verdict,
