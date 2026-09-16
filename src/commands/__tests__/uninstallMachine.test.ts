@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs';
 import { access, mkdir, readdir, readFile, rmdir, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -202,7 +203,7 @@ it.each([false, true])('discloses the app and evals before consent, removing onl
   await mkdir(evals); await writeFile(join(evals, 'transcript.json'), 'retained');
   const io = new ScriptedPrompter();
   io.confirm = async (_question, options) => {
-    expect(options?.detail).toContain(`  Downloaded desktop app bundle at ${join(store.root, 'app')} (all versions)`);
+    expect(options?.detail).toContain(`  Desktop app downloads and records at ${join(store.root, 'app')} (all versions)`);
     expect(options?.detail?.find(line => line.startsWith('Kept:'))).toContain(`${evals} (eval runs and transcripts)`);
     expect(await readFile(join(bundle, 'terum'), 'utf8')).toBe('bundle');
     return accepted;
@@ -273,17 +274,23 @@ it.each(['darwin', 'win32', 'linux'] as const)('returns and prints CLI package a
   const { root, store, hook } = await minimal(); const app = join(store.root, 'app');
   const bundle = join(app, '0.1.6', 'Terum.app', 'Contents', 'MacOS');
   await mkdir(bundle, { recursive: true }); await writeFile(join(bundle, 'terum'), 'bundle');
+  // The macOS bundle itself lives in Applications; the uninstall removes it there (only on darwin, where it was placed).
+  const applicationsDir = join(root, 'Applications'), placed = join(applicationsDir, 'Terum Skills.app');
+  await mkdir(join(placed, 'Contents'), { recursive: true }); await writeFile(join(placed, 'Contents', 'Info.plist'), '<plist/>');
   await mkdir(join(store.root, 'run')); await writeFile(join(store.root, 'run', 'app.json'), '{}');
   const launch = { kind: 'npx' as const, path: '/cache/dist/index.js', cacheDir: '/cache', request: 'terum-skills@latest' };
   const io = new ScriptedPrompter([], [true]);
-  const result = await run({ config: store, hook, wrapper: wrapperFor(join(root, 'home')), launch, platform }, io);
+  const result = await run({ config: store, hook, wrapper: wrapperFor(join(root, 'home')), launch, platform, applicationsDir }, io);
   if (!result.ok) throw new Error(result.error);
+  expect(existsSync(placed)).toBe(platform !== 'darwin');
   const platformLines = platform === 'darwin'
-    ? [`The desktop app was deleted from ${app}. A copy that is running keeps running until you quit it; it cannot be reopened from the Dock. \`npx -y terum-skills@latest app\` downloads it again (needs gh and the release).`]
+    ? [`The desktop app was deleted from ${placed} and ${app}. A copy that is running keeps running until you quit it; it cannot be reopened from the Dock. \`npx -y terum-skills@latest app\` downloads it again (needs gh and the release).`]
     : platform === 'win32' ? [`The desktop app under %LOCALAPPDATA%\\Terum Skills stays installed; remove it from Windows Settings ▸ Apps. Only its download record under ${app} was removed.`] : [];
   const advice = [...packageRemovalLines(launch), ...platformLines, "This app's own preferences (theme, layout) are kept by the app and were not touched."];
   const detail = io.details['Remove terum-skills from this machine?']!;
-  expect(detail[detail.indexOf(`  Downloaded desktop app bundle at ${app} (all versions)`) + 1]).toBe(`  Desktop launch state in ${join(store.root, 'run')} (app.json, latest-version.json)`);
+  if (platform === 'darwin') expect(detail[detail.indexOf(`  Desktop app at ${placed}`) + 1]).toBe(`  Desktop app downloads and records at ${app} (all versions)`);
+  else expect(detail).not.toContain(`  Desktop app at ${placed}`);
+  expect(detail[detail.indexOf(`  Desktop app downloads and records at ${app} (all versions)`) + 1]).toBe(`  Desktop launch state in ${join(store.root, 'run')} (app.json, latest-version.json)`);
   expect(result.value.advice).toEqual(advice);
   expect(io.lines.slice(-advice.length)).toEqual(advice);
 });
