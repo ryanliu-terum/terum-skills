@@ -1829,73 +1829,103 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
   },
   {
     "file": "README.md",
-    "line": 42,
+    "line": 44,
     "policy": "prose",
     "pattern": "We're interested in collaborators, and just as much in feedback and the things you want us to add. Join our Discord to talk to us: [discord.gg/SVVzejCf9](https://discord.gg/SVVzejCf9)! Bugs and feature requests are also welcome as [GitHub issues](https://github.com/ryanliu-terum/terum-skills/issues), or just email ryanliu@terum.ai directly (I've offered your email as tribute Ryan)."
   },
   {
     "file": "README.md",
-    "line": 64,
+    "line": 66,
     "policy": "prose",
     "pattern": "- Setup also installs a `/terum-skills` skill for Claude Code, so Claude can run these commands for you inside a session."
   },
   {
     "file": "README.md",
-    "line": 93,
+    "line": 95,
     "policy": "prose",
     "pattern": "- **Cases** live in the skill folder and travel with it. A skill with none still gets evaluated: `eval` generates between three and seven, sized to the skill's complexity and spread across the five prompt buckets, plus five should-trigger and five should-not-trigger prompts. Every generated file is marked as generated."
   },
   {
     "file": "README.md",
-    "line": 118,
+    "line": 120,
     "policy": "fixed",
     "pattern": "Every verb runs as `npx -y terum-skills@latest <verb>`. The ones you'll type by hand:"
   },
   {
     "file": "README.md",
-    "line": 122,
+    "line": 124,
     "policy": "prose",
     "pattern": "| `setup [<org>/<repo>]` | Create or join a team, then open the app |"
   },
   {
     "file": "README.md",
-    "line": 123,
+    "line": 125,
     "policy": "prose",
     "pattern": "| `app` | Install and open the desktop app for this CLI version |"
   },
   {
     "file": "README.md",
-    "line": 124,
+    "line": 126,
     "policy": "prose",
     "pattern": "| `publish <skill>` | Publish a local folder as an immutable version, or attach new evals to an identical one |"
   },
   {
     "file": "README.md",
-    "line": 125,
+    "line": 127,
     "policy": "prose",
     "pattern": "| `install <skill>` | Copy a team skill into your global or a project folder |"
   },
   {
     "file": "README.md",
-    "line": 126,
+    "line": 128,
     "policy": "prose",
     "pattern": "| `eval <skill>` | Evaluate a local skill with your own Claude Code login |"
   },
   {
     "file": "README.md",
-    "line": 127,
+    "line": 129,
     "policy": "prose",
     "pattern": "| `sync` | Fetch the team repo; never touches your local skills |"
   },
   {
     "file": "README.md",
-    "line": 129,
+    "line": 136,
+    "policy": "prose",
+    "pattern": "| Team | `setup [<org>/<repo>]` · `login` · `status` · `invite <github-login>…` · `profile` · `team create [name]` · `team join <target>` · `team leave <name>` · `team move <target>` · `team remove <handle>` · `team migrate` · `team workflow-update` · `team project create [name]` · `team project delete [name]` |"
+  },
+  {
+    "file": "README.md",
+    "line": 137,
+    "policy": "prose",
+    "pattern": "| Library | `ls` · `ls member <handle>` · `ls project <name>` · `search <term>` · `project add [path]` · `project remove <path>` · `project list` · `reconcile` · `skill move <path>` · `skill copy <path>` · `skill rename <path>` · `skill delete <path>` · `skill fix <path>` · `skill category <path>` · `skill enable <path>` · `skill disable <path>` · `prune` |"
+  },
+  {
+    "file": "README.md",
+    "line": 138,
+    "policy": "prose",
+    "pattern": "| Sharing | `publish <ref>` · `unpublish <skill>` · `install <ref>` · `uninstall-skill <ref>` · `sync` |"
+  },
+  {
+    "file": "README.md",
+    "line": 139,
+    "policy": "prose",
+    "pattern": "| Evals | `validate <path\\|name>` · `eval <skill…>` · `eval-report <skill>` · `usage [skill]` |"
+  },
+  {
+    "file": "README.md",
+    "line": 140,
+    "policy": "prose",
+    "pattern": "| Machine | `app` · `app-update` · `update` · `uninstall` · `serve` |"
+  },
+  {
+    "file": "README.md",
+    "line": 144,
     "policy": "fixed",
     "pattern": "`npx -y terum-skills@latest --help` lists every verb, and `<verb> --help` its options. Programs drive the CLI with `--frames`, one JSON object per line; see [docs/frame-protocol.md](docs/frame-protocol.md)."
   },
   {
     "file": "README.md",
-    "line": 133,
+    "line": 148,
     "policy": "fixed",
     "pattern": "Updates are automatic. The CLI runs the latest release every time through `npx -y`, and the desktop app downloads its own new version and installs it when you quit, overnight, or when you press Install now, whichever you chose in Settings ▸ Updates. `npx -y terum-skills@latest uninstall` removes your team from this machine, the session hook, the Claude Code skill, and the app bundle, and keeps your quarantine, backups, and local eval runs."
   },
