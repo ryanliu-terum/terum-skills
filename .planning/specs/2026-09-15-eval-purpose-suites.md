@@ -1,6 +1,7 @@
 # Eval purpose suites — cases that test what a skill is for (IE7)
 
-**Status:** DRAFT rev 1 (Ryan, 2026-09-15, in session with Claude). Not built.
+**Status:** DRAFT rev 2 (harden r1 applied 2026-09-16 by the overnight build session — the
+clear BLOCKER/DRIFT fixes only; rev 1 Ryan, 2026-09-15, in session with Claude). Building: PR A open.
 Supersedes nothing yet; revises engine spec §4.3 (session cap), §7.1 (dead-arm row
 rule), adds a §5.1 sibling asset (suite), and adds a second generator mode to the
 eval-gen spec. Every decision below marked **locked** was made by Ryan in the
@@ -94,9 +95,14 @@ transcript**. Its checks fail, and that is a real loss. Rev 7's finding (the
 balk-and-ask death was the dominant noise source) still holds for that shape; it does
 not hold for a kill or a crash, which say nothing about the skill.
 
-Receipt impact: `case_runs[].outcomes` is an enum of win/loss/tie
-(`receipt.ts:58`). Unscored rows are **omitted** from `case_runs` and counted in
-`expected_rows − scored_rows`. No schema change.
+Receipt impact: `per_case[].outcomes` is the win/loss/tie enum (`receipt.ts:58`; the
+`per_case` list is `receipt.ts:114`), and `case_runs` is the separate per-arm `{passed, total}`
+tally over non-null verdicts. Unscored rows are **omitted** from `per_case` (and so from the
+`case_runs` tally) and counted in `expected_rows − scored_rows`; a dead arm's empty-transcript
+fraction never enters `arm_scores` or `efficiency`. No schema change. *(Open after harden r1:
+whether an unscored row should instead stay visible in `per_case` with the dead arm
+`passed: null` and no `outcomes` entry for that comparison — three reviewers recommended three
+different texts; Ryan decides.)*
 
 ### 2.3 Sixth transcript check: `transcript_omits`
 
@@ -123,7 +129,7 @@ task: Review the uncommitted diff in this repository before I commit it.
 files:            # inline seeds, or
 fixture: ../fixtures/pricing-repo     # a directory relative to this file
 setup: |          # /bin/sh -ce, 60 s cap, non-zero aborts the suite (unscored)
-  git init -q && git add -A && git -c user.name=t -c user.email=t@t commit -qm base
+  git init -q && git add -A -- . ':!.probes' ':!.plants.diff' && git -c user.name=t -c user.email=t@t commit -qm base
   sh .probes/run.sh expect-pass && git apply .plants.diff && sh .probes/run.sh expect-fail
   rm -rf .probes .plants.diff
 requires: []      # host tools, e.g. [codex]; probed once per suite (§4.3 rev 8)
@@ -143,9 +149,11 @@ skill may carry `evals/cases/*.yaml` **and** `evals/suite.yaml`; both run.
 
 ### 3.3 Runner: `runSuite` beside `runCase` (`execution.ts`)
 
-Per rep: probe `requires` once → for each arm: `seedSandbox` once (suite file is in
-`evals/`, which staging already excludes — the answer key never enters the sandbox,
-§4.3) → one `runAgent` → §7.3 contamination check unchanged → for each sub-case:
+Per rep: probe `requires` once → for each arm: `seedSandbox` once (the suite file — sub-cases
+and anchors — is in `evals/`, which staging already excludes; the probes and the patch that
+`setup` uses are pathspec-excluded from the base commit and deleted by `setup`'s last line, so
+they are in neither `HEAD`, the index, `git status` nor the worktree when an arm starts — engine
+§4.3, "the skill must not see its own answer key") → one `runAgent` → §7.3 contamination check unchanged → for each sub-case:
 `runChecks(sub.checks, transcript ?? emptyTranscript, sandbox)` → `decide()` per
 sub-case with the §2.2 rule → one `ComparisonRow` per (sub-case × opponent).
 
@@ -175,8 +183,10 @@ sub-case with the §2.2 rule → one `ComparisonRow` per (sub-case × opponent).
 
 ## 4. Ground-truth generation (eval-gen mode 2)
 
-**Runs for every skill** that has no authored assets (or under `--gen`), replacing
-today's case prompt. The heavy flag (§5) decides sessions and the notice, **not**
+**Runs for every skill** that has no authored execution asset — no `evals/cases/*.yaml`
+and no `evals/suite.yaml` (§3.5) — and that was not run with `--no-gen`; authored assets are
+never regenerated (`--gen` is deleted, D29: regenerating is deleting the asset and re-running).
+It replaces today's case prompt. The heavy flag (§5) decides sessions and the notice, **not**
 what gets generated — Ryan, 2026-09-15: "the new generator prompt should run for all
 skills".
 
@@ -213,8 +223,10 @@ distractor with `transcript_omits`; and per defect a **probe** under `.probes/` 
 exits 0 on the base and non-zero after the patch. Defect count must stay below any
 finding cap the SKILL.md states (the built-in reviewer caps at 8 on medium).
 
-**Self-validation, built into `setup`.** Commit base → run probes expecting pass →
-apply patch → run probes expecting fail → delete `.probes/` and `.plants.diff`. A
+**Self-validation, built into `setup`.** Commit the clean base (the probes and the patch
+are pathspec-excluded from that commit) → run probes expecting pass → apply patch → run
+probes expecting fail → delete `.probes/` and `.plants.diff`, leaving no trace in `HEAD`, the
+index or `git status`. A
 probe that disagrees makes setup exit non-zero, and a failed setup is already an
 unscored abort (`execution.ts` catch on `setup failed`). A fake bug therefore
 **aborts** the suite instead of poisoning both arms. This is why the
@@ -297,10 +309,12 @@ CANDIDATE FILE LISTING (names only):
 ```
 
 **Engine-composed `setup`** (written into the suite file by the validator; probes land
-under `.probes/<name>` with 0755, the diff as `.plants.diff`):
+under `.probes/<name>.sh` with 0755, the diff as `.plants.diff` — both are excluded from the
+base commit by pathspec and deleted before any arm starts, so the answer key is in neither
+`HEAD`, the index, `git status` nor the worktree when the task runs; harden r1 BLOCKER):
 
 ```
-git init -q && git add -A && git -c user.name=t -c user.email=t@t commit -qm base
+git init -q && git add -A -- . ':!.probes' ':!.plants.diff' && git -c user.name=t -c user.email=t@t commit -qm base
 for p in .probes/*; do sh "$p" || exit 1; done
 git apply .plants.diff
 for p in .probes/*; do if sh "$p"; then exit 1; fi; done
@@ -402,7 +416,7 @@ one line per staged path. No receipt change. A token that resolves nowhere print
 is recorded under `missing_dependencies` — the honest result for a teammate who
 installed a skill whose method never travelled with it.
 
-**Hygiene warning HYG7 [veto cheap]** — warning tier, like rev 16's HYG6: *"this
+**Hygiene warning HYG8 [veto cheap]** (rev 2: HYG7 is already the off-list category warning) — warning tier, like rev 16's HYG6: *"this
 skill references N repository paths outside its folder; it depends on files it does
 not carry"*. Printed by validate, share, publish, and eval; gates nothing. The
 author's fix is to move the script into the skill folder and reference it there —
@@ -480,8 +494,8 @@ one additive line (the v1→v2 precedent added `content_digest` the same way); i
 | 3 | §2.3 `transcript_omits` | 3 | 0 | 0 | — | check test + whitelist test |
 | 4 | §3 suite runner + wiring | 3 | 1 | 1 | 2 | suite-only skill generates nothing; dead session empties all sub-cases; receipt validates under v2 |
 | 5 | §5 detection + notice | 2 | 1 | 1 | 4 | static + observed flags agree on hybrid-review; refusal on closed prompt |
-| 6 | §4 ground-truth generation | 4 | 2 | 3 | 3, 4 | shape decision matches §4.0 on the eleven harness skills; a generated suite whose probe disagrees aborts setup; a reviewed suite runs on a code-review copy and separates it from baseline |
-| 8 | §6.1 dependency staging + HYG7 | 4 | 1 | 1 | — | hybrid-review candidate arm launches the Workflow tool in a sandbox seeded from a bare case; a missing path prints and is recorded; a skill referencing nothing stages nothing |
+| 6 | §4 ground-truth generation | 4 | 2 | 3 | 3, 4 | shape decision matches §4.0 on the eleven harness skills; a generated suite whose probe disagrees aborts setup; after setup, `git log -p`, `git status --porcelain` and `git diff` in the sandbox contain no probe body, no patch body and no such path; a reviewed suite runs on a code-review copy and separates it from baseline |
+| 8 | §6.1 dependency staging + HYG8 | 4 | 1 | 1 | — | hybrid-review candidate arm launches the Workflow tool in a sandbox seeded from a bare case; a missing path prints and is recorded; a skill referencing nothing stages nothing |
 | 7 | §6.2 hybrid-review suite (assets only) | 4 | 0 | 2 | 1, 2, 4, 8 | candidate transcript shows Workflow launch + `codex exec`; at least one row scored |
 
 Scores: Necessity to the North Star, Bug risk, Difficulty (incl. how cloudy), each
@@ -502,7 +516,7 @@ file shape, proven by one real run.
 6. Generated suite: 2–6 defects, exactly 1 distractor, 3–6 files.
 7. Dependency staging (§6.1): repo root = `.git` ancestor of the skill folder, else
    of the cwd; script files bring their parent directory; 20 MB cap; candidate and
-   incumbent arms only; HYG7 is warning tier.
+   incumbent arms only; HYG8 is warning tier.
 8. `spawns_agents`, `staged_dependencies`, `missing_dependencies` recorded in
    `run.jsonl` meta, not the receipt.
 
