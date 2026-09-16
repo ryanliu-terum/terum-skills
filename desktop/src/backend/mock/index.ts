@@ -225,6 +225,17 @@ export function createMockBackend(opts:{latencyMs?:number}={}):Backend & {readon
     result.value.skillMd={frontmatter:frontmatter[0].replace(/\r?\n$/,''),body:[],markdown:RAW_MD.slice(frontmatter[0].length)};
    }
    return result.ok?ok(scopedDetail(removalState(withInstall({...result.value,...(scenario==='not-installed'?{installed:'absent' as const,placed:false,onDiskOnly:false,root:'Marketplace' as const,flags:[]}:{}),...(scenario==='on-disk-only'&&ref==='deploy-check'?{installed:'placed' as const,placed:false,onDiskOnly:true,path:'~/.claude/skills/deploy-check',pathLabel:'~/.claude/skills/deploy-check',paths:[['~/.claude/skills/deploy-check','global']] as [string,string][]}:{}),enabled:scenario==='disabled'?false:backend.prefs.get('enabled:'+ref,result.value.enabled),favorite:backend.prefs.get('favorite:'+ref,result.value.favorite)})),at)):result;},ref),
+  /** Fixture firings. `deploy-check` is the case the feature exists for — reached for by hand, never
+   *  chosen by the model. A skill absent from this map has no placement here, which the panel must
+   *  render differently from "placed and never fired" (see UsageModel). */
+  usage:async({ref})=>{
+   const name=ref.replace(/^local:/,'').split('/').pop()??ref;
+   const fixture:Record<string,{d1:number;d2:number}>={'deploy-check':{d1:0,d2:4},'release-notes':{d1:3,d2:1},'pr-review':{d1:0,d2:0}};
+   const hit=fixture[name];
+   return ok({firings:hit===undefined?null:{...hit,autonomy:hit.d1+hit.d2===0?null:hit.d1/(hit.d1+hit.d2),availability:'full' as const},
+    since:'2026-08-16T00:00:00.000Z',until:'2026-09-15T00:00:00.000Z',
+    caveats:['Counts are invocations, not outcome-changing uses; reopenings are not deduped.','A skill placed part-way through the window was only available for part of it.','30-day window: Claude Code prunes transcripts, so earlier use is visible only where this machine has already archived it.']});
+  },
   evalReport:async({ref})=>{const detail=await backend.skill({ref});if(!detail.ok)return detail;const {receipt,summary,incumbentLift,reportNumbers,history,versions,latestState,invalidReceiptFile,localRuns,evalEstimate,evalEstimateText,evalEstimateTip,scoreFractions,wlt}=detail.value;return ok({receipt,summary,incumbentLift,reportNumbers,history,versions,latestState,invalidReceiptFile,localRuns,evalEstimate,evalEstimateText,evalEstimateTip,scoreFractions,wlt});},
   receipts:({skillId,version})=>read('library',()=>{const detail=skillByRef(skillId);if(!detail.ok)return fail(detail.error);return ok(detail.value.version===version?detail.value.receipt??null:null);}),
   inbox:()=>read('inbox',scenario=>ok(scenario==='empty'?[]:inboxItems())),

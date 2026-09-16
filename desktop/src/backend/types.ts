@@ -16,7 +16,7 @@ export interface Run<T>{readonly frames:AsyncIterable<Frame>;answer(id:string,va
 export interface Capabilities {appVersion:string;windowChrome:'mac-overlay'|'native'|'cosmetic';windowControlsEnd:number|null;disablePerMachine:boolean;inboxEventLog:boolean;offtargetKind:boolean;machineRegistry:boolean;perCaseEvalTables:boolean;openInEditor:boolean;clipboard:boolean}
 // §7.1: the local key is `libraryProjects`, not `projects` — `projects` is already the marketplace's
 // team-projects screen, and desktop/AGENTS.md invariant 2 forbids one flag meaning two things.
-export const FEATURE_KEYS = ['favorites','follow','roles','lastSeen','installScope','inviteScoping','disablePerMachine','projectMembers','liftOnCards','runEvalInApp','perCase','progress','memberRole','localIdentity','libraryProjects','projects','refresh','appUpdate','reconcile','serve'] as const;
+export const FEATURE_KEYS = ['favorites','follow','roles','lastSeen','installScope','inviteScoping','disablePerMachine','projectMembers','liftOnCards','runEvalInApp','perCase','progress','memberRole','localIdentity','libraryProjects','projects','refresh','appUpdate','reconcile','serve','usage'] as const;
 export type FeatureKey = typeof FEATURE_KEYS[number];
 export type Features = Readonly<Record<FeatureKey, boolean>>;
 export interface Surfaces {libraryProjects:boolean;divergence:boolean;status:boolean;settings:boolean;onboarding:boolean;library:boolean;skill:boolean;receipts:boolean;inbox:boolean;catalog:boolean;roster:boolean;update:boolean;appUpdate:boolean}
@@ -73,6 +73,13 @@ export type SkillDetail=Omit<Design['DETAIL'],keyof SkillCard|'root'|'history'|'
  viewerHandle:string|null;
  localRuns:{runId:string;runDir:string;executionStatus:'complete'|'partial'|'failed'|'unknown';committed:boolean;receipt:Receipt|null;summary:ReceiptSummary|null}[];
 };
+/** One skill's live firing counts (build spec §4.2), read from the CLI's `usage` verb.
+ *
+ *  `firings:null` means this machine has no PLACEMENT for the skill — it was never installed here,
+ *  so it was never in a position to be passed over. That is not the same as `{d1:0,d2:0}`, which
+ *  means it was installed and the model ignored it anyway. The second is the case this whole
+ *  feature exists to find; a panel that renders both as "no firings" throws it away. */
+export interface UsageModel{firings:{d1:number;d2:number;autonomy:number|null;availability:'full'|'partial'|'unknown'}|null;since:string;until:string;caveats:string[]}
 export type EvalReportModel=Pick<SkillDetail,'receipt'|'summary'|'incumbentLift'|'reportNumbers'|'history'|'versions'|'latestState'|'invalidReceiptFile'|'localRuns'|'evalEstimate'|'evalEstimateText'|'evalEstimateTip'|'scoreFractions'|'wlt'>;
 // D22: `update` (update-available) and `review` (PR review) are the two mechanisms this refactor
 // deletes, so they are no longer item kinds. design.json still records their canvas rows; the mock
