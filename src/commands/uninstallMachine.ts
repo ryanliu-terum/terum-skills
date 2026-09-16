@@ -11,11 +11,11 @@ import { Prompter } from '../lib/prompt.js';
 import { stripRemoteCredentials } from '../lib/remote.js';
 import { fromError, cancelled, failure, Result, success } from '../lib/result.js';
 import { Runner, systemRunner } from '../lib/runner.js';
-import { APP_PRODUCT } from './app.js';
+import { APP_BUNDLE, APP_PRODUCT, applicationsDirectory } from './app.js';
 import { teardownTeam } from './leave.js';
 
 export const fsForTests = { rm, rmdir };
-export interface UninstallMachineArgs extends WithForm { config?: ConfigStore; hook?: HookOptions; wrapper?: WrapperOptions; editHook?: Partial<EditHookOptions>; launch?: Launch; runner?: Runner; home?: string; platform?: NodeJS.Platform; }
+export interface UninstallMachineArgs extends WithForm { config?: ConfigStore; hook?: HookOptions; wrapper?: WrapperOptions; editHook?: Partial<EditHookOptions>; launch?: Launch; runner?: Runner; home?: string; platform?: NodeJS.Platform; /** Test knob: the folder holding the macOS bundle (default `~/Applications`). */ applicationsDir?: string; }
 export interface MachineUninstallResult { teams: string[]; removedPlacements: number; hookRemoved: boolean; wrapperRemoved: boolean; configRemoved: boolean; kept: string[]; record: string; launch: Launch | null; advice: string[]; }
 
 /** Confirm and remove this machine's tracked state. Package removal is always advice, never executed. */
@@ -51,6 +51,9 @@ export async function run(args: UninstallMachineArgs, io: Prompter): Promise<Res
     const kept: string[] = [];
     const app = join(store.root, 'app');
     const appPresent = await exists(app);
+    const platform = args.platform ?? process.platform;
+    const bundle = join(applicationsDirectory(args.applicationsDir), APP_BUNDLE);
+    const bundlePresent = platform === 'darwin' && await exists(bundle);
     const evals = join(store.root, 'evals');
     const evalsPresent = await exists(evals);
 
@@ -74,7 +77,8 @@ export async function run(args: UninstallMachineArgs, io: Prompter): Promise<Res
     else detail.push(`  ${wrapperPresence.kind === 'managed' ? '/terum-skills Claude Code skill at' : 'No /terum-skills Claude Code skill at'} ${wrapperDir}`);
     if (editHookPresence.kind === 'foreign') detail.push(`  ${editHookPath} is not the bundled terum-skills edit hook (${editHookPresence.why}); left alone`);
     else detail.push(`  ${editHookPresence.kind === 'managed' ? 'Edit hook (and its Write/Edit entry) at' : 'No edit hook at'} ${editHookPath}`);
-    if (appPresent) detail.push(`  Downloaded desktop app bundle at ${app} (all versions)`);
+    if (bundlePresent) detail.push(`  Desktop app at ${bundle}`);
+    if (appPresent) detail.push(`  Desktop app downloads and records at ${app} (all versions)`);
     if (launchStatePresent) detail.push(`  Desktop launch state in ${join(store.root, 'run')} (app.json, latest-version.json)`);
     detail.push(`  ${configPath}`);
     detail.push(`Kept: ${quarantineCount ? `${quarantine} (${quarantineCount} items), ` : ''}${backups} (settings backups and a record of this uninstall)${evalsPresent ? `, ${evals} (eval runs and transcripts)` : ''}`);
@@ -165,6 +169,13 @@ export async function run(args: UninstallMachineArgs, io: Prompter): Promise<Res
         directoryFailure ??= `Could not remove ${path}: ${message(error)}. Everything else was removed; re-run \`${invocation(args.form, 'uninstall')}\` to retry.`;
       }
     }
+    if (bundlePresent) {
+      try { await fsForTests.rm(bundle, { recursive: true, force: true }); }
+      catch (error) {
+        io.print(`Kept ${bundle}: ${message(error)}`); kept.push(bundle);
+        directoryFailure ??= `Could not remove ${bundle}: ${message(error)}. Everything else was removed; re-run \`${invocation(args.form, 'uninstall')}\` to retry.`;
+      }
+    }
     for (const path of ['app', 'run', 'cache', 'teams', 'quarantine'].map((name) => join(store.root, name)).concat(store.root)) {
       try { if (path === app) await fsForTests.rm(path, { recursive: true, force: true }); else await fsForTests.rmdir(path); }
       catch (error) {
@@ -182,9 +193,8 @@ export async function run(args: UninstallMachineArgs, io: Prompter): Promise<Res
     }
     if (directoryFailure) return failure(directoryFailure);
     const appLines: string[] = [];
-    if (appPresent) {
-      const platform = args.platform ?? process.platform;
-      if (platform === 'darwin') appLines.push(`The desktop app was deleted from ${app}. A copy that is running keeps running until you quit it; it cannot be reopened from the Dock. \`${invocation(args.form, 'app')}\` downloads it again (needs gh and the release).`);
+    if (appPresent || bundlePresent) {
+      if (platform === 'darwin') appLines.push(`The desktop app was deleted from ${[bundlePresent ? bundle : null, appPresent ? app : null].filter(Boolean).join(' and ')}. A copy that is running keeps running until you quit it; it cannot be reopened from the Dock. \`${invocation(args.form, 'app')}\` downloads it again (needs gh and the release).`);
       if (platform === 'win32') appLines.push(`The desktop app under %LOCALAPPDATA%\\${APP_PRODUCT} stays installed; remove it from Windows Settings ▸ Apps. Only its download record under ${app} was removed.`);
       appLines.push("This app's own preferences (theme, layout) are kept by the app and were not touched.");
     }
