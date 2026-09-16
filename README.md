@@ -33,9 +33,11 @@ I've been searching for best skills and practices for using the amazing AI tools
 - **The most impactful skills only work in the context of the project they were created for.** 
 - **It should be easy to evaluate the best skills that work for a project and easy to distribute them among the contributors of that project.** 
 
-As a result, we built Terum, a free, fully open source tool that lets you evaluate and share the best skills/workflows among a team! One terminal command installs a CLI package and a lightweight application for a simple UI that wraps the CLI. Fully self-hosted, no server, all skills live in a private GitHub repository that the CLI package calls from.
+**Use cases:**
 
-Our purpose is to make it quick and easy to determine best AI practices through skills and share your findings with your team.
+- Measure the ROI of skills and their workflows: cost, time, and quality of output.
+- Compare similar skills against each other: your skill vs a public one, two public skills, or two versions of your own.
+- Share skills with team members easily.
 
 ## Collaborate with us!
 
@@ -125,6 +127,19 @@ Every verb runs as `npx -y terum-skills@latest <verb>`. The ones you'll type by 
 | `install <skill>` | Copy a team skill into your global or a project folder |
 | `eval <skill>` | Evaluate a local skill with your own Claude Code login |
 | `sync` | Fetch the team repo; never touches your local skills |
+
+<details>
+<summary>All commands</summary>
+
+| Area | Commands |
+| --- | --- |
+| Team | `setup [<org>/<repo>]` · `login` · `status` · `invite <github-login>…` · `profile` · `team create [name]` · `team join <target>` · `team leave <name>` · `team move <target>` · `team remove <handle>` · `team migrate` · `team workflow-update` · `team project create [name]` · `team project delete [name]` |
+| Library | `ls` · `ls member <handle>` · `ls project <name>` · `search <term>` · `project add [path]` · `project remove <path>` · `project list` · `reconcile` · `skill move <path>` · `skill copy <path>` · `skill rename <path>` · `skill delete <path>` · `skill fix <path>` · `skill category <path>` · `skill enable <path>` · `skill disable <path>` · `prune` |
+| Sharing | `publish <ref>` · `unpublish <skill>` · `install <ref>` · `uninstall-skill <ref>` · `sync` |
+| Evals | `validate <path\|name>` · `eval <skill…>` · `eval-report <skill>` · `usage [skill]` |
+| Machine | `app` · `app-update` · `update` · `uninstall` · `serve` |
+
+</details>
 
 `npx -y terum-skills@latest --help` lists every verb, and `<verb> --help` its options. Programs drive the CLI with `--frames`, one JSON object per line; see [docs/frame-protocol.md](docs/frame-protocol.md).
 
