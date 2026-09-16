@@ -192,8 +192,8 @@ export function frameChannel(streams: FrameStreams): FrameChannel {
     interactive: true,
     channel: 'frames',
     async confirm(question, options) {
-      const answer = await ask('confirm', question, options?.detail?.length ? { detail: options.detail } : {});
-      return typeof answer === 'boolean' ? answer : /^(y|yes|true)$/i.test(String(answer).trim());
+      const answer = await ask('confirm', question, { ...(options?.default === undefined ? {} : { default: String(options.default) }), ...(options?.detail?.length ? { detail: options.detail } : {}) });
+      return typeof answer === 'boolean' ? answer : String(answer).trim() ? /^(y|yes|true)$/i.test(String(answer).trim()) : Boolean(options?.default);
     },
     async text(question, defaultValue, options) {
       const answer = String(await ask(options?.path === true ? 'path' : 'text', question, { ...(defaultValue === undefined || defaultValue === '' ? {} : { default: defaultValue }), ...(options?.detail?.length ? { detail: options.detail } : {}) })).trim();

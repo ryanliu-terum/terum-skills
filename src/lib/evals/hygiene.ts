@@ -3,7 +3,7 @@ import YAML from 'yaml';
 import { CREDENTIAL_PATTERNS } from './receipt.js';
 import { allowedTools, describeRaw, FRONTMATTER, localSkillFrontmatterSchema, skillFrontmatterSchema } from '../schema.js';
 
-export type HygieneCode = 'HYG1' | 'HYG2' | 'HYG3' | 'HYG4' | 'HYG5' | 'HYG6' | 'HYG7';
+export type HygieneCode = 'HYG1' | 'HYG2' | 'HYG3' | 'HYG4' | 'HYG5' | 'HYG6' | 'HYG7' | 'HYG8';
 export interface HygieneFinding { code: HygieneCode; path: string; line?: number; message: string; }
 /** §9 rev 16: errors gate (fail-closed); warnings are printed by every caller and gate nothing. */
 export interface HygieneAssessment { readonly errors: readonly HygieneFinding[]; readonly warnings: readonly HygieneFinding[]; }
@@ -29,6 +29,8 @@ export interface HygieneInput {
    *  consented form): waives HYG4's exec-bit and shebang findings only — the extension allowlist
    *  and every other check still apply (walk D5, Ryan 2026-09-07). */
   allowExecutable?: boolean;
+  /** Resolved repository dependencies outside the skill folder, when the caller knows its root. */
+  dependencyCount?: number;
 }
 
 const ALLOWED_EXTENSIONS = new Set(['.md', '.txt', '.json', '.yaml', '.yml', '.csv', '.toml', '.xml', '.html', '.css', '.js', '.ts', '.py', '.sh', '.sql', '.svg', '.png', '.jpg', '.jpeg', '.gif', '.webp', '.pdf']);
@@ -109,6 +111,7 @@ export function inspectHygiene(input: HygieneInput): HygieneAssessment {
   if (length > 20_000) warnings.push({ code: 'HYG6', path: 'SKILL.md', message: `SKILL.md is ${thousands(length)} characters, ${thousands(length - 20_000)} over the 20,000-character guideline (~5k tokens). Size alone does not block this operation; loading this skill uses that much more context.` });
   const description = parsed.success ? parsed.data.description : recordValue(input.frontmatter, 'description');
   if (typeof description !== 'string' || !description.trim()) errors.push({ code: 'HYG6', path: 'SKILL.md', line: lineOf(skill, /^description\s*:/m), message: 'description must not be empty.' });
+  if ((input.dependencyCount ?? 0) > 0) warnings.push({ code: 'HYG8', path: 'SKILL.md', message: `this skill references ${input.dependencyCount} repository paths outside its folder; it depends on files it does not carry` });
   return { errors, warnings };
 }
 
@@ -181,9 +184,9 @@ export class HygieneRefused extends Error {
 }
 
 /** The single pure gate shared by every hygiene caller. */
-export function assessHygiene(name: string, input: { files: Map<string, Buffer>; executable: ReadonlySet<string> }, license: string | null, allowExecutable = false, managedFieldsAbsent = false, categories?: readonly string[]): HygieneAssessment {
+export function assessHygiene(name: string, input: { files: Map<string, Buffer>; executable: ReadonlySet<string> }, license: string | null, allowExecutable = false, managedFieldsAbsent = false, categories?: readonly string[], dependencyCount?: number): HygieneAssessment {
   const skill = input.files.get('SKILL.md');
-  const assessment = inspectHygiene({ name, frontmatter: skill === undefined ? undefined : hygieneFrontmatter(skill), files: input.files, executable: input.executable, policy: { skill_license: license }, allowExecutable, managedFieldsAbsent, categories });
+  const assessment = inspectHygiene({ name, frontmatter: skill === undefined ? undefined : hygieneFrontmatter(skill), files: input.files, executable: input.executable, policy: { skill_license: license }, allowExecutable, managedFieldsAbsent, categories, dependencyCount });
   if (assessment.errors.length) throw new HygieneRefused(assessment);
   return assessment;
 }

@@ -28,6 +28,7 @@ import { parseSkillFrontmatter } from '../lib/schema.js';
 import { refIsPath, resolveLibrarySkill, unusableSkillFolder } from '../lib/local-skills.js';
 import { parseVersionFolder, versionLabel, type SkillVersion } from '../lib/versions.js';
 import { openTeamRepo, refreshClone, lockWait, listVersions, skillVersions } from '../lib/teamRepo.js';
+import { dependencyPlan, scanHeavySkill } from '../lib/evals/dependencies.js';
 
 export interface EvalArgs extends WithForm {
   ref: string;
@@ -44,6 +45,8 @@ export interface EvalArgs extends WithForm {
   model?: string;
   judgeModel?: string;
   noGen?: boolean;
+  /** Force or decline the heavy one-session mode without a prompt. */
+  heavy?: boolean;
   /**
    * `false` keeps a finished receipt on this machine. Absent publishes it to the team when — and only
    * when — these exact bytes are already a published version (`shareReceipt`).
@@ -74,6 +77,16 @@ export interface EvalResult {
   ccVersion: string;
   executionStatus: 'complete' | 'partial' | 'failed';
   receiptPath?: string;
+}
+
+export function heavyNotice(cases: string): string {
+  return `This skill appears to call subagents, which can be expensive. Instead of
+running it once per case, this evaluation runs one session with the skill
+and one without, against a single fixture with many checks, to limit usage
+and wall-clock time. The verdict therefore rests on one session and will
+vary more between runs. To reduce variance, uncheck the box below; that
+runs the skill ${cases} times in sequence. If the run is interrupted or your
+usage runs out, it is marked unscored and must be run again.`;
 }
 
 /**
@@ -146,6 +159,12 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
     const inspected = inspectSkillSource(candidateFiles.files.get('SKILL.md')?.toString('utf8') ?? '');
     const skillId = (inspected.ok ? inspected.id : null) ?? record?.id ?? null;
     const description = (inspected.ok ? inspected.description : inspected.description) ?? record?.frontmatter.description ?? '';
+    const wantsCases = !args.triggersOnly;
+    const wantsTriggers = !args.executionOnly;
+    const authoredCasesDir = join(candidateDir, 'evals', 'cases');
+    const authoredCaseFiles = (await optionalDirectory(authoredCasesDir)).filter((name) => /\.ya?ml$/i.test(name)).sort();
+    const authoredTrigger = candidateFiles.files.has('evals/triggers.yaml');
+    const assets = { name: local.name, wantsCases, wantsTriggers, authoredCaseFiles, authoredTrigger };
     if (args.skipReceipted || args.expectedVersion !== undefined) {
       // Both queue guards are re-keyed on the content hash (§6.6): the bytes, not an ordinal, are what
       // a queued item was queued against.
@@ -159,24 +178,29 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
         return success({ team: teamName, id: skillId, name: local.name, runDir: '', ccVersion: newest.receipt.provenance.cc_version, executionStatus: newest.receipt.execution_status, alreadyEvaluated: true });
       }
     }
+    const dependencies = await dependencyPlan(candidateDir);
+    const heavyScan = await scanHeavySkill(candidateDir, dependencies.staged[0]);
+    let heavy = args.heavy;
     try {
       // §6.3: the folder as it is on disk — eval never injects — so HYG1 treats `license` and the
       // three managed `metadata.*` fields as optional. Every other HYG1 clause and every HYG2–HYG6
       // predicate stay unchanged and fail-closed. With no team there is no policy license to conform
       // to, so HYG5 compares the frontmatter against the bundled LICENSE files alone.
-      reportHygieneWarnings((line) => io.print(line), assessHygiene(local.name, candidateFiles, team?.policy.skill_license ?? null, false, true));
+      reportHygieneWarnings((line) => io.print(line), assessHygiene(local.name, candidateFiles, team?.policy.skill_license ?? null, false, true, undefined, dependencies.staged.length + dependencies.skipped.length));
+      for (const path of dependencies.staged) io.print(`Staging dependency ${path}`);
+      for (const path of dependencies.missing) io.print(`SKILL.md references ${path}, which is not present here; the skill may not run`);
+      for (const skipped of dependencies.skipped) io.print(`${skipped.path} is ${(skipped.bytes / (1024 * 1024)).toFixed(1)} MB; staging it would exceed the 20 MB cap; not staged`);
+      if (heavy === undefined && heavyScan.heavy) {
+        io.print(heavyScan.evidence);
+        io.print(heavyNotice(authoredCaseFiles.length === 0 ? 'each' : String(authoredCaseFiles.length)));
+        heavy = await io.confirm('Use the one-session heavy evaluation mode?', { default: true });
+      }
+      heavy ??= heavyScan.heavy;
     } catch (error) {
       if (!(error instanceof HygieneRefused)) throw error;
       reportHygieneWarnings((line) => io.print(line), error.assessment);
       return failure(`Hygiene failed for ${local.name}:\n${error.message}`);
     }
-
-    const wantsCases = !args.triggersOnly;
-    const wantsTriggers = !args.executionOnly;
-    const authoredCasesDir = join(candidateDir, 'evals', 'cases');
-    const authoredCaseFiles = (await optionalDirectory(authoredCasesDir)).filter((name) => /\.ya?ml$/i.test(name)).sort();
-    const authoredTrigger = candidateFiles.files.has('evals/triggers.yaml');
-    const assets = { name: local.name, wantsCases, wantsTriggers, authoredCaseFiles, authoredTrigger };
 
     const model = args.model ?? DEFAULT_MODEL;
     const preflight = await (args.preflight ?? systemPreflight)(model);
@@ -288,7 +312,7 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
         const output = await runCase(
           { agent: args.agent ?? systemAgent, rng, model, judgeModel: args.judgeModel ?? model, log: (line) => io.print(line) },
           parsed.value,
-          { k, skillName: local.name, caseDir: casesDir, arms: { candidate: candidateDir, ...(incumbent === undefined ? {} : { incumbent }) }, scratch, transcriptDir },
+          { k, skillName: local.name, caseDir: casesDir, arms: { candidate: candidateDir, ...(incumbent === undefined ? {} : { incumbent }) }, scratch, transcriptDir, dependencies },
         );
         rows.push(...output.rows); arms.push(...output.arms);
         if (output.skipped) environmentSkips[name] = output.skipped;
@@ -300,6 +324,11 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
       team: teamName, skill_id: skillId, skill_name: local.name, run_id: runId,
       cc_version: preflight.value.ccVersion, model, judge_model: args.judgeModel ?? model,
       expected_rows: expectedRows,
+      heavy,
+      heavy_evidence: heavyScan.evidence,
+      staged_dependencies: dependencies.staged,
+      missing_dependencies: dependencies.missing,
+      spawns_agents: arms.some((arm) => arm.spawns_agents === true),
       arm_skill_lists: Object.fromEntries([...new Set(arms.map((arm) => arm.arm))].map((arm) => [arm, arms.find((sample) => sample.arm === arm)?.skill_list ?? null])),
       ...(generated.cases !== undefined || generated.triggers !== undefined ? { generated_assets: { cases: generated.cases !== undefined, triggers: generated.triggers !== undefined } } : {}),
     }, [...rows, ...arms, ...(triggers === null ? [] : [triggers])]);
@@ -932,6 +961,7 @@ export async function runMany(args: EvalManyArgs, io: Prompter): Promise<Result<
           ...(teamName === null ? {} : { team: teamName }),
           ...(args.k === undefined ? {} : { k: args.k }), ...(args.model === undefined ? {} : { model: args.model }), ...(args.judgeModel === undefined ? {} : { judgeModel: args.judgeModel }),
           ...(args.noGen ? { noGen: true } : {}), ...(args.triggersOnly ? { triggersOnly: true } : {}), ...(args.executionOnly ? { executionOnly: true } : {}), ...(args.case === undefined ? {} : { case: args.case }),
+          ...(args.heavy === undefined ? {} : { heavy: args.heavy }),
           ...(args.agent === undefined ? {} : { agent: args.agent }), ...(args.now === undefined ? {} : { now: args.now }),
         }, captured),
       });

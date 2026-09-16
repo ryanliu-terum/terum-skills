@@ -19,10 +19,11 @@ import YAML from 'yaml';
 import type { CheckResult, CheckSpec } from './checks.js';
 import { emptyTranscript, fractionPassed, runChecks } from './checks.js';
 import type { AgentApi, Transcript } from './agent.js';
-import { AgentRunError, DEFAULT_MODEL } from './agent.js';
+import { AgentRunError, AgentTimeoutError, DEFAULT_MODEL } from './agent.js';
 import { DEFAULT_ESCALATION_MODEL, judgePair } from './judge.js';
 import type { Result } from '../result.js';
 import { failure, success } from '../result.js';
+import { stageDependencies, type DependencyPlan } from './dependencies.js';
 
 export const ARMS = ['baseline', 'candidate', 'incumbent'] as const;
 export type Arm = (typeof ARMS)[number];
@@ -40,6 +41,8 @@ export interface EvalCase {
   bucket?: (typeof BUCKETS)[number];
   /** Rev 8: host tools this case needs — `ffmpeg` (PATH probe) or `python3:openpyxl` (import probe). */
   requires: string[];
+  timeout_minutes?: number;
+  max_turns?: number;
 }
 
 /** Parse one `evals/cases/<case>.yaml` (§5.1); the stem is the case name. */
@@ -55,6 +58,12 @@ export function loadCase(source: string, name: string): Result<EvalCase> {
     if (record['files'] === null || typeof record['files'] !== 'object' || Array.isArray(record['files'])) return failure(`case '${name}': 'files' must be a map`);
     for (const [key, value] of Object.entries(record['files'] as Record<string, unknown>)) files[key] = String(value);
   }
+  const timeoutRaw = record['timeout_minutes'];
+  if (timeoutRaw !== undefined && (typeof timeoutRaw !== 'number' || !Number.isFinite(timeoutRaw) || timeoutRaw <= 0 || timeoutRaw > 120)) return failure(`case '${name}': 'timeout_minutes' must be a number greater than 0 and at most 120`);
+  const timeoutMinutes = timeoutRaw as number | undefined;
+  const maxTurnsRaw = record['max_turns'];
+  if (maxTurnsRaw !== undefined && (typeof maxTurnsRaw !== 'number' || !Number.isInteger(maxTurnsRaw) || maxTurnsRaw <= 0)) return failure(`case '${name}': 'max_turns' must be a positive integer`);
+  const maxTurns = maxTurnsRaw as number | undefined;
   return success({
     name,
     task: record['task'],
@@ -65,6 +74,8 @@ export function loadCase(source: string, name: string): Result<EvalCase> {
     judge: record['judge'] === undefined ? undefined : String(record['judge']),
     bucket: bucket as EvalCase['bucket'],
     requires: Array.isArray(record['requires']) ? record['requires'].map(String) : [],
+    ...(timeoutMinutes === undefined ? {} : { timeout_minutes: timeoutMinutes }),
+    ...(maxTurns === undefined ? {} : { max_turns: maxTurns }),
   });
 }
 
@@ -116,6 +127,8 @@ export interface SeedOptions {
   /** Full skill tree to stage, or null for the baseline arm. */
   skillDir: string | null;
   scratch: string;
+  /** Resolved once per eval run; baseline arms never apply it. */
+  dependencies?: DependencyPlan;
 }
 
 /**
@@ -152,6 +165,7 @@ export async function seedSandbox(evalCase: EvalCase, options: SeedOptions): Pro
         return top !== 'evals' && top !== 'fixtures';
       },
     });
+    if (options.dependencies !== undefined) await stageDependencies(options.dependencies, sandbox);
   }
   return sandbox;
 }
@@ -228,6 +242,7 @@ export interface ArmSample {
   skill_list: string[] | null;
   /** Rev 7: resolved model snapshot from the init event — the request alias floats. */
   model_id: string | null;
+  spawns_agents?: boolean | null;
 }
 
 /**
@@ -256,6 +271,7 @@ export interface RunCaseOptions {
   scratch: string;
   /** Transcripts land here as `<case>.<arm>.<rep>.jsonl` (§4.2). */
   transcriptDir: string;
+  dependencies?: DependencyPlan;
 }
 
 /**
@@ -287,11 +303,19 @@ export async function runCase(deps: RunCaseDeps, evalCase: EvalCase, options: Ru
       let retried = false;
       const transcriptPath = join(options.transcriptDir, `${evalCase.name}.${arm}.${rep}.jsonl`);
       for (let attempt = 0; attempt < 2 && transcript === null; attempt++) {
-        sandbox = await seedSandbox(evalCase, { caseDir: options.caseDir, skillName: options.skillName, skillDir, scratch: options.scratch });
+        sandbox = await seedSandbox(evalCase, { caseDir: options.caseDir, skillName: options.skillName, skillDir, scratch: options.scratch, ...(options.dependencies === undefined ? {} : { dependencies: options.dependencies }) });
         try {
-          transcript = await deps.agent.runAgent(evalCase.task, sandbox, { transcriptPath, model: deps.model ?? DEFAULT_MODEL });
+          transcript = await deps.agent.runAgent(evalCase.task, sandbox, {
+            transcriptPath, model: deps.model ?? DEFAULT_MODEL,
+            timeoutMs: (evalCase.timeout_minutes ?? 120) * 60_000,
+            maxTurns: evalCase.max_turns ?? 200,
+          });
         } catch (error) {
           if (!(error instanceof AgentRunError)) throw error;
+          if (error instanceof AgentTimeoutError) {
+            log(`  ${evalCase.name} rep${rep} ${arm}: timed out, not retried: ${error.message}`);
+            break;
+          }
           if (attempt === 0) {
             retried = true;
             // §17.3: the failed attempt's transcript survives under a distinct suffix; the retry
@@ -322,7 +346,9 @@ export async function runCase(deps: RunCaseDeps, evalCase: EvalCase, options: Ru
       transcripts.set(arm, transcript);
       checksByArm.set(arm, checks);
       const efficiency = transcript?.efficiency() ?? { turns: null, duration_ms: null, cost_usd: null };
-      samples.push({ kind: 'arm', case: evalCase.name, rep, arm, failed: transcript === null, retried, fraction: fractionPassed(checks), ...efficiency, skill_list: skillList, model_id: transcript?.modelId() ?? null });
+      const spawnsAgents = transcript === null ? null : transcript.toolUses().some((name) => ['Task', 'Agent', 'Workflow'].includes(name))
+        || transcript.bashCommands().some((command) => /\bcodex\b|claude -p/.test(command));
+      samples.push({ kind: 'arm', case: evalCase.name, rep, arm, failed: transcript === null, retried, fraction: fractionPassed(checks), ...efficiency, skill_list: skillList, model_id: transcript?.modelId() ?? null, spawns_agents: spawnsAgents });
     }
 
     for (const opponent of ['baseline', 'incumbent'] as const) {
@@ -372,8 +398,8 @@ export async function decide(
   candidateChecks: CheckResult[], opponentChecks: CheckResult[],
 ): Promise<{ result: Outcome; decidedBy: string; reason: string; swapped?: boolean }> {
   if (candidate === null && opponent === null) return { result: 'tie', decidedBy: 'both-arms-failed', reason: '' };
-  if (candidate === null) return { result: 'loss', decidedBy: 'candidate-run-failed', reason: '' };
-  if (opponent === null) return { result: 'win', decidedBy: 'opponent-run-failed', reason: '' };
+  if (candidate === null) return { result: 'tie', decidedBy: 'candidate-run-failed', reason: '' };
+  if (opponent === null) return { result: 'tie', decidedBy: 'opponent-run-failed', reason: '' };
 
   const candidatePass = candidateChecks.every((check) => check.passed);
   const opponentPass = opponentChecks.every((check) => check.passed);

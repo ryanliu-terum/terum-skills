@@ -32,6 +32,10 @@ const at = (now = '2026-09-14T00:00:00Z') => ({ skill, files: ['SKILL.md'], cata
 const withCase = (extra: Record<string, unknown>) => ({ cases: [{ ...validCases.cases[0]!, ...extra }, validCases.cases[1], validCases.cases[2]] });
 
 describe('eval generation (IE5)', () => {
+  it('accepts transcript_omits in the generated check whitelist', async () => {
+    const generated = { cases: [{ ...validCases.cases[0], checks: [{ transcript_omits: 'distractor' }] }, validCases.cases[1], validCases.cases[2]] };
+    await expect(generate({ ...at(), agent: agent([generated]) })).resolves.toMatchObject({ ok: true });
+  });
   it('round-trips generated schemas and adds review/provenance headers from injected time', async () => {
     const prompts: string[] = [];
     const result = await generate({ agent: agent([validTriggers, validCases], prompts), skill, files: ['SKILL.md', 'reference.md'], catalog: '- sibling: a similar skill', model: 'sonnet', engineVersion: '0.1.3', now: new Date('2026-09-07T12:34:56Z'), cases: true, triggers: true });

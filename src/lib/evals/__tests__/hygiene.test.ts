@@ -130,6 +130,13 @@ describe('HYG7 — category taxonomy warning', () => {
   });
 });
 
+describe('HYG8 — external repository dependency warning', () => {
+  it('warns without gating when the caller resolved dependencies', () => {
+    const result = assessHygiene('sample', { files: new Map([['SKILL.md', Buffer.from(skill())]]), executable: new Set() }, 'Apache-2.0', false, false, undefined, 2);
+    expect(result).toEqual({ errors: [], warnings: [{ code: 'HYG8', path: 'SKILL.md', message: 'this skill references 2 repository paths outside its folder; it depends on files it does not carry' }] });
+  });
+});
+
 describe('inspectContent', () => {
   const bytes = (files: Record<string, string>) => new Map(Object.entries(files).map(([path, body]) => [path, Buffer.from(body)]));
 
