@@ -305,4 +305,14 @@ describe('generated YAML round-trips byte for byte', () => {
     expect(loaded).toMatchObject({ ok: true });
     if (loaded.ok) expect(loaded.value.files['changes.diff']).toBe(aDiff);
   });
+
+  it('a generated case whose setup applies its seeded diff passes the dry run on the first ask', async () => {
+    // The dry run seeds what validateCases re-parsed: folded bytes would make `git apply` fail and
+    // re-ask the model for a case that was valid all along.
+    const prompts: string[] = [];
+    const applies = withCase({ files: { 'changes.diff': aDiff, 'src/a.js': aSource }, setup: 'git init -q && git apply changes.diff' });
+    const result = await generate({ ...at(), agent: agent([applies, applies, applies], prompts) });
+    expect(result).toMatchObject({ ok: true });
+    expect(prompts).toHaveLength(1);
+  });
 });
