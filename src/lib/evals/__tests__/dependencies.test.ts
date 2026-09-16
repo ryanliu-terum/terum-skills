@@ -18,7 +18,7 @@ describe('heavy and dependency scans (§5 / §6.1)', () => {
     await writeFile(join(root, '.claude', 'workflows', 'engine.js'), 'export const engine = true;');
     await writeFile(join(root, '.claude', 'workflows', 'helper.js'), 'export const helper = true;');
     await writeFile(join(skill, 'SKILL.md'), '---\nname: sample\ndescription: useful\n---\nUse the Workflow tool on .claude/workflows/engine.js and missing/path.txt');
-    expect(await scanHeavySkill(skill)).toMatchObject({ heavy: true, evidence: 'SKILL.md names the Workflow tool and .claude/workflows/engine.js' });
+    expect(await scanHeavySkill(skill)).toMatchObject({ heavy: true, evidence: 'SKILL.md names the Workflow tool' });
     const plan = await dependencyPlan(skill, root);
     expect(plan).toMatchObject({ staged: ['.claude/workflows/engine.js'], missing: ['missing/path.txt'] });
     expect(await scanHeavySkill(skill, 'staged/first.js')).toMatchObject({ heavy: true, evidence: 'SKILL.md names the Workflow tool and staged/first.js' });

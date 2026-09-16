@@ -88,8 +88,9 @@ export async function scanHeavySkill(skillDir: string, referenced?: string): Pro
     if (text === undefined) continue;
     const tool = /\b(Agent|Task|Workflow)\b/.exec(text)?.[1];
     if (tool) {
-      const named = referenced ?? /[\w.-]+(?:\/[\w.-]+)+/.exec(text)?.[0];
-      return { heavy: true, evidence: `${file.path} names the ${tool} tool${named === undefined ? '' : ` and ${named}`}` };
+      // Only a resolved dependency is worth naming: the first path-shaped token in a SKILL.md is
+      // usually prose (`critical/high`, `trivial/safe/isolated` on the live harness skills).
+      return { heavy: true, evidence: `${file.path} names the ${tool} tool${referenced === undefined ? '' : ` and ${referenced}`}` };
     }
     if (/codex exec/.test(text)) return { heavy: true, evidence: `${file.path} contains codex exec` };
     if (/claude -p/.test(text)) return { heavy: true, evidence: `${file.path} contains claude -p` };
