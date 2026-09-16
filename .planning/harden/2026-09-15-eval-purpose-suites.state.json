@@ -1,0 +1,100 @@
+{
+  "slug": "2026-09-15-eval-purpose-suites",
+  "lane": "spec",
+  "shape": "full-rounds",
+  "cap": 1,
+  "mode": "unattended",
+  "base": null,
+  "args": "",
+  "startedAt": "2026-09-16T06:55:55.980Z",
+  "finishedAt": "2026-09-16T07:28:15.148Z",
+  "status": "cap",
+  "verdict": "stop: cap reached (1 passes) with 7 BLOCKER + DRIFT finding(s) still open",
+  "startRound": 1,
+  "nextRound": 2,
+  "rounds": [
+    {
+      "round": 1,
+      "kind": "full",
+      "report": ".planning/specs/reviews/2026-09-15-eval-purpose-suites.codex-spec.r1.review.md",
+      "at": "2026-09-16T07:28:15.147Z",
+      "counts": {
+        "blocker": 1,
+        "drift": 6,
+        "ambiguity": 3,
+        "gap": 2,
+        "note": 0
+      },
+      "confirmed": 12,
+      "top": 7,
+      "regression": false,
+      "triage": {
+        "mechanical": 0,
+        "clear": 12,
+        "fork": 0,
+        "declined": 0,
+        "untriaged": 0
+      },
+      "contested": 2,
+      "unverified": 0,
+      "applied": {
+        "mechanical": 0,
+        "clear": 7
+      },
+      "gates": "pass",
+      "commit": "a33b1015",
+      "confirmBase": null,
+      "human": {
+        "mediums": [
+          {
+            "title": "[AMBIGUITY/GAP, not applied by the loop] Heavy mode has incompatible session semantics",
+            "location": "§5 lines 329–363; §10 lines 496–501"
+          },
+          {
+            "title": "[AMBIGUITY/GAP, not applied by the loop] Dependency staging both includes and excludes sibling helpers",
+            "location": "§6.1 lines 390–397"
+          },
+          {
+            "title": "[AMBIGUITY/GAP, not applied by the loop] Heavy-mode selection does not define an implementable state machine",
+            "location": "§5, lines 338–350; §10 item 5, lines 500–501"
+          },
+          {
+            "title": "[AMBIGUITY/GAP, not applied by the loop] Suite rows lack a collision-free identity and an aggregation marker",
+            "location": "§3.2 lines 131–142; §3.5 lines 173–174; §7 lines 446–453"
+          },
+          {
+            "title": "[AMBIGUITY/GAP, not applied by the loop] Generated suite write-back has no crash or rerun contract",
+            "location": "§4 lines 230–232 and §4.1 lines 314–319"
+          }
+        ],
+        "forks": [
+          {
+            "title": "Unscored row: omitted from per_case (as built in PR A) vs kept visible with passed:null and no outcome for that comparison (#1) vs kept with outcome tie (#2/#12)",
+            "location": "§2.2, lines 97–99",
+            "why": "three clear recommendations on the same §2.2 paragraph disagree; the loop applied only their common core (field rename per_case/case_runs)"
+          },
+          {
+            "title": "Answer-key leak fix applied as a pathspec-exclusion variant of triage option 1 (key never committed, deleted before any arm) instead of an out-of-sandbox key directory",
+            "location": "§3.3 lines 146–148; §4.1 lines 299–307",
+            "why": "same outcome as option 1 with bug risk 1 instead of 3 (no new suite field, no env plumbing); Ryan may prefer the literal option 1 or option 2 (.git/info/exclude)"
+          }
+        ],
+        "notApplied": [],
+        "contested": [
+          {
+            "title": "Censoring candidate-caused failures can produce a false PASS",
+            "location": "North Star lines 9–11; §2.2 lines 82–99"
+          },
+          {
+            "title": "The generator prompt gives impossible file-count rules for document and session-log suites",
+            "location": "§4.0 lines 187–205; §4 lines 207–214; §4.1 lines 253–275"
+          }
+        ],
+        "declinedByTriage": [],
+        "declinedByLoop": [],
+        "untriaged": []
+      }
+    }
+  ],
+  "invalidAttempts": []
+}
