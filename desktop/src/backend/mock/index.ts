@@ -230,7 +230,7 @@ export function createMockBackend(opts:{latencyMs?:number}={}):Backend & {readon
    *  render differently from "placed and never fired" (see UsageModel). */
   usage:async({ref})=>{
    const name=ref.replace(/^local:/,'').split('/').pop()??ref;
-   const fixture:Record<string,{d1:number;d2:number}>={'deploy-check':{d1:0,d2:4},'release-notes':{d1:3,d2:1},'schema-guard':{d1:0,d2:0}};
+   const fixture:Record<string,{d1:number;d2:number}>={'deploy-check':{d1:0,d2:4},'release-notes':{d1:3,d2:1},'pr-review':{d1:0,d2:0}};
    const hit=fixture[name];
    return ok({firings:hit===undefined?null:{...hit,autonomy:hit.d1+hit.d2===0?null:hit.d1/(hit.d1+hit.d2),availability:'full' as const},
     since:'2026-08-16T00:00:00.000Z',until:'2026-09-15T00:00:00.000Z',
