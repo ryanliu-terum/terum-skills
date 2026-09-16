@@ -2,7 +2,7 @@
 A newer release is advertised: 0.17.0
 
   latest:      [33m⚠ 0.17.0[0m
-  observation: older
+  observation: newer
   launch:      local
 
 [1mRelease check[0m

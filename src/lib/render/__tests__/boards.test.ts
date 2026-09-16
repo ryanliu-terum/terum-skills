@@ -216,7 +216,7 @@ describe('status, update, sync boards', () => {
       await expect(text).toMatchFileSnapshot(snapshot('empty.status', backend));
     });
     it(`typed.update (${backend})`, async () => {
-      const value = { running: '0.16.0', latest: '0.17.0', observation: 'older', launch: 'local', description: 'Latest advertised release: 0.17.0 (observed 2026-09-13T08:00:00Z)', advice: ['If managed with npm, run in /home/seed/work/app:', '  npm install terum-skills@latest'], lines: ['terum-skills 0.16.0', 'This copy: /home/seed/work/app/node_modules/terum-skills', 'Declared dependency of: /home/seed/work/app', 'Latest advertised release: 0.17.0 (observed 2026-09-13T08:00:00Z)', 'If managed with npm, run in /home/seed/work/app:', '  npm install terum-skills@latest'] };
+      const value = { running: '0.16.0', latest: '0.17.0', observation: 'newer', launch: 'local', description: 'Latest advertised release: 0.17.0 (observed 2026-09-13T08:00:00Z)', advice: ['If managed with npm, run in /home/seed/work/app:', '  npm install terum-skills@latest'], lines: ['terum-skills 0.16.0', 'This copy: /home/seed/work/app/node_modules/terum-skills', 'Declared dependency of: /home/seed/work/app', 'Latest advertised release: 0.17.0 (observed 2026-09-13T08:00:00Z)', 'If managed with npm, run in /home/seed/work/app:', '  npm install terum-skills@latest'] };
       await expect(await typed('update', ['update'], backend, { ok: true, value, exitCode: 0 }, value.lines)).toMatchFileSnapshot(snapshot('typed.update', backend));
     });
     it(`typed.sync (${backend})`, async () => {
@@ -233,7 +233,7 @@ describe('status, update, sync boards', () => {
   });
 
   it('update board shows "How to update" and the Next step when the advice was printed', async () => {
-    const value = { running: '0.15.0', latest: '0.16.0', observation: 'older', launch: 'global', description: 'Latest advertised release: 0.16.0 (observed 2026-09-13T08:00:00Z)', advice: ['If installed globally with npm, run:', '  npm install -g terum-skills@latest', 'Otherwise, update it with the tool that installed this copy.'], lines: ['terum-skills 0.15.0', 'This copy: /opt/homebrew/lib/node_modules/terum-skills', 'Latest advertised release: 0.16.0 (observed 2026-09-13T08:00:00Z)', 'If installed globally with npm, run:', '  npm install -g terum-skills@latest', 'Otherwise, update it with the tool that installed this copy.'] };
+    const value = { running: '0.15.0', latest: '0.16.0', observation: 'newer', launch: 'global', description: 'Latest advertised release: 0.16.0 (observed 2026-09-13T08:00:00Z)', advice: ['If installed globally with npm, run:', '  npm install -g terum-skills@latest', 'Otherwise, update it with the tool that installed this copy.'], lines: ['terum-skills 0.15.0', 'This copy: /opt/homebrew/lib/node_modules/terum-skills', 'Latest advertised release: 0.16.0 (observed 2026-09-13T08:00:00Z)', 'If installed globally with npm, run:', '  npm install -g terum-skills@latest', 'Otherwise, update it with the tool that installed this copy.'] };
     const text = await typed('update', ['update'], 'md', { ok: true, value, exitCode: 0 }, value.lines);
     expect(text).toContain('### How to update');
     expect(text).toContain('**Next:** `npm install -g terum-skills@latest`');
@@ -241,7 +241,7 @@ describe('status, update, sync boards', () => {
 
   it('update board preserves the npx copy path and all cache-update advice without inventing a dependency root', async () => {
     const value = {
-      running: '0.16.0', latest: '0.17.0', observation: 'older', launch: 'npx',
+      running: '0.16.0', latest: '0.17.0', observation: 'newer', launch: 'npx',
       description: 'Latest advertised release: 0.17.0 (observed 2026-09-13T08:00:00Z)',
       advice: ['Cache request recorded as: terum-skills@latest', "To request the registry's latest release, run:", '  npx -y terum-skills@latest <command>', 'This does not update other local or global installations.'],
       lines: ['terum-skills 0.16.0', 'This copy: /home/seed/.npm/_npx/abc/node_modules/terum-skills', 'Latest advertised release: 0.17.0 (observed 2026-09-13T08:00:00Z)', 'Cache request recorded as: terum-skills@latest', "To request the registry's latest release, run:", '  npx -y terum-skills@latest <command>', 'This does not update other local or global installations.'],
@@ -477,6 +477,15 @@ describe('validate, install, uninstall-skill, project boards and fallbacks', () 
     expect(text).toContain('/list-skills --local');
     await expect(text).toMatchFileSnapshot(snapshot('typed.install-empty', 'md'));
   });
+  // `install --adopt` returns ONE AdoptedResult, not an array (src/commands/install.ts:53); the board must not read it as "Nothing installed.".
+  for (const backend of ['md', 'json'] as const) {
+    it(`typed.install-adopt (${backend})`, async () => {
+      const value = { id: DASHBOARD_IDS.deploy, team: 'acme', path: '/home/seed/.claude/skills/deploy-check', version: 'v2', profiled: false, adopted: true };
+      const text = await typed('install', ['install', '--adopt', '/home/seed/.claude/skills/deploy-check'], backend, { ok: true, value, exitCode: 0 }, ['Recorded deploy-check where it is.']);
+      if (backend === 'md') { expect(text).toContain('**Adopted where it is.**'); expect(text).not.toContain('Nothing installed.'); expect(text).toContain('deploy-check'); }
+      await expect(text).toMatchFileSnapshot(snapshot('typed.install-adopt', backend));
+    });
+  }
   it('typed.uninstall-empty', async () => {
     const text = await typed('uninstall-skill', ['uninstall-skill', 'ghost'], 'md', { ok: true, value: [], exitCode: 0 }, []);
     expect(text).toContain('**Nothing was placed on this machine.**');

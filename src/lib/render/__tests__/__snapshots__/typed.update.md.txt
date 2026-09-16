@@ -2,7 +2,7 @@
 **A newer release is advertised: 0.17.0**
 
 - **latest:** ⚠ 0.17.0
-- **observation:** older
+- **observation:** newer
 - **launch:** local
 
 ### Release check

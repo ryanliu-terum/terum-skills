@@ -5,8 +5,9 @@ import { asArray, asRecord, str } from './shared.js';
 export const render = (raw: unknown, _ctx: RenderContext): Board => { void _ctx;
   const value = asRecord(raw); const running = str(value['running']); const observation = str(value['observation']);
   const b = board(`terum-skills ${running ?? 'version unknown'}`);
-  const tone = observation === 'older' ? 'warn' : observation === 'same' ? 'ok' : 'muted';
-  b.headline = observation === 'older' ? `A newer release is advertised: ${str(value['latest']) ?? '?'}` : observation === 'same' ? 'This copy matches the advertised release.' : observation === 'newer' ? 'This copy is ahead of the advertised release.' : 'No release advertisement is known.';
+  // `observation` is compare(latest, running) (src/commands/update.ts): 'newer' = a newer release is advertised, 'older' = this copy is ahead.
+  const tone = observation === 'newer' ? 'warn' : observation === 'same' ? 'ok' : 'muted';
+  b.headline = observation === 'newer' ? `A newer release is advertised: ${str(value['latest']) ?? '?'}` : observation === 'same' ? 'This copy matches the advertised release.' : observation === 'older' ? 'This copy is ahead of the advertised release.' : 'No release advertisement is known.';
   b.sections.push(kv([['latest', status(tone, str(value['latest']) ?? 'unknown')], ['observation', text(observation)], ['launch', text(value['launch'])]]));
   const description = str(value['description']); if (description !== null && description !== '') b.sections.push(textBlock(description.split('\n'), { title: 'Release check' }));
   const advice = asArray(value['advice']).map(String);

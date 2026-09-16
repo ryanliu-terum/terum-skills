@@ -1,7 +1,7 @@
 import { mkdir, readFile, readdir, symlink, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { BUNDLED_SKILLS, defaultWrapperOptions, inspectManagedSkill, installManagedSkill, isManagedFrontmatter, isManagedSkill, listManagedSkills, managedSkillInventory, managedSkillRoots, managedSkillStates, offerWrapper, readBundledSkills, refreshManagedSkills, removeManagedSkill } from '../wrapper.js';
+import { BUNDLED_SKILLS, defaultWrapperOptions, fsForTests, inspectManagedSkill, installManagedSkill, isManagedFrontmatter, isManagedSkill, listManagedSkills, managedSkillInventory, managedSkillRoots, managedSkillStates, offerWrapper, readBundledSkills, refreshManagedSkills, removeManagedSkill } from '../wrapper.js';
 import { BUNDLED_SKILL_SOURCE, CANONICAL_SKILLS, ScriptedPrompter, temporaryDirectory, wrapperFor } from './fixtures.js';
 
 const OLD_COPY = '---\nname: terum-skills\ndescription: an older bundled copy\nmetadata:\n  managed-by: terum-skills\n---\nold body\n';
@@ -92,6 +92,19 @@ describe('the bundled terum-skills skills', () => {
     expect(await removeManagedSkill(claude, 'terum-skills')).toBe('removed');
     expect(await inspectManagedSkill(claude, 'terum-skills')).toEqual({ kind: 'foreign', why: 'it has no SKILL.md' });
     expect(await removeManagedSkill(claude, 'terum-skills')).toBe('foreign');
+  });
+
+  it('removes the folder it created when the write fails, so a retry installs instead of reading it as foreign', async () => {
+    const { claude, bundled } = await fresh();
+    const raw = bundled.get('terum-skills')!;
+    const realOpen = fsForTests.open;
+    fsForTests.open = async () => { throw Object.assign(new Error('disk full (simulated)'), { code: 'ENOSPC' }); };
+    try { await expect(installManagedSkill(claude, 'terum-skills', raw)).rejects.toThrow('disk full (simulated)'); }
+    finally { fsForTests.open = realOpen; }
+    expect(await readdir(claude)).not.toContain('terum-skills');
+    expect(await inspectManagedSkill(claude, 'terum-skills')).toEqual({ kind: 'absent' });
+    expect(await installManagedSkill(claude, 'terum-skills', raw)).toBe('installed');
+    expect(await readFile(join(claude, 'terum-skills', 'SKILL.md'), 'utf8')).toBe(raw);
   });
 
   it('leaves foreign skills, symlinks, files, and non-file SKILL.md entries alone', async () => {

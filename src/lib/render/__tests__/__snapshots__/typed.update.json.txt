@@ -5,7 +5,7 @@
   "value": {
     "running": "0.16.0",
     "latest": "0.17.0",
-    "observation": "older",
+    "observation": "newer",
     "launch": "local",
     "description": "Latest advertised release: 0.17.0 (observed 2026-09-13T08:00:00Z)",
     "advice": [

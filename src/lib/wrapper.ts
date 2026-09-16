@@ -31,6 +31,9 @@ export function defaultWrapperOptions(home = homedir(), env: NodeJS.ProcessEnv =
 
 export function managedSkillDirectory(root: string, name: string): string { return join(root, name); }
 
+/** Test seam: a failing `open` simulates an interrupted install (the file system itself is not mocked). */
+export const fsForTests = { open };
+
 export function isManagedFrontmatter(parsed: unknown): boolean {
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return false;
   const data = parsed as Record<string, unknown>;
@@ -129,11 +132,20 @@ export async function installManagedSkill(root: string, name: string, raw: strin
   const target = join(directory, 'SKILL.md');
   const temporary = join(directory, `.SKILL.md.${randomUUID()}.tmp`);
   try {
-    const handle = await open(temporary, 'w');
+    const handle = await fsForTests.open(temporary, 'w');
     try { await handle.writeFile(raw, 'utf8'); await handle.sync(); }
     finally { await handle.close(); }
     await rename(temporary, target);
-  } catch (error) { await rm(temporary, { force: true }); throw error; }
+  } catch (error) {
+    await rm(temporary, { force: true });
+    // A folder this call created and never filled would read as foreign ("it has no SKILL.md") on every later
+    // attempt; remove it (only when empty, only when it was absent before) so the retry starts clean.
+    if (presence.kind === 'absent') {
+      try { await rmdir(directory); }
+      catch (cleanup) { const code = (cleanup as NodeJS.ErrnoException).code; if (code !== 'ENOTEMPTY' && code !== 'EEXIST' && code !== 'ENOENT') throw cleanup; }
+    }
+    throw error;
+  }
   return presence.kind === 'managed' ? 'replaced' : 'installed';
 }
 
