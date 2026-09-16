@@ -303,7 +303,11 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
       if (args.case !== undefined && selected.length === 0) return failure(`No eval case named ${args.case} for ${local.name}.`);
       const selectedNames = selected.map((file) => file.replace(/\.ya?ml$/i, ''));
       caseNames.push(...selectedNames);
-      const suite = authoredSuite === undefined ? undefined : loadSuite(authoredSuite, 'suite');
+      // `--case <stem>` addresses authored case FILES only, so it must not pay for the suite's session
+      // (a suite session can run to `timeout_minutes: 120` per arm); a named-case run skips the suite
+      // and says so. Addressing a single sub-case is an open fork (harden r1 on this branch).
+      const suite = authoredSuite === undefined || args.case !== undefined ? undefined : loadSuite(authoredSuite, 'suite');
+      if (authoredSuite !== undefined && args.case !== undefined) io.print(`Skipping evals/suite.yaml: --case ${args.case} names an authored case; the suite runs only in a full run.`);
       if (suite !== undefined && !suite.ok) return failure(suite.error);
       if (suite !== undefined) {
         const authoredNames = authoredCaseFiles.map((file) => file.replace(/\.ya?ml$/i, ''));

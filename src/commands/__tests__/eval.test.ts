@@ -240,6 +240,21 @@ describe('eval (§6 / IE2)', () => {
     expect(receipt.per_case!.map((entry) => entry.case)).toEqual(['happy', 'suite-finds-deploy', 'suite-omits-wrong']);
   });
 
+  it('--case <stem> runs that authored case alone: the suite is skipped, announced, and absent from the receipt', async () => {
+    const { store, home } = await evalFixture({ team: false, assets: { 'evals/cases/happy.yaml': CASE, 'evals/suite.yaml': SUITE } });
+    let calls = 0;
+    const agent: AgentApi = { runAgent: async (task, cwd) => { calls += 1; return armAgent.runAgent(task, cwd); }, askJson: () => Promise.resolve({}) };
+    const io = new ScriptedPrompter();
+    const result = await run(args(store, home, { agent, k: 1, noGen: true, case: 'happy' }), io);
+    expect(result).toMatchObject({ ok: true }); if (!result.ok) return;
+    expect(calls).toBe(2);
+    expect(io.lines.join('\n')).toContain('Skipping evals/suite.yaml: --case happy');
+    const receipt = receiptSchema.parse(JSON.parse(await readFile(join(result.value.runDir, 'receipt.json'), 'utf8')));
+    expect(receipt.expected_rows).toBe(1);
+    expect(receipt.provenance.cases).toEqual(['happy']);
+    expect(receipt.per_case!.map((entry) => entry.case)).toEqual(['happy']);
+  });
+
   it('refuses a suite sub-case name that collides with any authored case name', async () => {
     const collision = 'task: deploy\ncases:\n  - name: happy\n    checks: []\n';
     const { store, home } = await evalFixture({ assets: { 'evals/cases/happy.yaml': CASE, 'evals/suite.yaml': collision } });
