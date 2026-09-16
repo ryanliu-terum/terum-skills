@@ -21,6 +21,7 @@ import { cliRun } from './run';
 import { createReadSession } from './session.js';
 import { prepareRun } from './prepare-run';
 import { cliEvalReport, mapEvalReport, cliReceipt } from './eval-report';
+import { cliUsage, mapUsage } from './usage';
 import { receiptSummary } from '../receipt-summary';
 import { relativeTime } from '../../lib/relative-time';
 import { personPlaceNote, plural } from '../../screens/marketplace/market-data';
@@ -734,6 +735,11 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
     const inventory = await cached(['ls', '--team', team.team], cliLs, options);
     return inventory.ok ? { ok: true as const, value: { team, inventory: inventory.value, placements: status.value.ledger.placements } } : inventory;
   }
+  /** No ref: `usage <skill>` filters after the corpus scan, so a per-skill spawn costs a whole
+   *  rescan and `cached()` would key a separate entry per skill. One read serves every skill page. */
+  async function readUsage(options?:ReadOptions) {
+    return cached(['usage','--json'],cliUsage,options);
+  }
   async function readEvalReport(ref:string,team:string|undefined,options?:ReadOptions) {
     const lines:string[]=[];
     const report=await cached(['eval-report',...(team?['--team',team]:[]),'--',ref],cliEvalReport,options,lines);
@@ -903,6 +909,10 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
     async evalReport({ref,team},options) {
       const {report,lines}=await readEvalReport(ref,team,options);
       return report.ok?{ok:true,value:mapEvalReport(report.value,lines)}:{ok:false,error:report.error};
+    },
+    async usage({ref},options) {
+      const report=await readUsage(options);
+      return report.ok?{ok:true as const,value:mapUsage(report.value,ref)}:{ok:false as const,error:report.error};
     },
     async receipts({skillId,version},options) {
       const {report,lines}=await readEvalReport(skillId,undefined,options);

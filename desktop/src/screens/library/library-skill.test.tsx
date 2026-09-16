@@ -142,7 +142,7 @@ it.each([
  ['#/library/global?__mock=error',"Couldn't read your library"],
  ['#/skill/deploy-check?__mock=error',"Couldn't read deploy-check"],
  ['#/skill/deploy-check?tab=quality','Coming soon'],
- ['#/skill/deploy-check?tab=activity','Coming soon'],
+ ['#/skill/deploy-check?tab=activity','Skill firings'],
  ['#/skill/deploy-check?menu=files','3 files'],
  ['#/skill/deploy-check?tab=evals&rail=closed&full=1','Coverage and provenance'],
 ])('reaches the real board content at %s',async(route,text)=>{open(route);expect(await screen.findByText(text)).toBeInTheDocument();expect(screen.queryByText(/S1b builds this/)).toBeNull();await waitFor(()=>expect(document.documentElement.dataset.appReady).toBe('true'));});
