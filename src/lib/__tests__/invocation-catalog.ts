@@ -1199,6 +1199,12 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
   },
   {
     "file": "README.md",
+    "line": 396,
+    "policy": "prose",
+    "pattern": "| | `usage [skill] [--since <iso>] [--all] [--json]` | Show which placed skills fired on this machine and whether the model chose them from their description (autonomous) or a person named them by slash command (explicit). A skill with `0 autonomous, N explicit` is one people reach for that the model never picks \u2014 the signal for rewriting its description. Read-only, no fetch and no model call; counts are invocations, not outcome-changing uses. The window is the last 30 days because Claude Code prunes transcripts, so each run also appends what it saw to a machine-local archive (skill name, timestamp, kind and entrypoint only \u2014 never prompt text, paths or session ids) and `--since` earlier than retention is answered from it |"
+  },
+  {
+    "file": "README.md",
     "line": 1,
     "policy": "prose",
     "pattern": "# terum-skills(Evaluating the best skills and sharing them)"
