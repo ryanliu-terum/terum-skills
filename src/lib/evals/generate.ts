@@ -9,6 +9,7 @@ import { join } from 'node:path';
 import YAML from 'yaml';
 import { AgentRunError, type AgentApi } from './agent.js';
 import { casePathViolation, dryRunCase, dryRunSuite, loadCase, loadSuite, patchApplies } from './execution.js';
+import { hygieneFrontmatter } from './hygiene.js';
 import { parseTriggers } from './triggers.js';
 import { failure, success, type Result } from '../result.js';
 
@@ -29,6 +30,12 @@ const MAX_CASES = 7;
  * finish in 120 s — three silent timeouts, no receipt. Arm runs get 600 s; generation gets half.
  */
 export const GENERATION_TIMEOUT_MS = 300_000;
+/**
+ * Every YAML the generator writes or re-reads is dumped unfolded. The default 80-column folding
+ * picks a `>` scalar for diff-shaped text (a long line, then space-led context lines) and the parse
+ * no longer returns the same bytes — a `plants_diff` that validated would not apply once written.
+ */
+const YAML_OPTIONS = { lineWidth: 0 } as const;
 
 export interface GeneratedCases {
   files: Record<string, string>;
@@ -68,22 +75,23 @@ export async function generate(options: GenerateOptions): Promise<Result<Generat
   if (options.triggers) {
     const generated = await askWithValidation(options.agent, triggerPrompt(options), options.model, skillBytes, async (raw) => validateTriggers(raw));
     if (!generated.ok) return failure(`Could not generate triggers: ${generated.error}. Retry the command or pass --no-gen.`);
-    out.triggers = header + YAML.stringify(generated.value);
+    out.triggers = header + YAML.stringify(generated.value, YAML_OPTIONS);
   }
   if (options.cases) {
     const scratch = options.scratch ?? await mkdtemp(join(tmpdir(), 'terum-eval-gen-'));
+    const skillName = skillNameOf(options.skill);
     let generated: Result<{ kind: 'cases'; cases: Record<string, Record<string, unknown>> } | { kind: 'suite'; file: string }>;
     try {
       const shape = generationShape(options.shape);
       if (!shape.ok) return failure(`Could not generate execution cases: ${shape.error}. Retry the command or pass --no-gen.`);
-      generated = await askWithValidation(options.agent, suitePrompt(options, shape.value), options.model, skillBytes, (raw) => validateExecutionAssets(raw, scratch, shape.value));
+      generated = await askWithValidation(options.agent, suitePrompt(options, shape.value), options.model, skillBytes, (raw) => validateExecutionAssets(raw, scratch, shape.value, skillName));
     } finally {
       if (options.scratch === undefined) await rm(scratch, { recursive: true, force: true });
     }
     if (!generated.ok) return failure(`Could not generate execution cases: ${generated.error}. Retry the command or pass --no-gen.`);
     if (generated.value.kind === 'cases') {
       const files: Record<string, string> = {};
-      for (const [name, value] of Object.entries(generated.value.cases)) files[`${name}.yaml`] = header + YAML.stringify(value);
+      for (const [name, value] of Object.entries(generated.value.cases)) files[`${name}.yaml`] = header + YAML.stringify(value, YAML_OPTIONS);
       out.cases = { files, names: Object.keys(generated.value.cases) };
     } else out.suite = { file: header + generated.value.file };
   }
@@ -98,16 +106,16 @@ function generationShape(value: unknown): Result<GenerationShape> {
   return failure("SKILL.md metadata.eval.shape must be 'suite' or 'cases'");
 }
 
-async function validateExecutionAssets(raw: Record<string, unknown>, scratch: string, fixedShape: GenerationShape): Promise<Result<{ kind: 'cases'; cases: Record<string, Record<string, unknown>> } | { kind: 'suite'; file: string }>> {
+async function validateExecutionAssets(raw: Record<string, unknown>, scratch: string, fixedShape: GenerationShape, skillName: string | undefined): Promise<Result<{ kind: 'cases'; cases: Record<string, Record<string, unknown>> } | { kind: 'suite'; file: string }>> {
   const isSuite = Object.hasOwn(raw, 'suite');
   const isCases = Object.hasOwn(raw, 'cases');
   if (isSuite === isCases) return failure("generated execution assets need exactly one of 'suite' or 'cases'");
   if (fixedShape !== undefined && (fixedShape === 'suite') !== isSuite) return failure(`The shape is fixed: return {"${fixedShape}": ${fixedShape === 'suite' ? '...}' : '[...]}'}`);
   if (isCases) {
-    const cases = await validateCases(raw, scratch);
+    const cases = await validateCases(raw, scratch, skillName);
     return cases.ok ? success({ kind: 'cases', cases: cases.value }) : failure(cases.error);
   }
-  const suite = await validateSuite(raw, scratch);
+  const suite = await validateSuite(raw, scratch, skillName);
   return suite.ok ? success({ kind: 'suite', file: suite.value }) : failure(suite.error);
 }
 
@@ -141,7 +149,7 @@ async function askWithValidation<T>(agent: AgentApi, prompt: string, model: stri
 }
 
 function validateTriggers(raw: Record<string, unknown>): Result<Record<string, unknown>> {
-  const source = YAML.stringify(raw);
+  const source = YAML.stringify(raw, YAML_OPTIONS);
   const parsed = parseTriggers(source);
   if (!parsed.ok) return failure(parsed.error);
   if (parsed.value.shouldTrigger.length !== 5) return failure(`generated triggers need exactly 5 should_trigger prompts (got ${parsed.value.shouldTrigger.length})`);
@@ -156,7 +164,7 @@ function validateTriggers(raw: Record<string, unknown>): Result<Record<string, u
  * has provably started before it is written into the skill (D3). Both used to surface only at
  * run time — one as a silently dropped case, the other as a dead eval.
  */
-async function validateCases(raw: Record<string, unknown>, scratch: string): Promise<Result<Record<string, Record<string, unknown>>>> {
+async function validateCases(raw: Record<string, unknown>, scratch: string, skillName: string | undefined): Promise<Result<Record<string, Record<string, unknown>>>> {
   const supplied = raw['cases'];
   if (!Array.isArray(supplied)) return failure("generated cases need a 'cases' array");
   if (supplied.length < MIN_CASES || supplied.length > MAX_CASES) return failure(`generated cases need between ${MIN_CASES} and ${MAX_CASES} cases (got ${supplied.length})`);
@@ -169,6 +177,8 @@ async function validateCases(raw: Record<string, unknown>, scratch: string): Pro
     if (Object.hasOwn(files, name)) return failure(`generated case name '${name}' is duplicated`);
     if (Object.hasOwn(record, 'fixture')) return failure(`generated case '${name}' may not use fixture`);
     if (typeof record['bucket'] !== 'string' || !BUCKETS.has(record['bucket'])) return failure(`generated case '${name}' needs a bucket from explicit, implicit, contextual, negative, adversarial`);
+    const selfCall = typeof record['task'] === 'string' ? selfInvocation(record['task'], skillName) : null;
+    if (selfCall !== null) return failure(`generated case '${name}' ${selfCall}`);
     const checks = record['checks'];
     if (checks !== undefined && !Array.isArray(checks)) return failure(`generated case '${name}' has a malformed checks field`);
     for (const check of checks ?? []) {
@@ -177,7 +187,7 @@ async function validateCases(raw: Record<string, unknown>, scratch: string): Pro
       if (entries.length !== 1 || !CHECK_KINDS.has(entries[0]![0])) return failure(`generated case '${name}' uses a check outside the generation whitelist`);
     }
     const body = Object.fromEntries(Object.entries(record).filter(([key]) => key !== 'name'));
-    const parsed = loadCase(YAML.stringify(body), name);
+    const parsed = loadCase(YAML.stringify(body, YAML_OPTIONS), name);
     if (!parsed.ok) return failure(parsed.error);
     for (const rel of Object.keys(parsed.value.files)) {
       const violation = casePathViolation(rel);
@@ -198,13 +208,15 @@ for p in .probes/*; do if sh "$p"; then exit 1; fi; done
 rm -rf .probes .plants.diff`;
 
 /** Validate, materialize, load, and dry-run a model-provided ground-truth suite. */
-async function validateSuite(raw: Record<string, unknown>, scratch: string): Promise<Result<string>> {
+async function validateSuite(raw: Record<string, unknown>, scratch: string, skillName: string | undefined): Promise<Result<string>> {
   if (Object.keys(raw).length !== 1 || raw['suite'] === null || typeof raw['suite'] !== 'object' || Array.isArray(raw['suite'])) return failure("generated suite needs a single 'suite' object");
   const suite = raw['suite'] as Record<string, unknown>;
   const allowedSuite = new Set(['task', 'files', 'plants_diff', 'probes', 'cases']);
   const unknown = Object.keys(suite).find((key) => !allowedSuite.has(key));
   if (unknown !== undefined) return failure(`generated suite may not carry '${unknown}'`);
   if (typeof suite['task'] !== 'string' || !suite['task'].trim()) return failure("generated suite needs a non-empty 'task'");
+  const selfCall = selfInvocation(suite['task'], skillName);
+  if (selfCall !== null) return failure(`generated suite ${selfCall}`);
   if (suite['files'] === null || typeof suite['files'] !== 'object' || Array.isArray(suite['files']) || Object.keys(suite['files'] as object).length === 0) return failure("generated suite needs a non-empty 'files' map");
   const files: Record<string, string> = {};
   for (const [path, content] of Object.entries(suite['files'] as Record<string, unknown>)) {
@@ -266,7 +278,7 @@ async function validateSuite(raw: Record<string, unknown>, scratch: string): Pro
   if (patchError !== null) return failure(patchError);
   const materializedFiles: Record<string, string> = { ...files, '.plants.diff': suite['plants_diff'] as string };
   for (const [name, command] of Object.entries(probes)) materializedFiles[`.probes/${name}.sh`] = `${command}\n`;
-  const materialized = YAML.stringify({ task: suite['task'], files: materializedFiles, timeout_minutes: 120, requires: [], setup: SUITE_SETUP, cases });
+  const materialized = YAML.stringify({ task: suite['task'], files: materializedFiles, timeout_minutes: 120, requires: [], setup: SUITE_SETUP, cases }, YAML_OPTIONS);
   const loaded = loadSuite(materialized, 'suite');
   if (!loaded.ok) return failure(loaded.error);
   const dryRunError = await dryRunSuite(loaded.value, scratch);
@@ -282,6 +294,31 @@ async function validateSuite(raw: Record<string, unknown>, scratch: string): Pro
  * sentence is what keeps the model from hitting that refusal in the first place.
  */
 const FIXTURE_RULE = 'Any email address you write must use a reserved domain (example.com, example.org, or a .test/.invalid name) — never a real or real-looking one. Never include anything shaped like a credential: no API keys, tokens, passwords, or private keys, real or fake.';
+
+/**
+ * Eval-gen spec rev 2 §4 (the engine's §5.1 authoring rule), carried by the v0.20.0 case prompt and
+ * dropped from the mode-2 case appendix. One constant so the two prompts cannot drift apart again.
+ */
+const TASK_RULE = 'Tasks must not demand magic-string incantations and must be answerable without human follow-up.';
+
+/** The frontmatter `name` — the handle a slash command for this skill would use. */
+function skillNameOf(skill: string): string | undefined {
+  const frontmatter = hygieneFrontmatter(Buffer.from(skill, 'utf8')) as { name?: unknown } | undefined;
+  const name = frontmatter?.name;
+  return typeof name === 'string' && name.trim() !== '' ? name.trim() : undefined;
+}
+
+/**
+ * A task that opens with `/<skill-name>` only runs in an arm with the skill staged: the baseline
+ * answers "Unknown command" and the case records a loss the skill did not earn (observed live: 5 of
+ * 5 generated spec-readable tasks). Returns the correction for the re-ask, or null.
+ */
+function selfInvocation(task: string, skillName: string | undefined): string | null {
+  if (skillName === undefined) return null;
+  const escaped = skillName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  if (!new RegExp(`^/${escaped}(?=$|[\\s:,.;!?)])`, 'i').test(task.trimStart())) return null;
+  return `starts its task with /${skillName}: only an arm with the skill staged has that command, so the baseline answers "Unknown command" and scores a false loss. Write the task as the plain request a user would make (what they want done, with the inputs it needs) and let the skill trigger from it; never start it with /${skillName}`;
+}
 
 /**
  * Eval-gen D1 (2026-09-14): the runtime contract `execution.ts` enforces, stated where the model can
@@ -301,7 +338,7 @@ function triggerPrompt(options: GenerateOptions): string {
 }
 
 export function casePrompt(options: GenerateOptions): string {
-  return `Generate headlessly answerable execution evaluation cases for this Claude Code skill. Return ONLY JSON: {"cases":[{"name":"lowercase-hyphenated-stem","task":"...","files":{},"setup":"optional shell","checks":[{"transcript_mentions":"..."}],"bucket":"explicit"}]}.\nChoose how many cases this skill needs, between ${MIN_CASES} and ${MAX_CASES} inclusive, from its own complexity: a skill with one behaviour and one way to get it wrong wants ${MIN_CASES}; a skill with several distinct surfaces, decision branches, or refusal modes wants more, one case per thing that can independently go wrong. Do not pad — a case that tests nothing the others do not is worse than no case.\nEvery case needs a bucket from explicit, implicit, contextual, negative, adversarial; at least one must be adversarial, and a set larger than ${MIN_CASES} should spread across several buckets rather than repeat one. Do not include fixture. Checks may use ONLY transcript_mentions, transcript_omits, command_matching, no_command_matching, file_exists, file_absent. Do not use command_succeeds. Tasks must not demand magic-string incantations and must be answerable without human follow-up.\n${SETUP_RULE}\n${FIXTURE_RULE}\n\n${context(options)}`;
+  return `Generate headlessly answerable execution evaluation cases for this Claude Code skill. Return ONLY JSON: {"cases":[{"name":"lowercase-hyphenated-stem","task":"...","files":{},"setup":"optional shell","checks":[{"transcript_mentions":"..."}],"bucket":"explicit"}]}.\nChoose how many cases this skill needs, between ${MIN_CASES} and ${MAX_CASES} inclusive, from its own complexity: a skill with one behaviour and one way to get it wrong wants ${MIN_CASES}; a skill with several distinct surfaces, decision branches, or refusal modes wants more, one case per thing that can independently go wrong. Do not pad — a case that tests nothing the others do not is worse than no case.\nEvery case needs a bucket from explicit, implicit, contextual, negative, adversarial; at least one must be adversarial, and a set larger than ${MIN_CASES} should spread across several buckets rather than repeat one. Do not include fixture. Checks may use ONLY transcript_mentions, transcript_omits, command_matching, no_command_matching, file_exists, file_absent. Do not use command_succeeds. ${TASK_RULE}\n${SETUP_RULE}\n${FIXTURE_RULE}\n\n${context(options)}`;
 }
 
 /** §4.1's ground-truth prompt. The contract portion before the case-shape appendix is verbatim. */
@@ -366,6 +403,6 @@ ${options.files.join('\n')}
 
 Case shape (when you return {"cases": [...]})
 Return ONLY JSON: {"cases":[{"name":"lowercase-hyphenated-stem","task":"...","files":{},"setup":"optional shell","checks":[{"transcript_mentions":"..."}],"bucket":"explicit"}]}.
-Choose between ${MIN_CASES} and ${MAX_CASES} inclusive from the skill's complexity. Every case needs a bucket from explicit, implicit, contextual, negative, adversarial; at least one must be adversarial. Checks may use ONLY transcript_mentions, transcript_omits, command_matching, no_command_matching, file_exists, file_absent. Do not use command_succeeds. Do not include fixture. ${SETUP_RULE}
+Choose between ${MIN_CASES} and ${MAX_CASES} inclusive from the skill's complexity. ${TASK_RULE} Every case needs a bucket from explicit, implicit, contextual, negative, adversarial; at least one must be adversarial. Checks may use ONLY transcript_mentions, transcript_omits, command_matching, no_command_matching, file_exists, file_absent. Do not use command_succeeds. Do not include fixture. ${SETUP_RULE}
 ${FIXTURE_RULE}`;
 }
