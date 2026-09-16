@@ -29,9 +29,9 @@ I've been searching for best skills and practices for using the amazing AI tools
 
 **Core beliefs of the project:**
 
-- **Skills are extremely impactful at increasing efficiency with AI.** [SkillsBench](https://arxiv.org/abs/2602.12670) measured curated skills across 87 tasks and 18 model-harness configurations: pass rates rose by 16.6 percentage points on average, and smaller models with skills matched larger models without them.
-- **The most impactful skills only work in the context of the project they were created for.** The same benchmark found gains that vary widely by domain, 13 of 87 tasks that got worse with skills, and skills the model wrote for itself landing below the no-skill baseline. A skill earns its place on a specific task set, not in general.
-- **It should be easy to evaluate the best skills that work for a project and easy to distribute them among the contributors of that project.** That one is ours.
+- **Skills are extremely impactful at increasing efficiency with AI.** [SkillsBench](https://arxiv.org/abs/2602.12670)
+- **The most impactful skills only work in the context of the project they were created for.** 
+- **It should be easy to evaluate the best skills that work for a project and easy to distribute them among the contributors of that project.** 
 
 As a result, we built Terum, a free, fully open source tool that lets you evaluate and share the best skills/workflows among a team! One terminal command installs a CLI package and a lightweight application for a simple UI that wraps the CLI. Fully self-hosted, no server, all skills live in a private GitHub repository that the CLI package calls from.
 
