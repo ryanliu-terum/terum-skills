@@ -14,6 +14,11 @@ AGENTS.local.md
 !.claude/skills/
 .claude/skills/*
 !.claude/skills/terum-skills/
+# ...plus the authored eval assets of the hybrid-review skill (eval-purpose-suites spec §6.2): the
+# suite and its fixture are data the engine measures with; the skill itself stays in the harness.
+!.claude/skills/hybrid-review/
+.claude/skills/hybrid-review/*
+!.claude/skills/hybrid-review/evals/
 
 # .planning/ is untracked except the capture recordings the desktop tests replay
 # (src/commands/__tests__/capture-frames.test.ts and desktop/src/backend/tauri/__tests__/*).

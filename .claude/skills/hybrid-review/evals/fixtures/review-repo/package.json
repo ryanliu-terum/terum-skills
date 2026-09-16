@@ -1,0 +1,13 @@
+{
+  "name": "ledger-lite",
+  "version": "0.4.2",
+  "description": "Cart, pricing, tax and invoice arithmetic for a small storefront. No dependencies.",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "test": "node test/run.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
