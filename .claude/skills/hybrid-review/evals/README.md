@@ -1,0 +1,9 @@
+# hybrid-review evals
+
+`suite.yaml` (eval spec §6.2, chunk 7) measures whether `/hybrid-review` — Claude finders, Codex verify panel — reports the real defects in a diff and stays quiet about a change that only looks wrong. `fixtures/review-repo/` is a clean, dependency-free Node ESM repository (pricing ↔ invoice, cart, tax, dates, `test/run.js`); its `.plants.txt` plants five defects across five files, including one broken caller contract (`applyDiscount` changes its return shape, `invoice.js` is not updated), plus one distractor (a correct decimal-shift `roundHalfUp` that reads odd).
+
+`setup` commits the base without the diff file, applies the diff as uncommitted working-tree edits, and deletes it, so `git diff` in the sandbox is exactly the plants; `node test/run.js` passes on the base and fails on every defect afterwards (9 of 21). One row per defect (`transcript_mentions` on the identifier a finding must cite) and one for the distractor (`transcript_omits`).
+
+The task names the skill ("Use the hybrid-review skill to review…"): without that, the candidate arm reviews inline and the skill is never exercised (first proof run, 2026-09-16). Run: `terum-skills eval hybrid-review --k 1 --no-commit`. Needs `codex` on PATH and a logged-in Codex account (`requires: [codex]` skips the suite cleanly elsewhere); expect an hour-plus per candidate arm, since the panel runs `codex exec` at `high`.
+
+The workflow engine `.claude/workflows/ultrareview.js` is not in this folder: dependency staging (spec §6.1) copies it, with its directory, into the candidate and incumbent sandboxes from the SKILL.md's own `scriptPath` reference. To change the fixture, keep the base green, regenerate `.plants.txt` with `git diff` from a scratch repo, and re-run the `setup` lines under `/bin/sh -ce` before committing.

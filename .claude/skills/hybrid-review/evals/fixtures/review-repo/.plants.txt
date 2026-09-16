@@ -1,0 +1,321 @@
+diff --git a/README.md b/README.md
+index 217adb6..937b15a 100644
+--- a/README.md
++++ b/README.md
+@@ -7,10 +7,10 @@ no dependencies. Run the tests with `npm test` (or `node test/run.js`).
+ 
+ | Module | Exports | Depends on |
+ | --- | --- | --- |
+-| `src/pricing.js` | `roundHalfUp`, `clamp`, `discountAmount`, `applyDiscount`, `lineTotal` | — |
+-| `src/cart.js` | `createCart`, `addItem`, `removeItem`, `setQuantity`, `cartSubtotal`, `itemCount`, `isEmpty`, `MAX_LINE_QTY` | pricing |
++| `src/pricing.js` | `roundHalfUp`, `clamp`, `discountAmount`, `applyDiscount`, `lineTotal`, `lineSavings` | — |
++| `src/cart.js` | `createCart`, `addItem`, `removeItem`, `setQuantity`, `cartSubtotal`, `cartSavings`, `itemCount`, `isEmpty`, `MAX_LINE_QTY` | pricing |
+ | `src/tax.js` | `TAX_RATES`, `normalizeRegion`, `taxRate`, `taxFor`, `isTaxable` | pricing |
+-| `src/dates.js` | `startOfUtcDay`, `addDays`, `dueDate`, `isOverdue`, `MS_PER_DAY` | — |
++| `src/dates.js` | `startOfUtcDay`, `addDays`, `dueDate`, `daysPastDue`, `isOverdue`, `MS_PER_DAY` | — |
+ | `src/invoice.js` | `buildInvoice`, `resetNumbering`, `DEFAULT_REGION`, `DEFAULT_TERMS` | cart, pricing, tax, dates |
+ 
+ ## Rules the code relies on
+@@ -18,25 +18,29 @@ no dependencies. Run the tests with `npm test` (or `node test/run.js`).
+ **Money.** Amounts are plain numbers in major units (`12.5` is twelve fifty) and are
+ never negative. Every function that returns money rounds through `roundHalfUp`
+ (ties round toward +∞, the `Math.round` convention), so a total never carries
+-binary-float dust. Known caveat: `roundHalfUp(1.005)` currently yields `1` because
+-`1.005 * 100` is `100.49999999999999` in binary floating point.
++binary-float dust. Rounding shifts the decimal point in base 10, so a decimal tie
++such as `1.005` rounds up to `1.01` even though `1.005 * 100` is `100.49999999999999`
++in binary floating point.
+ 
+ **Discounts.** A discount is `{ type: 'percent', value }` (clamped to 0–100) or
+ `{ type: 'fixed', value }` (never below zero). `applyDiscount(unitPrice, discount)`
+-returns the discounted **unit** price, rounded to cents; a line total is that unit
+-price times the quantity. Rounding per unit, not per line, is deliberate: it is what
+-the receipt printer shows.
++returns `{ price, saved }`: the discounted **unit** price and the amount taken off
++it, both rounded to cents. A line total is that unit price times the quantity, and
++`lineSavings` / `cartSavings` are the "you save" figures on the receipt. Rounding per
++unit, not per line, is deliberate: it is what the receipt printer shows.
+ 
+ **Quantities.** Integers from 1 to `MAX_LINE_QTY`. Adding a SKU that is already in
+ the cart increases that line's quantity (capped) and keeps its original price and
+ discount.
+ 
+-**Tax.** `TAX_RATES` holds sales-tax rates by region code as **percents**
+-(`7.25` means 7.25 %). `taxFor(amount, region)` is the tax owed, rounded to cents.
++**Tax.** `TAX_RATES` holds sales-tax rates by region code as **fractions** of the
++taxable amount (`0.0725` means 7.25 %); every entry in the table is a fraction.
++`taxFor(amount, region)` is the tax owed, rounded to cents.
+ Unknown regions throw; a zero-rated region is a valid entry, not a missing one.
+ 
+ **Terms.** An invoice is due `netDays` after its issue date (midnight UTC). It is
+ overdue from the day **after** the due date: on the due date itself it is still
+-current. Explicit terms win, then the house default (`DEFAULT_TERMS`, net 30).
+-A customer record is optional — walk-in sales have none — and when present it may
+-carry a `region`.
++current; `daysPastDue` counts the days either side of it for the reminder cadence.
++Explicit terms win, then the customer's negotiated terms, then the house default
++(`DEFAULT_TERMS`, net 30). A customer record is optional — walk-in sales have none —
++and when present it may carry a `region` and negotiated `terms`.
+diff --git a/src/cart.js b/src/cart.js
+index e96e586..0cdf3f6 100644
+--- a/src/cart.js
++++ b/src/cart.js
+@@ -1,4 +1,4 @@
+-import { lineTotal, roundHalfUp } from './pricing.js';
++import { clamp, lineSavings, lineTotal, roundHalfUp } from './pricing.js';
+ 
+ /** Largest quantity a single line may hold; larger requests are capped, not rejected. */
+ export const MAX_LINE_QTY = 999;
+@@ -17,6 +17,11 @@ function assertQuantity(qty) {
+   }
+ }
+ 
++/** Keep a line quantity inside 1..MAX_LINE_QTY. */
++function clampQuantity(qty) {
++  return clamp(qty, MAX_LINE_QTY, 1);
++}
++
+ function findLine(cart, sku) {
+   return cart.lines.find((line) => line.sku === sku);
+ }
+@@ -31,14 +36,14 @@ export function addItem(cart, item) {
+   assertQuantity(qty);
+   const existing = findLine(cart, item.sku);
+   if (existing) {
+-    existing.qty = Math.min(existing.qty + qty, MAX_LINE_QTY);
++    existing.qty = clampQuantity(existing.qty + qty);
+     return existing;
+   }
+   const line = {
+     sku: item.sku,
+     name: item.name ?? item.sku,
+     unitPrice: item.unitPrice,
+-    qty: Math.min(qty, MAX_LINE_QTY),
++    qty: clampQuantity(qty),
+     discount: item.discount,
+   };
+   cart.lines.push(line);
+@@ -58,7 +63,7 @@ export function setQuantity(cart, sku, qty) {
+   assertQuantity(qty);
+   const line = findLine(cart, sku);
+   if (!line) throw new RangeError(`setQuantity: no line for sku ${sku}`);
+-  line.qty = Math.min(qty, MAX_LINE_QTY);
++  line.qty = clampQuantity(qty);
+   return line;
+ }
+ 
+@@ -68,6 +73,12 @@ export function cartSubtotal(cart) {
+   return roundHalfUp(sum);
+ }
+ 
++/** Sum of what the line discounts took off, rounded to cents. */
++export function cartSavings(cart) {
++  const sum = cart.lines.reduce((acc, line) => acc + lineSavings(line), 0);
++  return roundHalfUp(sum);
++}
++
+ /** Number of units across all lines. */
+ export function itemCount(cart) {
+   return cart.lines.reduce((acc, line) => acc + line.qty, 0);
+diff --git a/src/dates.js b/src/dates.js
+index 1fd29d1..6731856 100644
+--- a/src/dates.js
++++ b/src/dates.js
+@@ -18,10 +18,18 @@ export function dueDate(issuedAt, netDays) {
+   return addDays(issuedAt, netDays);
+ }
+ 
++/**
++ * Whole UTC days from the due date to `asOf`: negative while the invoice is still
++ * current, 0 on the due date, positive once it is overdue. Feeds the reminder cadence.
++ */
++export function daysPastDue(due, asOf = new Date()) {
++  return Math.round((startOfUtcDay(asOf).getTime() - startOfUtcDay(due).getTime()) / MS_PER_DAY);
++}
++
+ /**
+  * An invoice is overdue from the day AFTER its due date; on the due date itself
+  * it is still current (README "Terms"). Time of day is ignored on both sides.
+  */
+ export function isOverdue(due, asOf = new Date()) {
+-  return startOfUtcDay(asOf).getTime() > startOfUtcDay(due).getTime();
++  return daysPastDue(due, asOf) >= 0;
+ }
+diff --git a/src/invoice.js b/src/invoice.js
+index 5a55cfe..3285ac7 100644
+--- a/src/invoice.js
++++ b/src/invoice.js
+@@ -13,22 +13,31 @@ export function resetNumbering(start = 1) {
+   nextNumber = start;
+ }
+ 
++/** Explicit terms win, then the customer's negotiated terms, then the house default. */
++function resolveTerms({ terms, customer }) {
++  if (terms) return terms;
++  if (customer.terms) return customer.terms;
++  return DEFAULT_TERMS;
++}
++
+ /**
+  * Build an invoice from a non-empty cart.
+  *
+  * @param {object} cart
+  * @param {object} [options]
+  * @param {object} [options.customer]  optional — walk-in sales have no customer record;
+- *                                     when present it may carry `region`
++ *                                     when present it may carry `region` and negotiated `terms`
+  * @param {string} [options.region]    tax region; defaults to the customer's, then DEFAULT_REGION
+  * @param {object} [options.discount]  optional order-level discount ({ type, value }), applied
+  *                                     to the subtotal after line discounts
+  * @param {Date|string} [options.issuedAt]  defaults to now
+- * @param {object} [options.terms]     payment terms ({ netDays }); defaults to DEFAULT_TERMS
++ * @param {object} [options.terms]     payment terms ({ netDays }); defaults to the customer's
++ *                                     negotiated terms, then DEFAULT_TERMS
+  */
+ export function buildInvoice(cart, options = {}) {
+   if (isEmpty(cart)) throw new RangeError('buildInvoice: cart is empty');
+-  const { customer, discount, issuedAt = new Date(), terms = DEFAULT_TERMS } = options;
++  const { customer, discount, issuedAt = new Date() } = options;
++  const terms = resolveTerms(options);
+   const region = options.region ?? customer?.region ?? DEFAULT_REGION;
+ 
+   const lines = cart.lines.map((line) => ({ ...line, total: lineTotal(line) }));
+diff --git a/src/pricing.js b/src/pricing.js
+index 0c8165d..54f5674 100644
+--- a/src/pricing.js
++++ b/src/pricing.js
+@@ -6,8 +6,13 @@
+ 
+ /** Round `value` to `places` decimals; ties round toward +∞ (Math.round). */
+ export function roundHalfUp(value, places = 2) {
+-  const factor = 10 ** places;
+-  return Math.round(value * factor) / factor;
++  if (!Number.isFinite(value)) return value;
++  // Shift the decimal point in base 10, not by multiplying: 1.005 * 100 is
++  // 100.49999999999999 in binary floating point and used to round DOWN to 1.
++  const [mantissa, exponent] = value.toExponential().split('e');
++  const shifted = Math.round(Number(`${mantissa}e${Number(exponent) + places}`));
++  const [m, e] = shifted.toExponential().split('e');
++  return Number(`${m}e${Number(e) - places}`);
+ }
+ 
+ /** Clamp `value` into the closed interval [min, max]. */
+@@ -31,16 +36,26 @@ export function discountAmount(unitPrice, discount) {
+   throw new TypeError(`applyDiscount: unknown discount type ${String(discount.type)}`);
+ }
+ 
+-/** The discounted unit price (a number, rounded to cents). */
++/**
++ * The discounted unit price and the amount taken off it, both rounded to cents,
++ * as `{ price, saved }`. `saved` is what the receipt prints as "you save".
++ */
+ export function applyDiscount(unitPrice, discount) {
+-  if (discount == null) return unitPrice;
++  if (discount == null) return { price: unitPrice, saved: 0 };
+   const saved = discountAmount(unitPrice, discount);
+   const price = roundHalfUp(unitPrice - saved);
+-  return price;
++  return { price, saved };
+ }
+ 
+ /** Total for a cart line: the discounted unit price times the quantity. */
+ export function lineTotal(line) {
+-  const unit = applyDiscount(line.unitPrice, line.discount);
++  const { price: unit } = applyDiscount(line.unitPrice, line.discount);
+   return roundHalfUp(unit * line.qty);
+ }
++
++/** Amount the line's discount takes off the whole line (0 without one). */
++export function lineSavings(line) {
++  const { saved } = applyDiscount(line.unitPrice, line.discount);
++  const total = saved * line.qty;
++  return roundHalfUp(total);
++}
+diff --git a/src/tax.js b/src/tax.js
+index bdcda85..4519b94 100644
+--- a/src/tax.js
++++ b/src/tax.js
+@@ -1,15 +1,16 @@
+ import { roundHalfUp } from './pricing.js';
+ 
+ /**
+- * Sales-tax rates by region code, as PERCENTS: 7.25 means 7.25 %.
++ * Sales-tax rates by region code, as FRACTIONS of the taxable amount: 0.0725 means 7.25 %.
++ * (Percents were dropped after two callers forgot the /100 — every entry is a fraction now.)
+  * Finance owns the numbers; keep README "Tax" in sync when they change.
+  */
+ export const TAX_RATES = Object.freeze({
+-  'US-CA': 7.25,
++  'US-CA': 0.0725,
+   'US-TX': 8.25,
+   'US-OR': 0,
+-  'CA-QC': 14.975,
+-  'GB': 20,
++  'CA-QC': 0.14975,
++  'GB': 0.2,
+ });
+ 
+ /** Region codes are matched case-insensitively and with surrounding whitespace ignored. */
+@@ -28,7 +29,7 @@ export function taxRate(region) {
+ 
+ /** Tax owed on `amount` in `region`, rounded to cents. */
+ export function taxFor(amount, region) {
+-  const owed = amount * taxRate(region) / 100;
++  const owed = amount * taxRate(region);
+   return roundHalfUp(owed);
+ }
+ 
+diff --git a/test/run.js b/test/run.js
+index 6c9f0b8..46a380a 100644
+--- a/test/run.js
++++ b/test/run.js
+@@ -1,5 +1,5 @@
+ import assert from 'node:assert/strict';
+-import { applyDiscount, clamp, lineTotal, roundHalfUp } from '../src/pricing.js';
++import { applyDiscount, clamp, lineSavings, lineTotal, roundHalfUp } from '../src/pricing.js';
+ import {
+   MAX_LINE_QTY, addItem, cartSubtotal, createCart, isEmpty, itemCount, removeItem, setQuantity,
+ } from '../src/cart.js';
+@@ -34,6 +34,13 @@ test('roundHalfUp rounds ties up and keeps whole numbers intact', () => {
+   assert.equal(roundHalfUp(0.1 + 0.2), 0.3);
+ });
+ 
++test('roundHalfUp rounds decimal ties up whatever their binary representation', () => {
++  assert.equal(roundHalfUp(1.005), 1.01);
++  assert.equal(roundHalfUp(2.345), 2.35);
++  assert.equal(roundHalfUp(1234567.005), 1234567.01);
++  assert.equal(roundHalfUp(0.045, 2), 0.05);
++});
++
+ test('clamp bounds a value into [min, max]', () => {
+   assert.equal(clamp(5, 1, 3), 3);
+   assert.equal(clamp(-2, 0, 100), 0);
+@@ -48,6 +55,13 @@ test('lineTotal applies the discount per unit, then multiplies', () => {
+   assert.equal(lineTotal({ unitPrice: 10, qty: 1, discount: { type: 'percent', value: 150 } }), 0);
+ });
+ 
++test('applyDiscount returns the unit price and the amount saved', () => {
++  assert.deepEqual(applyDiscount(19.99, undefined), { price: 19.99, saved: 0 });
++  assert.deepEqual(applyDiscount(19.99, { type: 'percent', value: 10 }), { price: 17.99, saved: 2 });
++  assert.deepEqual(applyDiscount(3, { type: 'fixed', value: 5 }), { price: 0, saved: 3 });
++  assert.equal(lineSavings({ unitPrice: 19.99, qty: 3, discount: { type: 'percent', value: 10 } }), 6);
++});
++
+ test('applyDiscount rejects an unknown discount type', () => {
+   assert.throws(() => applyDiscount(10, { type: 'bogo', value: 1 }), TypeError);
+ });
+@@ -183,6 +197,14 @@ test('a customer without negotiated terms gets the house terms; their region win
+   assert.equal(invoice.dueAt.toISOString(), '2026-04-09T00:00:00.000Z');
+ });
+ 
++test('a customer with negotiated terms gets them when none are passed explicitly', () => {
++  const invoice = buildInvoice(sampleCart(), {
++    customer: { name: 'Ada', region: 'US-CA', terms: { netDays: 14 } },
++    issuedAt: '2026-03-10T09:00:00Z',
++  });
++  assert.equal(invoice.dueAt.toISOString(), '2026-03-24T00:00:00.000Z');
++});
++
+ test('buildInvoice refuses an empty cart', () => {
+   assert.throws(() => buildInvoice(createCart()), RangeError);
+ });
