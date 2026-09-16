@@ -16,7 +16,7 @@ export interface Run<T>{readonly frames:AsyncIterable<Frame>;answer(id:string,va
 export interface Capabilities {appVersion:string;windowChrome:'mac-overlay'|'native'|'cosmetic';windowControlsEnd:number|null;disablePerMachine:boolean;inboxEventLog:boolean;offtargetKind:boolean;machineRegistry:boolean;perCaseEvalTables:boolean;openInEditor:boolean;clipboard:boolean}
 // §7.1: the local key is `libraryProjects`, not `projects` — `projects` is already the marketplace's
 // team-projects screen, and desktop/AGENTS.md invariant 2 forbids one flag meaning two things.
-export const FEATURE_KEYS = ['favorites','follow','roles','lastSeen','installScope','inviteScoping','disablePerMachine','projectMembers','liftOnCards','runEvalInApp','perCase','progress','memberRole','localIdentity','libraryProjects','projects','refresh','appUpdate','reconcile','serve'] as const;
+export const FEATURE_KEYS = ['favorites','follow','roles','lastSeen','installScope','inviteScoping','disablePerMachine','projectMembers','liftOnCards','runEvalInApp','perCase','progress','memberRole','localIdentity','libraryProjects','projects','refresh','appUpdate','reconcile','serve','usage'] as const;
 export type FeatureKey = typeof FEATURE_KEYS[number];
 export type Features = Readonly<Record<FeatureKey, boolean>>;
 export interface Surfaces {libraryProjects:boolean;divergence:boolean;status:boolean;settings:boolean;onboarding:boolean;library:boolean;skill:boolean;receipts:boolean;inbox:boolean;catalog:boolean;roster:boolean;update:boolean;appUpdate:boolean}
