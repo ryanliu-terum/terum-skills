@@ -12,7 +12,7 @@ import { localReceiptsFor, newestReceiptAt } from '../lib/evals/receipt-store.js
 import { type AgentApi, DEFAULT_MODEL, preflight as systemPreflight, systemAgent } from '../lib/evals/agent.js';
 import { type DroppedCase, type ArmSample, type ComparisonRow, loadCase, loadSuite, runCase, runSuite } from '../lib/evals/execution.js';
 import { generate, type GeneratedAssets } from '../lib/evals/generate.js';
-import { assessHygiene, exemptAuthorEmail, formatHygieneFindings, HygieneRefused, inspectContent, reportHygieneWarnings } from '../lib/evals/hygiene.js';
+import { assessHygiene, exemptAuthorEmail, formatHygieneFindings, hygieneFrontmatter, HygieneRefused, inspectContent, reportHygieneWarnings } from '../lib/evals/hygiene.js';
 import { makeRng } from '../lib/evals/judge.js';
 import { receiptPath, buildReceipt, NO_TEAM_RUNNER_HANDLE } from '../lib/evals/receipt.js';
 import { aggregate, renderReport, runIdFrom, writeRunTree } from '../lib/evals/results.js';
@@ -218,6 +218,7 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
     let generated: GeneratedAssets = {};
     if (generateCases || generateTriggers) {
       const catalog = await endorsedCatalog(local.libraryRoot, { name: local.name, description });
+      const frontmatter = hygieneFrontmatter(candidateFiles.files.get('SKILL.md') ?? Buffer.alloc(0)) as { metadata?: { eval?: { shape?: unknown } } } | undefined;
       const built = await generate({
         agent: args.agent ?? systemAgent,
         skill: candidateFiles.files.get('SKILL.md')?.toString('utf8') ?? '',
@@ -228,6 +229,7 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
         now: runAt,
         cases: generateCases,
         triggers: generateTriggers,
+        shape: frontmatter?.metadata?.eval?.shape,
       });
       if (!built.ok) return failure(built.error);
       generated = built.value;
@@ -247,7 +249,8 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
       // prompt: nothing leaves the machine here, publish still asks before anything does, and
       // publish already writes into this same folder (§5.1 step 6b).
       const written = generatedAssetLabels(generated);
-      io.print(`Writing generated ${written.join(' and ')} into ${candidateDir} — they were missing, so this run made them. That changes the skill's content: the next publish mints a new version and the current local eval score blanks. To regenerate, delete evals/cases/ and run eval again.`);
+      const regenerationTarget = generated.suite === undefined ? 'evals/cases/' : 'evals/suite.yaml';
+      io.print(`Writing generated ${written.join(' and ')} into ${candidateDir} — they were missing, so this run made them. That changes the skill's content: the next publish mints a new version and the current local eval score blanks. To regenerate, delete ${regenerationTarget} and run eval again.`);
       const saved = await saveGeneratedAssets(candidateDir, generated);
       if (!saved.ok) return failure(saved.error);
     }
@@ -264,7 +267,7 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
     // was queued is what was on disk when it was queued, and re-checking `--skipReceipted` after
     // generation would mean paying for the model call before discovering the bytes were receipted.
     // The next run of an already-generated folder reads the written-back bytes and matches this one.
-    const regenerated = generated.cases !== undefined || generated.triggers !== undefined;
+    const regenerated = generated.cases !== undefined || generated.suite !== undefined || generated.triggers !== undefined;
     const evaluatedDigest = regenerated ? skillContentDigest((await sourceFiles(candidateDir)).files) : candidateDigest;
 
     // §6.2: content-keyed, so a skill belonging to NO team can be evaluated at all.
@@ -306,8 +309,9 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
       // `--case <stem>` addresses authored case FILES only, so it must not pay for the suite's session
       // (a suite session can run to `timeout_minutes: 120` per arm); a named-case run skips the suite
       // and says so. Addressing a single sub-case is an open fork (harden r1 on this branch).
-      const suite = authoredSuite === undefined || args.case !== undefined ? undefined : loadSuite(authoredSuite, 'suite');
-      if (authoredSuite !== undefined && args.case !== undefined) io.print(`Skipping evals/suite.yaml: --case ${args.case} names an authored case; the suite runs only in a full run.`);
+      const suiteSource = generated.suite?.file ?? authoredSuite;
+      const suite = suiteSource === undefined || args.case !== undefined ? undefined : loadSuite(suiteSource, 'suite');
+      if (suiteSource !== undefined && args.case !== undefined) io.print(`Skipping evals/suite.yaml: --case ${args.case} names an authored case; the suite runs only in a full run.`);
       if (suite !== undefined && !suite.ok) return failure(suite.error);
       if (suite !== undefined) {
         const authoredNames = authoredCaseFiles.map((file) => file.replace(/\.ya?ml$/i, ''));
@@ -338,7 +342,7 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
         const output = await runSuite(
           { agent: args.agent ?? systemAgent, rng, model, judgeModel: args.judgeModel ?? model, log: (line) => io.print(line) },
           suite.value,
-          { k, skillName: local.name, caseDir: join(candidateDir, 'evals'), arms: { candidate: candidateDir, ...(incumbent === undefined ? {} : { incumbent }) }, scratch, transcriptDir, dependencies },
+          { k, skillName: local.name, caseDir: generated.suite === undefined ? join(candidateDir, 'evals') : generatedRoot, arms: { candidate: candidateDir, ...(incumbent === undefined ? {} : { incumbent }) }, scratch, transcriptDir, dependencies },
         );
         // A skipped or seed-aborted suite has no shared session, so it cannot invalidate the
         // independence of ordinary case rows. A dead agent still yields samples and did run.
@@ -359,7 +363,7 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
       missing_dependencies: dependencies.missing,
       spawns_agents: arms.some((arm) => arm.spawns_agents === true),
       arm_skill_lists: Object.fromEntries([...new Set(arms.map((arm) => arm.arm))].map((arm) => [arm, arms.find((sample) => sample.arm === arm)?.skill_list ?? null])),
-      ...(generated.cases !== undefined || generated.triggers !== undefined ? { generated_assets: { cases: generated.cases !== undefined, triggers: generated.triggers !== undefined } } : {}),
+      ...(generated.cases !== undefined || generated.suite !== undefined || generated.triggers !== undefined ? { generated_assets: { cases: generated.cases !== undefined, ...(generated.suite === undefined ? {} : { suite: true }), triggers: generated.triggers !== undefined } } : {}),
     }, [...rows, ...arms, ...(triggers === null ? [] : [triggers])]);
     const armSkillLists = Object.fromEntries([...new Set(arms.map((arm) => arm.arm))]
       .map((arm) => [arm, arms.find((sample) => sample.arm === arm)?.skill_list ?? null]));
@@ -404,7 +408,7 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
     if (!receipt.ok) return failure(receipt.error);
     const source = `${JSON.stringify(receipt.value, null, 2)}\n`;
     await writeFile(join(runDir, 'receipt.json'), source, 'utf8');
-    if (generated.cases !== undefined || generated.triggers !== undefined) announceGeneratedAssets(io, wantsCases, wantsTriggers, generated, join(runDir, 'generated'));
+    if (generated.cases !== undefined || generated.suite !== undefined || generated.triggers !== undefined) announceGeneratedAssets(io, wantsCases, wantsTriggers, generated, join(runDir, 'generated'));
     io.print(renderReport(summary, triggers));
 
     // Running the eval is the sharing step (Ajay, 2026-09-13). When these exact bytes are ALREADY a
@@ -471,7 +475,7 @@ async function optionalDirectory(path: string): Promise<string[]> {
 
 function announceGeneratedAssets(io: Prompter, wantsCases: boolean, wantsTriggers: boolean, generated: GeneratedAssets, root: string): void {
   const sets = [
-    wantsCases ? `cases: ${generated.cases === undefined ? 'authored' : `generated (${generated.cases.names.length})`}` : null,
+    wantsCases ? `cases: ${generated.suite !== undefined ? 'generated suite' : generated.cases === undefined ? 'authored' : `generated (${generated.cases.names.length})`}` : null,
     wantsTriggers ? `triggers: ${generated.triggers === undefined ? 'authored' : 'generated'}` : null,
   ].filter((line): line is string => line !== null);
   io.print(`eval assets: ${sets.join(' · ')}`);
@@ -480,7 +484,7 @@ function announceGeneratedAssets(io: Prompter, wantsCases: boolean, wantsTrigger
 
 
 /**
- * One generated-asset layout under `root` — `triggers.yaml`, `cases/<name>.yaml`. Two callers: the run
+ * One generated-asset layout under `root` — `triggers.yaml`, `suite.yaml`, `cases/<name>.yaml`. Two callers: the run
  * tree's own copy (§6.0's team/store write invariant), and the staging folder `saveGeneratedAssets`
  * renames from, so the folder the user gets is byte-for-byte the folder the run recorded.
  */
@@ -494,11 +498,15 @@ async function writeGeneratedAssets(root: string, generated: GeneratedAssets): P
     await mkdir(cases, { recursive: true, mode: 0o700 });
     for (const [name, source] of Object.entries(generated.cases.files)) await writeFile(join(cases, name), source, 'utf8');
   }
+  if (generated.suite !== undefined) {
+    await mkdir(root, { recursive: true, mode: 0o700 });
+    await writeFile(join(root, 'suite.yaml'), generated.suite.file, 'utf8');
+  }
 }
 
 /** The folder-relative spellings of the assets a generation carries, in the order they are written back. */
 function generatedAssetLabels(generated: GeneratedAssets): string[] {
-  return [generated.cases === undefined ? null : 'evals/cases/', generated.triggers === undefined ? null : 'evals/triggers.yaml'].filter((entry): entry is string => entry !== null);
+  return [generated.cases === undefined ? null : 'evals/cases/', generated.suite === undefined ? null : 'evals/suite.yaml', generated.triggers === undefined ? null : 'evals/triggers.yaml'].filter((entry): entry is string => entry !== null);
 }
 
 /**
@@ -511,12 +519,14 @@ function generatedAssetLabels(generated: GeneratedAssets): string[] {
 function generatedFileMap(generated: GeneratedAssets): Map<string, Buffer> {
   const files = new Map<string, Buffer>();
   if (generated.triggers !== undefined) files.set('evals/triggers.yaml', Buffer.from(generated.triggers, 'utf8'));
+  if (generated.suite !== undefined) files.set('evals/suite.yaml', Buffer.from(generated.suite.file, 'utf8'));
   for (const [name, body] of Object.entries(generated.cases?.files ?? {})) files.set(`evals/cases/${name}`, Buffer.from(body, 'utf8'));
   return files;
 }
 
 export async function saveGeneratedAssets(source: string, generated: GeneratedAssets): Promise<Result> {
   const cases = join(source, 'evals', 'cases');
+  const suite = join(source, 'evals', 'suite.yaml');
   const triggers = join(source, 'evals', 'triggers.yaml');
   // Restored from the pre-refactor verb, which had both refusals. The write-back's claim that it
   // "only ever runs for an asset that was MISSING" holds only for the EXACT spelling: `authoredTrigger`
@@ -528,6 +538,7 @@ export async function saveGeneratedAssets(source: string, generated: GeneratedAs
   // The check asks the FILESYSTEM, so it is correct on both kinds of volume: on a case-sensitive one
   // the two names are different files and generation proceeds as it should.
   if (generated.cases !== undefined && await pathExists(cases)) return failure(`${cases} already exists, so the generated eval cases were not written — a generated asset never overwrites an authored one. Rename or delete it, then run eval again.`);
+  if (generated.suite !== undefined && await pathExists(suite)) return failure(`${suite} already exists, so the generated eval suite was not written — a generated asset never overwrites an authored one. Rename or delete it, then run eval again.`);
   if (generated.triggers !== undefined && await pathExists(triggers)) return failure(`${triggers} already exists, so the generated triggers were not written — a generated asset never overwrites an authored one. Rename or delete it, then run eval again.`);
   // D72: stage, then rename — the same shape as `place()` in placer.ts. This is the user's own skill
   // folder, and the file-by-file write it replaced had no rollback: an interruption after the first
@@ -567,6 +578,7 @@ export async function saveGeneratedAssets(source: string, generated: GeneratedAs
     staging = await mkdtemp(join(dirname(source), '.generated.terum-'));
     await writeGeneratedAssets(staging, generated);
     if (generated.cases !== undefined) { await rename(join(staging, 'cases'), cases); landed.push('evals/cases/'); }
+    if (generated.suite !== undefined) { await rename(join(staging, 'suite.yaml'), suite); landed.push('evals/suite.yaml'); }
     if (generated.triggers !== undefined) { await rename(join(staging, 'triggers.yaml'), triggers); landed.push('evals/triggers.yaml'); }
   } catch (error) {
     if (staging !== undefined) await rm(staging, { recursive: true, force: true }).catch(() => undefined);

@@ -241,18 +241,64 @@ export async function dryRunCase(evalCase: EvalCase, scratch: string): Promise<s
   }
 }
 
+/**
+ * Eval-gen mode 2 uses the ordinary suite seeding path before it writes a generated asset.  This
+ * deliberately executes the composed setup rather than merely parsing it: probes must agree with
+ * the base and planted diff before an arm can be trusted with the fixture.
+ */
+export async function dryRunSuite(suite: EvalSuite, scratch: string): Promise<string | null> {
+  const root = await mkdtemp(join(scratch, 'dry-suite-'));
+  try {
+    await seedSandbox({ ...suite, checks: [] }, { caseDir: root, skillName: suite.name, skillDir: null, scratch: root });
+    return null;
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+}
+
+/**
+ * Generation-time patch gate.  Like setup hooks, this is intentionally owned by execution.ts so
+ * all engine shelling remains behind its subprocess seam.  `git apply` also works outside a repo,
+ * which is exactly the clean-files contract the generator promises.
+ */
+export async function patchApplies(files: Record<string, string>, patch: string, scratch: string): Promise<string | null> {
+  const root = await mkdtemp(join(scratch, 'patch-'));
+  try {
+    for (const [rel, content] of Object.entries(files)) {
+      const violation = casePathViolation(rel);
+      if (violation !== null) return violation;
+      const target = join(root, rel);
+      await mkdir(dirname(target), { recursive: true });
+      await writeFile(target, content, 'utf8');
+    }
+    const patchPath = join(root, '.plants.diff');
+    await writeFile(patchPath, patch, 'utf8');
+    return await runSubprocess('git', ['apply', '--check', '.plants.diff'], root, 'plants_diff does not apply');
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+}
+
 /** The one non-agent subprocess in the engine: the case's own setup hook, inside its sandbox. */
 function runSetup(evalCase: EvalCase, sandbox: string): Promise<void> {
-  return new Promise((resolvePromise, reject) => {
-    const child = spawn('/bin/sh', ['-ce', evalCase.setup!], { cwd: sandbox, stdio: ['ignore', 'ignore', 'pipe'] });
+  return runSubprocess('/bin/sh', ['-ce', evalCase.setup!], sandbox, `case '${evalCase.name}': setup failed`).then((error) => {
+    if (error !== null) throw new Error(error);
+  });
+}
+
+/** The sole captured-output subprocess seam for eval generation and setup hooks. */
+function runSubprocess(file: string, args: string[], cwd: string, label: string): Promise<string | null> {
+  return new Promise((resolvePromise) => {
+    const child = spawn(file, args, { cwd, stdio: ['ignore', 'ignore', 'pipe'] });
     const err: Buffer[] = [];
     const timer = setTimeout(() => child.kill('SIGKILL'), 60_000);
     child.stderr.on('data', (chunk: Buffer) => err.push(chunk));
-    child.on('error', (error) => { clearTimeout(timer); reject(error); });
+    child.on('error', (error) => { clearTimeout(timer); resolvePromise(`${label}: ${error.message}`); });
     child.on('close', (code) => {
       clearTimeout(timer);
-      if (code === 0) resolvePromise();
-      else reject(new Error(`case '${evalCase.name}': setup failed (rc=${code ?? 'killed'}): ${Buffer.concat(err).toString('utf8').slice(-500)}`));
+      resolvePromise(code === 0 ? null : `${label} (rc=${code ?? 'killed'}): ${Buffer.concat(err).toString('utf8').slice(-500)}`);
     });
   });
 }
