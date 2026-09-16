@@ -7,7 +7,7 @@
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 [![Discord](https://img.shields.io/badge/Discord-join%20us-5865F2?logo=discord&logoColor=white)](https://discord.gg/SVVzejCf9)
 
-[Docs](docs/README.md) · [Roadmap](docs/roadmap.md)
+[Docs](docs/README.md) · [Roadmap](docs/roadmap.md) · [Changelog](CHANGELOG.md)
 
 <!-- HERO VIDEO: drag the .mp4 into a GitHub issue or PR comment, copy the
      github.com/user-attachments/assets/... URL it produces, and paste that URL
