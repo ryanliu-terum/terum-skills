@@ -9,13 +9,25 @@ const row = (skill: string, d1: number, d2: number, availability: 'full' | 'part
   ({ skill, label: 'team', d1, d2, autonomy: d1 + d2 === 0 ? null : d1 / (d1 + d2), availability });
 
 describe('mapUsage — never-installed and never-fired are different answers', () => {
-  it('returns null firings for a skill with no placement on this machine', () => {
+  it('returns null firings only when the skill appears nowhere — no row AND no observed firing', () => {
     expect(mapUsage(report([row('other', 1, 0)]), 'deploy-check').firings).toBeNull();
+  });
+
+  it('falls back to the unrecognised tail: a firing counts even if Terum did not place the copy', () => {
+    // The `decision-walk` regression. Four firings were recorded under ~/.claude/skills/ with no
+    // ledger row, and dropping them made the tab claim there was nothing to observe.
+    const r = { ...report([]), unrecognised: [{ skill: 'decision-walk', d1: 1, d2: 3 }] };
+    expect(mapUsage(r, 'decision-walk').firings).toEqual({ d1: 1, d2: 3, autonomy: 0.25, availability: 'unknown', placed: false });
+  });
+
+  it('prefers the ledger row over the tail when a skill somehow appears in both', () => {
+    const r = { ...report([row('a', 2, 0)]), unrecognised: [{ skill: 'a', d1: 9, d2: 9 }] };
+    expect(mapUsage(r, 'a').firings).toMatchObject({ d1: 2, placed: true });
   });
 
   it('returns zeroed firings — NOT null — for a skill placed here that never fired', () => {
     // The case the whole feature exists to surface. Collapsing it into null throws it away.
-    expect(mapUsage(report([row('deploy-check', 0, 0)]), 'deploy-check').firings).toEqual({ d1: 0, d2: 0, autonomy: null, availability: 'full' });
+    expect(mapUsage(report([row('deploy-check', 0, 0)]), 'deploy-check').firings).toEqual({ d1: 0, d2: 0, autonomy: null, availability: 'full', placed: true });
   });
 
   it('carries the autonomy ratio for the used-but-never-chosen case', () => {

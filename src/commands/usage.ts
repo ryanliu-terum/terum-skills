@@ -53,7 +53,6 @@ export interface UsageResult extends UsageReport {
  */
 const CAVEATS: readonly string[] = [
   'Counts are invocations, not outcome-changing uses; reopenings are not deduped.',
-  'A skill placed part-way through the window was only available for part of it.',
   `${DEFAULT_WINDOW_DAYS}-day window: Claude Code prunes transcripts, so earlier use is visible only where this machine has already archived it.`,
 ];
 
@@ -87,19 +86,22 @@ export function placedSkills(placements: Record<string, { team: string; placed_a
  * Every caveat prints every time. A rate that implies the skill *helped* is the one thing this
  * report must never show, and the disclaimers are what keep the counts honest (ryanliu, `8ec17dd7`).
  */
-export function renderReport(report: UsageResult, options: { all?: boolean } = {}): string[] {
+export function renderReport(report: UsageResult, options: { all?: boolean; single?: boolean } = {}): string[] {
   const lines: string[] = [];
-  const width = Math.max(0, ...report.rows.map((row) => row.skill.length), ...(options.all ? report.unrecognised.map((row) => row.skill.length) : []));
+  const width = Math.max(0, ...report.rows.map((row) => row.skill.length), ...(options.all || options.single === true ? report.unrecognised.map((row) => row.skill.length) : []));
   const fired = report.rows.filter((row) => row.d1 + row.d2 > 0);
   for (const row of fired) {
     const note = row.autonomy === 0 ? '  ·  never chosen from its description' : '';
     const partial = row.availability === 'full' ? '' : `  (${row.availability === 'partial' ? 'placed mid-window' : 'availability unknown'})`;
     lines.push(`${row.skill.padEnd(width)}  ${String(row.d1).padStart(2)} autonomous   ${String(row.d2).padStart(2)} explicit${note}${partial}`);
   }
-  if (fired.length === 0) lines.push('No placed skill fired in this window.');
-  lines.push(`${report.unused} skill${report.unused === 1 ? '' : 's'} placed here and never fired in this window.`);
-  if (options.all && report.unrecognised.length > 0) {
-    lines.push('', 'Fired but not placed by this machine (not counted above):');
+  if (fired.length === 0 && report.unrecognised.length === 0) lines.push('No placed skill fired in this window.');
+  // A whole-machine tally means nothing when one skill was asked about, and reads as noise when
+  // that skill has no placement row at all.
+  if (!(options.single === true && report.rows.length === 0)) lines.push(`${report.unused} skill${report.unused === 1 ? '' : 's'} placed here and never fired in this window.`);
+  if ((options.all || options.single === true) && report.unrecognised.length > 0) {
+    if (lines.length > 0) lines.push('');
+    lines.push('Fired here, but not placed by this machine — so how long it was available is unknown:');
     for (const row of report.unrecognised) lines.push(`${row.skill.padEnd(width)}  ${String(row.d1).padStart(2)} autonomous   ${String(row.d2).padStart(2)} explicit`);
   } else if (report.unrecognised.length > 0) {
     lines.push(`${report.unrecognised.length} fired name${report.unrecognised.length === 1 ? '' : 's'} had no placement here; pass --all to list them.`);
@@ -143,12 +145,16 @@ export async function run(args: UsageArgs, io: Prompter): Promise<Result<UsageRe
 
     let placed = placedSkills(config.placements);
     if (args.ref !== undefined) placed = placed.filter((skill) => skill.name === args.ref);
-    const report = aggregate(events, placed, { since, until });
+    let report = aggregate(events, placed, { since, until });
+    // Asked about ONE skill, answer about that skill. The tail otherwise reports every other
+    // unplaced name on the machine, which is noise here — and worse, a skill that fired from a copy
+    // Terum did not place would have its counts withheld behind a `--all` hint.
+    if (args.ref !== undefined) report = { ...report, unrecognised: report.unrecognised.filter((row) => row.skill === args.ref) };
     const result: UsageResult = { ...report, archived, problems, usedArchive, caveats: [...CAVEATS] };
     // The verb renders itself; `execute` writes nothing on success to a terminal, and frame mode
     // carries `result` as the value regardless (lib/execute.ts).
     if (args.json === true) io.print(JSON.stringify(result, null, 2));
-    else for (const line of renderReport(result, { ...(args.all === undefined ? {} : { all: args.all }) })) io.print(line);
+    else for (const line of renderReport(result, { ...(args.all === undefined ? {} : { all: args.all }), single: args.ref !== undefined })) io.print(line);
     return success(result);
   } catch (error) {
     return fromError(error);

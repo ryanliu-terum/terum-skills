@@ -76,15 +76,19 @@ function Activity({skill:s}:{skill:SkillDetail}){
   if(!supported)return <Small>This terum-skills version cannot report skill firings. Update it to see them here.</Small>;
   if(q.isPending)return <SkeletonLine width={220}/>;
   if(q.error)return <ErrorLine>{q.error instanceof Error?q.error.message:String(q.error)}</ErrorLine>;
-  if(firings===null)return <Small>Not installed on this machine, so there is nothing to observe here. Install it and its firings will appear.</Small>;
+  // No row and no observed firing. This model reads transcripts, not the filesystem, so it cannot
+  // say whether the skill is installed -- only that nothing fired. Claiming otherwise contradicted
+  // the rail, which reads "Installed · on this machine" for a hand-placed copy.
+  if(firings===null)return <Small>No firings recorded for this skill in this window.</Small>;
   const total=firings.d1+firings.d2;
-  return <div className="board-column" style={{gap:8}}>
-   <div className="activity-firings"><span className="board-mono">{firings.d1} autonomous</span><span className="board-mono">{firings.d2} explicit</span>
-    {total===0?<Small>Placed here and never fired in this window.</Small>
-     :firings.autonomy===0?<Small>Never chosen from its description — people reach for it by name, the model never picks it.</Small>:null}</div>
-   {firings.availability==='partial'?<Small>Placed part-way through this window, so it was only available for part of it.</Small>
+  return <div className="board-column" style={{gap:10}}>
+   <div className="activity-firings"><span>{firings.d1}</span><Small>autonomous</Small><span>{firings.d2}</span><Small>explicit</Small></div>
+   {total===0?<Small>Placed here and never fired in this window.</Small>
+    :firings.autonomy===0?<Small>Never chosen from its description — people reach for it by name, the model never picks it.</Small>:null}
+   {!firings.placed?<Small>Terum did not place this copy, so how long it has been available is unknown.</Small>
+    :firings.availability==='partial'?<Small>Placed part-way through this window, so it was only available for part of it.</Small>
     :firings.availability==='unknown'?<Small>Availability unknown — the ledger records no placement date for this skill.</Small>:null}
-   {(model?.caveats??[]).map(line=><Small key={line}>{line}</Small>)}
+   <div className="board-column" style={{gap:4}}>{(model?.caveats??[]).map(line=><Small key={line}>{line}</Small>)}</div>
   </div>;
  };
  return <div className="activity-tab" role="region" aria-label="Activity" tabIndex={0}>
