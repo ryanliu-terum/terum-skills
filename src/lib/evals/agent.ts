@@ -16,7 +16,14 @@ import { resolveAgentCommand, type AgentCommandEvidence } from './agent-command.
 
 export const DEFAULT_MODEL = 'sonnet'; // §16.9 [provisional]
 export const DEFAULT_TIMEOUT_MS = 7_200_000;
-const AGENT_TOOLS = 'Bash Read Write Edit Glob Grep';
+/**
+ * Eval purpose suites §5 / §6.2: a heavy skill does its work through the subagent (`Task`) and
+ * `Workflow` tools. Without them on the allowlist the headless session's permission gate
+ * ("Review dynamic workflow before running") blocks the launch and the skill degrades to prose —
+ * measured 2026-09-16 on the hybrid-review suite: three blocked Workflow calls, no `codex exec`.
+ * Every arm gets the same list, so the comparison stays fair.
+ */
+const AGENT_TOOLS = 'Bash Read Write Edit Glob Grep Task Workflow';
 /**
  * Rev 7: appended to every arm run, identically, so the comparison stays fair. A headless agent
  * that stops to ask a question dies silently and scores as skill failure (measured: the dominant

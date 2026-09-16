@@ -10,7 +10,7 @@ import { ConfigStore, createConfigStore, selectTeam } from '../lib/config.js';
 import type { Config } from '../lib/schema.js';
 import { localReceiptsFor, newestReceiptAt } from '../lib/evals/receipt-store.js';
 import { type AgentApi, DEFAULT_MODEL, preflight as systemPreflight, systemAgent } from '../lib/evals/agent.js';
-import { type DroppedCase, type ArmSample, type ComparisonRow, loadCase, runCase } from '../lib/evals/execution.js';
+import { type DroppedCase, type ArmSample, type ComparisonRow, loadCase, loadSuite, runCase, runSuite } from '../lib/evals/execution.js';
 import { generate, type GeneratedAssets } from '../lib/evals/generate.js';
 import { assessHygiene, exemptAuthorEmail, formatHygieneFindings, HygieneRefused, inspectContent, reportHygieneWarnings } from '../lib/evals/hygiene.js';
 import { makeRng } from '../lib/evals/judge.js';
@@ -163,8 +163,10 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
     const wantsTriggers = !args.executionOnly;
     const authoredCasesDir = join(candidateDir, 'evals', 'cases');
     const authoredCaseFiles = (await optionalDirectory(authoredCasesDir)).filter((name) => /\.ya?ml$/i.test(name)).sort();
+    // A suite is one authored execution asset even though it expands into multiple receipt rows.
+    const authoredSuite = await optionalText(join(candidateDir, 'evals', 'suite.yaml'));
     const authoredTrigger = candidateFiles.files.has('evals/triggers.yaml');
-    const assets = { name: local.name, wantsCases, wantsTriggers, authoredCaseFiles, authoredTrigger };
+    const assets = { name: local.name, wantsCases, wantsTriggers, authoredCaseFiles, authoredSuite: authoredSuite !== undefined, authoredTrigger };
     if (args.skipReceipted || args.expectedVersion !== undefined) {
       // Both queue guards are re-keyed on the content hash (§6.6): the bytes, not an ordinal, are what
       // a queued item was queued against.
@@ -294,17 +296,31 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
     const caseNames: string[] = [];
     const rng = makeRng(0);
     let expectedRows = 0;
+    let suiteRan = false;
     if (wantsCases) {
       const caseFiles = generated.cases === undefined ? authoredCaseFiles : (await optionalDirectory(casesDir)).filter((name) => /\.ya?ml$/i.test(name)).sort();
       const selected = args.case === undefined ? caseFiles : caseFiles.filter((file) => file.replace(/\.ya?ml$/i, '') === args.case);
       if (args.case !== undefined && selected.length === 0) return failure(`No eval case named ${args.case} for ${local.name}.`);
-      caseNames.push(...selected.map((file) => file.replace(/\.ya?ml$/i, '')));
+      const selectedNames = selected.map((file) => file.replace(/\.ya?ml$/i, ''));
+      caseNames.push(...selectedNames);
+      // `--case <stem>` addresses authored case FILES only, so it must not pay for the suite's session
+      // (a suite session can run to `timeout_minutes: 120` per arm); a named-case run skips the suite
+      // and says so. Addressing a single sub-case is an open fork (harden r1 on this branch).
+      const suite = authoredSuite === undefined || args.case !== undefined ? undefined : loadSuite(authoredSuite, 'suite');
+      if (authoredSuite !== undefined && args.case !== undefined) io.print(`Skipping evals/suite.yaml: --case ${args.case} names an authored case; the suite runs only in a full run.`);
+      if (suite !== undefined && !suite.ok) return failure(suite.error);
+      if (suite !== undefined) {
+        const authoredNames = authoredCaseFiles.map((file) => file.replace(/\.ya?ml$/i, ''));
+        const collision = suite.value.cases.find((subCase) => authoredNames.includes(subCase.name));
+        if (collision !== undefined) return failure(`suite 'suite': sub-case name '${collision.name}' collides with authored case name`);
+        caseNames.push(suite.value.name);
+      }
       // §6.5: no clone, no team, no id, no receipted version — every one of them means NO incumbent
       // and a single-arm run, exactly as eval-engine §7.1 already names it.
       const incumbent = clone === null || skillId === null ? undefined : await incumbentDir(clone, local.name, await listVersions(clone, local.name), skillId, evaluatedDigest);
       const opponents = incumbent === undefined ? 1 : 2;
       // Includes every selected authored case before requirement probes or setup failures.
-      expectedRows = selected.length * k * opponents;
+      expectedRows = (selected.length + (suite === undefined ? 0 : suite.value.cases.length)) * k * opponents;
       for (const file of selected) {
         const name = file.replace(/\.ya?ml$/i, '');
         const parsed = loadCase(await readFile(join(casesDir, file), 'utf8'), name);
@@ -318,8 +334,21 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
         if (output.skipped) environmentSkips[name] = output.skipped;
         if (output.dropped) droppedCases[name] = output.dropped;
       }
+      if (suite !== undefined) {
+        const output = await runSuite(
+          { agent: args.agent ?? systemAgent, rng, model, judgeModel: args.judgeModel ?? model, log: (line) => io.print(line) },
+          suite.value,
+          { k, skillName: local.name, caseDir: join(candidateDir, 'evals'), arms: { candidate: candidateDir, ...(incumbent === undefined ? {} : { incumbent }) }, scratch, transcriptDir, dependencies },
+        );
+        // A skipped or seed-aborted suite has no shared session, so it cannot invalidate the
+        // independence of ordinary case rows. A dead agent still yields samples and did run.
+        suiteRan ||= output.arms.length > 0;
+        rows.push(...output.rows); arms.push(...output.arms);
+        if (output.skipped) environmentSkips[suite.value.name] = output.skipped;
+        if (output.dropped) droppedCases[suite.value.name] = output.dropped;
+      }
     }
-    const summary = aggregate(rows, arms, expectedRows, environmentSkips, droppedCases);
+    const summary = aggregate(rows, arms, expectedRows, environmentSkips, droppedCases, suiteRan);
     await writeRunTree(runDir, {
       team: teamName, skill_id: skillId, skill_name: local.name, run_id: runId,
       cc_version: preflight.value.ccVersion, model, judge_model: args.judgeModel ?? model,
@@ -407,14 +436,14 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
   } catch (error) { return fromError(error); }
 }
 
-interface PlannedAssets { name: string; wantsCases: boolean; wantsTriggers: boolean; authoredCaseFiles: string[]; authoredTrigger: boolean }
+interface PlannedAssets { name: string; wantsCases: boolean; wantsTriggers: boolean; authoredCaseFiles: string[]; authoredSuite: boolean; authoredTrigger: boolean }
 
 /** The one derivation of what this run would generate, shared by the run body and both pre-run builders. */
 function plannedGeneration(args: EvalArgs, assets: PlannedAssets): { generateCases: boolean; generateTriggers: boolean } {
   // D29: use the assets that are there, generate only the ones that are missing — per asset. With
   // `--gen` deleted nothing can ever overwrite an authored file, which is what makes §6.3's
   // write-back into the user's own skill folder safe.
-  const generateCases = assets.wantsCases && !args.noGen && assets.authoredCaseFiles.length === 0;
+  const generateCases = assets.wantsCases && !args.noGen && assets.authoredCaseFiles.length === 0 && !assets.authoredSuite;
   const generateTriggers = assets.wantsTriggers && !args.noGen && !assets.authoredTrigger;
   return { generateCases, generateTriggers };
 }

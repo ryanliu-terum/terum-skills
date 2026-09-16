@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { AgentRunError, AgentTimeoutError, Transcript, type AgentApi } from '../agent.js';
-import { casePathViolation, ContaminationError, decide, dryRunCase, loadCase, missingRequirements, runCase, seedSandbox, type EvalCase } from '../execution.js';
+import { casePathViolation, ContaminationError, decide, dryRunCase, loadCase, loadSuite, missingRequirements, runCase, runSuite, seedSandbox, type EvalCase, type EvalSuite } from '../execution.js';
 
 let scratch: string;
 beforeEach(async () => { scratch = await mkdtemp(join(tmpdir(), 'exec-')); });
@@ -26,6 +26,27 @@ describe('case loading (§5.1)', () => {
     expect(loadCase('task: x\nbucket: sneaky\n', 'a').ok).toBe(false);
     expect(loadCase('task: x\nfiles: [nope]\n', 'a').ok).toBe(false);
     expect(loadCase('task: x\nchecks:\n  - file_exists: out.txt\n', 'a')).toMatchObject({ ok: true, value: { checks: [{ file_exists: 'out.txt' }] } });
+  });
+});
+
+describe('suite loading (§3.2)', () => {
+  const source = `task: review\nfixture: ../fixtures/repo\nfiles:\n  src/a.ts: export const a = 1\nsetup: touch ready\nrequires: [sh]\ntimeout_minutes: 12\nmax_turns: 40\ncases:\n  - name: defect-a\n    checks: [{ transcript_mentions: defectA }]\n  - name: distractor\n    checks: [{ transcript_omits: correctThing }]\n`;
+
+  it('uses case parsing for shared fields and preserves independently run checks', () => {
+    expect(loadSuite(source, 'suite')).toMatchObject({ ok: true, value: {
+      name: 'suite', task: 'review', fixture: '../fixtures/repo', files: { 'src/a.ts': 'export const a = 1' }, setup: 'touch ready', requires: ['sh'], timeout_minutes: 12, max_turns: 40,
+      cases: [{ name: 'defect-a', checks: [{ transcript_mentions: 'defectA' }] }, { name: 'distractor', checks: [{ transcript_omits: 'correctThing' }] }],
+    } });
+  });
+
+  it('rejects no sub-cases, duplicate names, and forbidden sub-case fields', () => {
+    expect(loadSuite('task: x\ncases: []\n', 'suite')).toMatchObject({ ok: false, error: expect.stringContaining("non-empty 'cases'") });
+    expect(loadSuite('task: x\ncases:\n  - name: same\n    checks: []\n  - name: same\n    checks: []\n', 'suite')).toMatchObject({ ok: false, error: expect.stringContaining("duplicate sub-case name 'same'") });
+    expect(loadSuite('task: x\ncases:\n  - name: bad\n    judge: no\n    checks: []\n', 'suite')).toMatchObject({ ok: false, error: expect.stringContaining("must not carry 'judge'") });
+  });
+
+  it('leaves unknown check kinds for run-time failure just as ordinary cases do', () => {
+    expect(loadSuite('task: x\ncases:\n  - name: unknown\n    checks: [{ invented_check: no }]\n', 'suite')).toMatchObject({ ok: true });
   });
 });
 
@@ -180,6 +201,100 @@ describe('row verdicts (§7.1, port of _decide)', () => {
       rng: () => 0.1,
     }, caseOf({ judge: 'cleaner wins' }), t, t, [], []);
     expect(judged).toMatchObject({ result: 'loss', decidedBy: 'judge', swapped: true });
+  });
+});
+
+describe('suite sessions (§3.3 / §7)', () => {
+  const suiteOf = (extra: Partial<EvalSuite> = {}): EvalSuite => ({
+    name: 'suite', task: 'review the diff', files: {}, requires: [],
+    cases: [
+      { name: 'first-defect', checks: [{ transcript_mentions: 'FIRST' }] },
+      { name: 'second-defect', checks: [{ transcript_mentions: 'SECOND' }] },
+    ],
+    ...extra,
+  });
+
+  const skillDir = async (): Promise<string> => {
+    const path = join(scratch, 'skill');
+    await mkdir(path, { recursive: true });
+    await writeFile(join(path, 'SKILL.md'), '# s');
+    return path;
+  };
+
+  it('runs one arm session per rep, then gives every sub-case its own fraction and copied efficiency', async () => {
+    const skill = await skillDir();
+    let calls = 0;
+    const agent: AgentApi = {
+      runAgent: (_task, cwd) => {
+        calls += 1;
+        const candidate = existsSync(join(cwd, '.claude', 'skills', 's'));
+        return Promise.resolve(transcriptWith(candidate ? 'FIRST' : 'SECOND', [{ type: 'system', subtype: 'init', skills: candidate ? ['s'] : [] }]));
+      },
+      askJson: () => { throw new Error('suite must not judge'); },
+    };
+    const out = await runSuite({ agent, rng: () => 0.5 }, suiteOf(), { k: 1, skillName: 's', caseDir: scratch, arms: { candidate: skill }, scratch, transcriptDir: scratch });
+    expect(calls).toBe(2);
+    expect((await readdir(scratch)).filter((name) => name.startsWith('arm-'))).toHaveLength(2);
+    expect(out.rows).toHaveLength(2);
+    expect(out.rows.map((row) => row.case)).toEqual(['first-defect', 'second-defect']);
+    expect(out.rows.every((row) => row.decided_by === 'checks')).toBe(true);
+    expect(out.arms.filter((sample) => sample.arm === 'candidate')).toMatchObject([
+      { case: 'first-defect', fraction: 1, turns: 4, duration_ms: 9400, cost_usd: 0.12 },
+      { case: 'second-defect', fraction: 0, turns: 4, duration_ms: 9400, cost_usd: 0.12 },
+    ]);
+    await expect(stat(join(scratch, 'suite.candidate.0.jsonl'))).rejects.toThrow(); // stub does not write transcripts
+  });
+
+  it('makes a dead candidate unscored for every sub-case and repeats failed samples', async () => {
+    const skill = await skillDir();
+    const agent: AgentApi = {
+      runAgent: (_task, cwd) => existsSync(join(cwd, '.claude', 'skills', 's'))
+        ? Promise.reject(new AgentTimeoutError('cap'))
+        : Promise.resolve(transcriptWith('FIRST SECOND', [{ type: 'system', subtype: 'init', skills: [] }])),
+      askJson: () => Promise.resolve({}),
+    };
+    const out = await runSuite({ agent, rng: () => 0.5 }, suiteOf(), { k: 1, skillName: 's', caseDir: scratch, arms: { candidate: skill }, scratch, transcriptDir: scratch });
+    expect(out.rows).toHaveLength(2);
+    expect(out.rows.every((row) => row.decided_by === 'candidate-run-failed' && row.outcome === 'tie')).toBe(true);
+    expect(out.arms.filter((sample) => sample.arm === 'candidate')).toMatchObject([{ failed: true, fraction: 0 }, { failed: true, fraction: 0 }]);
+  });
+
+  it('retries a crash using the suite transcript stem and preserves its first attempt', async () => {
+    const skill = await skillDir();
+    let candidateCalls = 0;
+    const agent: AgentApi = {
+      runAgent: async (_task, cwd, options) => {
+        const candidate = existsSync(join(cwd, '.claude', 'skills', 's'));
+        if (candidate && candidateCalls++ === 0) {
+          await writeFile(options!.transcriptPath!, 'first attempt');
+          throw new AgentRunError('flake');
+        }
+        await writeFile(options!.transcriptPath!, 'success');
+        return transcriptWith('FIRST SECOND', [{ type: 'system', subtype: 'init', skills: candidate ? ['s'] : [] }]);
+      },
+      askJson: () => Promise.resolve({}),
+    };
+    const out = await runSuite({ agent, rng: () => 0.5 }, suiteOf(), { k: 1, skillName: 's', caseDir: scratch, arms: { candidate: skill }, scratch, transcriptDir: scratch });
+    expect(out.arms.filter((sample) => sample.arm === 'candidate').every((sample) => sample.retried)).toBe(true);
+    await expect(readFile(join(scratch, 'suite.candidate.0.attempt-1.jsonl'), 'utf8')).resolves.toBe('first attempt');
+    await expect(readFile(join(scratch, 'suite.candidate.0.jsonl'), 'utf8')).resolves.toBe('success');
+  });
+
+  it('keeps the contamination refusal on suite sessions', async () => {
+    const skill = await skillDir();
+    const agent: AgentApi = { runAgent: () => Promise.resolve(transcriptWith('FIRST SECOND')), askJson: () => Promise.resolve({}) };
+    await expect(runSuite({ agent, rng: () => 0.5 }, suiteOf(), { k: 1, skillName: 's', caseDir: scratch, arms: { candidate: skill }, scratch, transcriptDir: scratch })).rejects.toThrow(ContaminationError);
+  });
+
+  it('fails an unknown suite check at run time rather than rejecting the suite asset', async () => {
+    const skill = await skillDir();
+    const agent: AgentApi = {
+      runAgent: (_task, cwd) => Promise.resolve(transcriptWith('anything', [{ type: 'system', subtype: 'init', skills: existsSync(join(cwd, '.claude', 'skills', 's')) ? ['s'] : [] }])),
+      askJson: () => Promise.resolve({}),
+    };
+    const out = await runSuite({ agent, rng: () => 0.5 }, suiteOf({ cases: [{ name: 'unknown', checks: [{ invented_check: 'x' }] }] }), { k: 1, skillName: 's', caseDir: scratch, arms: { candidate: skill }, scratch, transcriptDir: scratch });
+    expect(out.rows[0]).toMatchObject({ decided_by: 'checks-equal-no-judge', outcome: 'tie' });
+    expect(out.rows[0]!.checks_candidate[0]).toMatchObject({ passed: false, detail: expect.stringContaining('unknown check kind') });
   });
 });
 
