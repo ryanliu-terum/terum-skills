@@ -15,6 +15,8 @@ const EXCLUDED = new Set(['node_modules', '.git', '__tests__']);
 /** A path through either of these is never a skill's method: it is neither staged nor reported missing. */
 const NEVER = new Set(['node_modules', '.git']);
 const SCRIPT = new Set(['.js', '.mjs', '.cjs', '.ts', '.sh', '.py']);
+/** `${VAR}/`, `$VAR/`, `"$VAR"/` or `<placeholder>/` right before a token: the prefix stands for the repo root. */
+const PLACEHOLDER = /(["']?)(?:\$\{(\w+)\}|\$(\w+)|<[\w.-]+>)\1\/$/;
 /** Write errors that mean the sandbox already holds the path: the case's seeds and the staged skill win. */
 const OCCUPIED = new Set(['EEXIST', 'ENOTDIR', 'EISDIR']);
 export const DEPENDENCY_CAP_BYTES = 20 * 1024 * 1024;
@@ -118,12 +120,22 @@ function skillBody(source: string): string { return source.replace(/^---\s*\r?\n
 function scriptTokens(body: string): Map<string, string> {
   const tokens = new Map<string, string>();
   for (const match of body.matchAll(TOKEN)) {
+    let token = match[0];
     const at = match.index ?? 0;
-    // No leading `/` (§6.1): an absolute, `~/` or URL path is not repo-relative.
-    if (at > 0 && body[at - 1] === '/') continue;
+    const before = body.slice(Math.max(0, at - 256), at);
+    if (before.endsWith('$')) {
+      // `$VAR/rest`: TOKEN began inside the variable's name. `$HOME` is not the repo root.
+      const [name, ...rest] = token.split('/');
+      if (name === 'HOME' || rest.length < 2) continue;
+      token = rest.join('/');
+    } else if (before.endsWith('/')) {
+      // No leading `/` (§6.1): an absolute, `~/` or URL path is not repo-relative; a root placeholder is.
+      const placeholder = PLACEHOLDER.exec(before);
+      if (placeholder === null || (placeholder[2] ?? placeholder[3]) === 'HOME') continue;
+    }
     // TOKEN already stops before `,;:)`; a sentence-ending period is the one mark it swallows, and
     // stripping it leaves a real extension (`engine.js.` → `engine.js`) intact.
-    const token = match[0].replace(/\.+$/, '');
+    token = token.replace(/\.+$/, '');
     const segments = token.split('/').filter((segment) => segment !== '.');
     if (segments.includes('..') || neverTree(segments)) continue;
     // Only a script is the skill's method; `built/fixed/changed`, `.planning/specs` and

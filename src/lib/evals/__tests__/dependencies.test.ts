@@ -491,6 +491,15 @@ describe('every .claude tree is fenced, at any depth and in any spelling (§6.1 
 });
 
 describe('script spellings (§6.1 rev 3)', () => {
+  it('a ${VAR}/, $VAR/, "$VAR"/ or <placeholder>/ prefix stands for the repo root; $HOME, ~ and / do not', async () => {
+    const { root, skill } = await harnessRepo([
+      'Run ${ROOT}/scripts/a.sh, <repo>/scripts/b.sh, "$CLAUDE_PROJECT_DIR"/.claude/hooks/c.js and $ROOT/tools/d.sh.',
+      'Never $HOME/tools/e.sh, ${HOME}/tools/e.sh, ~/tools/e.sh or /tools/e.sh.',
+    ].join('\n'));
+    for (const path of ['scripts/a.sh', 'scripts/b.sh', '.claude/hooks/c.js', 'tools/d.sh', 'tools/e.sh']) await put(join(root, path), 'echo');
+    await expect(dependencyPlan(skill, root)).resolves.toMatchObject({ staged: ['.claude/hooks/c.js', 'scripts/a.sh', 'scripts/b.sh', 'tools/d.sh'], missing: [] });
+  });
+
   it('two spellings of one script stage it once, under the first spelling', async () => {
     const { root, skill } = await harnessRepo('Run ./scripts/x.sh; scripts/x.sh is idempotent.');
     await put(join(root, 'scripts', 'x.sh'), 'echo x');
