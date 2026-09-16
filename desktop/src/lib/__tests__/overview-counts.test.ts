@@ -4,9 +4,9 @@ import { overviewCopy } from '../overview-copy';
 import type { SkillCard } from '../../backend/types';
 
 type Verdict = NonNullable<SkillCard['localEval']>['verdict'];
-/** Only the two fields these counters read; the rest of the card is irrelevant to them. */
-const card=(verdict:Verdict|null,localMatch:SkillCard['localMatch']='none'):SkillCard=>
- ({localEval:verdict===null?null:{verdict,w:1,l:0,t:0,n:1,lift:0,partial:null,signP:'0.500',runnerHandle:null,version:null},localMatch}) as unknown as SkillCard;
+/** Only the three fields these counters read; the rest of the card is irrelevant to them. */
+const card=(verdict:Verdict|null,localMatch:SkillCard['localMatch']='none',flags:SkillCard['flags']=[]):SkillCard=>
+ ({localEval:verdict===null?null:{verdict,w:1,l:0,t:0,n:1,lift:0,partial:null,signP:'0.500',runnerHandle:null,version:null},localMatch,flags}) as unknown as SkillCard;
 
 describe('evaluatedOverview',()=>{
  it('reports the zero caption only when nothing is evaluated',()=>{
@@ -27,12 +27,28 @@ describe('evaluatedOverview',()=>{
 
 describe('unpublishedCount',()=>{
  it('counts only folders tied to no team skill',()=>{
-  expect(unpublishedCount([card(null,'none'),card(null,'identical'),card(null,'differs')])).toBe(1);
-  expect(unpublishedCount([])).toBe(0);
+  expect(unpublishedCount([card(null,'none'),card(null,'identical'),card(null,'differs')])).toEqual({count:1,unknown:0,total:3});
+  expect(unpublishedCount([])).toEqual({count:0,unknown:0,total:0});
  });
- it('reports an unknown rather than a count when any card predates the overlay',()=>{
-  expect(unpublishedCount([card(null,'none'),card(null,null)])).toBeNull();
-  expect(unpublishedOverview([card(null,'none'),card(null,null)])).toEqual({unpublished:'—',unpublished_note:''});
+ // Until 2026-09-15 one unknown row dashed the whole tile, and since every machine carries a folder the
+ // CLI cannot offer (`notOfferedCard` builds its card with no overlay key), the tile never showed a number.
+ it('keeps counting what it knows and reports the unknowns beside it',()=>{
+  expect(unpublishedCount([card(null,'none'),card(null,null)])).toEqual({count:1,unknown:1,total:2});
+  expect(unpublishedOverview([card(null,'none'),card(null,null)])).toEqual({unpublished:'1',unpublished_note:'never published to the marketplace · 1 folder with an unknown publish state'});
+  expect(unpublishedOverview([card(null,'none'),card(null,'none'),card(null,null),card(null,null)])).toEqual({unpublished:'2',unpublished_note:'never published to the marketplace · 2 folders with an unknown publish state'});
+ });
+ it('reports an unknown rather than a count only when nothing at all is known',()=>{
+  expect(unpublishedOverview([card(null,null),card(null,null)])).toEqual({unpublished:'—',unpublished_note:''});
+ });
+ it('never claims everything is published while a folder is unaccounted for',()=>{
+  expect(unpublishedOverview([card(null,'identical'),card(null,null)])).toEqual({unpublished:'0',unpublished_note:'1 folder with an unknown publish state'});
+ });
+ // The bundled manual setup places can never become a team skill, so it is neither unpublished nor an
+ // unknown: a library of published skills plus the manual still reads a clean 0.
+ it('leaves bundled folders out of the reckoning entirely',()=>{
+  expect(unpublishedCount([card(null,'identical'),card(null,null,['bundled'])])).toEqual({count:0,unknown:0,total:1});
+  expect(unpublishedOverview([card(null,'identical'),card(null,null,['bundled'])])).toEqual({unpublished:'0',unpublished_note:''});
+  expect(unpublishedOverview([card(null,'none'),card(null,null,['bundled'])])).toEqual({unpublished:'1',unpublished_note:'never published to the marketplace'});
  });
  it('drops the note at zero and carries it above zero',()=>{
   expect(unpublishedOverview([card(null,'identical')])).toEqual({unpublished:'0',unpublished_note:''});

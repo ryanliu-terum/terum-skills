@@ -320,8 +320,11 @@ folder's name into Claude Code's own `skillOverrides` setting — the same key t
 `~/.claude/skills` is governed by `~/.claude/settings.json`; a folder under a checkout's `.claude/skills` by that
 checkout's `.claude/settings.local.json`, which the CLI adds to `.git/info/exclude` when it creates the file. The
 result is `{kind, path, name, enabled, settingsFile, changed, notices}`; `changed:false` means the file already said
-so. Every `ls --local` row carries `enabled` read from those same files, so a shell renders state it read, not
-state it remembers. Nothing moves on disk and nothing is written to the team repository.
+so. Every `ls --local` row, and every `notOffered` entry (a symlinked or half-broken folder Claude Code still
+loads), carries `enabled` read from those same files, so a shell renders state it read, not state it remembers;
+the switch belongs to any folder under a skills root, placed by Terum or not. `skill delete` drops the folder's
+`"off"` the way `uninstall-skill` does, and `skill rename` / `skill move` carry it to the new name or the new
+root's settings file. Nothing moves on disk and nothing is written to the team repository.
 
 `skill fix <path>` is a one-shot frame write with no ask. It applies every repair whose outcome is
 fixed by an authority other than the author's typing: quoting a bare frontmatter value that holds `: `

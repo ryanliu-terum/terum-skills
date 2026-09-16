@@ -46,8 +46,10 @@ function recorder(outcome = ok) {
 }
 async function setup() {
   const config = createConfigStore(await temporaryDirectory()), runner = downloader(), execution = recorder();
-  const args: AppUpdateArgs = { config, runner, exec: execution.exec, evidence: mac, release: V };
-  return { config, root: config.root, runner, ...execution, args };
+  // Each run gets its own Applications folder: the default is the real ~/Applications, which may hold the app on the machine running these tests.
+  const applications = join(config.root, 'Applications'), placed = join(applications, `${APP_PRODUCT}.app`);
+  const args: AppUpdateArgs = { config, runner, exec: execution.exec, evidence: mac, release: V, applicationsDir: applications };
+  return { config, root: config.root, runner, ...execution, args, applications, placed };
 }
 async function stageFixture(windowsMode = false) {
   const h = await setup();
@@ -220,9 +222,28 @@ describe('app-update', () => {
     expect(await marker(h.root)).toMatchObject({ phase: 'launched', error: null }); expect(await exists(join(h.root, 'app', V, 'installed.json'))).toBe(false);
     expect(output.lines).toContain(`${APP_PRODUCT} ${V} is installed, but its record could not be written (EPERM: operation not permitted, open); the next check treats it as not installed until a later apply writes it.`);
   });
-  it('--apply-now on macOS opens the bundle without -n', async () => {
+  it('--apply-now on macOS moves the staged bundle onto its fixed path in Applications and opens that path without -n', async () => {
     const h = await stageFixture(), before=await fs.readFile(join(h.root,'run','app.json'),'utf8'); await run({...h.args,applyNow:true},io());
-    expect(h.calls).toEqual([{command:'open',args:[join(h.root,'app',V,`${APP_PRODUCT}.app`)],options:undefined}]); expect(await marker(h.root)).toMatchObject({phase:'launched'}); expect(await exists(join(h.root,'app',V,'installed.json'))).toBe(true); expect(await fs.readFile(join(h.root,'run','app.json'),'utf8')).toBe(before);
+    expect(h.calls).toEqual([{command:'open',args:[h.placed],options:undefined}]);
+    expect(await exists(h.placed)).toBe(true); expect(await fs.readdir(join(h.root,'app',V))).toEqual(['installed.json','staged.json']); expect(await fs.readdir(h.applications)).toEqual([`${APP_PRODUCT}.app`]); expect(await marker(h.root)).toMatchObject({phase:'launched'}); expect(await exists(join(h.root,'app',V,'installed.json'))).toBe(true); expect(await fs.readFile(join(h.root,'run','app.json'),'utf8')).toBe(before);
+  });
+  it('--apply-now on macOS replaces the bundle the running version left in Applications', async () => {
+    const h = await stageFixture(); await fs.mkdir(join(h.placed,'Contents'),{recursive:true}); await fs.writeFile(join(h.placed,'Contents','old'),'previous version');
+    expect(await run({...h.args,applyNow:true},io())).toMatchObject({ok:true,value:{phase:'launched'}});
+    expect(h.calls).toEqual([{command:'open',args:[h.placed],options:undefined}]); expect(await exists(join(h.placed,'Contents','old'))).toBe(false); expect(await fs.readdir(h.applications)).toEqual([`${APP_PRODUCT}.app`]);
+  });
+  it('--apply-now on macOS opens the bundle it already placed when an earlier apply failed at open', async () => {
+    const h = await stageFixture(); const staged = join(h.root,'app',V,`${APP_PRODUCT}.app`);
+    await fs.mkdir(join(staged,'Contents')); await fs.writeFile(join(staged,'Contents','Info.plist'),`<plist><dict><key>CFBundleShortVersionString</key><string>${V}</string></dict></plist>`);
+    expect(await run({...h.args,applyNow:true,exec:recorder({...ok,code:1,stderr:'open refused'}).exec},io())).toMatchObject({ok:true,value:{phase:'failed',error:'open refused'}});
+    expect(await exists(h.placed)).toBe(true); expect(await exists(staged)).toBe(false);
+    expect(await run({...h.args,applyNow:true},io())).toMatchObject({ok:true,value:{phase:'launched'}}); expect(h.calls).toEqual([{command:'open',args:[h.placed],options:undefined}]);
+  });
+  it('--apply-now on macOS removes a stage whose bundle is gone and nothing usable is in place, so --stage downloads again', async () => {
+    const h = await stageFixture(); await fs.rm(join(h.root,'app',V,`${APP_PRODUCT}.app`),{recursive:true});
+    expect(await run({...h.args,applyNow:true},io())).toMatchObject({ok:true,value:{phase:'failed',error:`The staged desktop app ${V} is no longer on disk; download it again.`}});
+    expect(h.calls).toEqual([]); expect(await exists(join(h.root,'app',V))).toBe(false);
+    expect(await run({...h.args,stage:true},io())).toMatchObject({ok:true,value:{staged:true,alreadyStaged:false}}); expect(h.runner.calls.filter(call => call.args[0] === 'release')).toHaveLength(2);  // the fixture's stage, then this one
   });
   it('--apply-now relaunches the surviving exe exactly once when the installer exits non-zero', async () => {
     const h = await stageFixture(true), localAppData=join(h.root,'local'), exe=join(localAppData,APP_PRODUCT,`${APP_SLUG}.exe`), failure=recorder({...ok,code:1,stderr:'kill failed'});
@@ -243,7 +264,7 @@ describe('app-update', () => {
   });
   it('--apply-now survives a prune failure', async () => {
     const h = await stageFixture(); for(const v of ['0.1.7','0.1.8'])await fs.mkdir(join(h.root,'app',v));
-    vi.mocked(fs.rm).mockRejectedValueOnce(Object.assign(new Error('denied'),{code:'EACCES'}));
+    vi.mocked(fs.rm).mockImplementation(async (path, options) => { if (String(path).endsWith('0.1.7')) throw Object.assign(new Error('denied'),{code:'EACCES'}); return real.rm(path, options); });
     expect(await run({...h.args,applyNow:true},io())).toMatchObject({ok:true,value:{phase:'launched'}}); expect(await marker(h.root)).toMatchObject({phase:'launched'});
   });
   it('rejects two modes at once', async () => {

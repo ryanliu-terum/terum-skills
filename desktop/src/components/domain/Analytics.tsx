@@ -17,13 +17,17 @@ export function Analytics({overview:o,zero=false,provenance='sonnet · agent CLI
  // Belt and braces for the tile that had the bug: the zero caption is this row's own copy, so the
  // tile can refuse to draw it over a nonzero count even if a backend hands it down anyway.
  const meterText=evaluated===0||o.meter_text!==o.zero.evaluated?o.meter_text:'';
+ // Same rule for the Unpublished tile, both ways round: a nonzero count never draws the zero copy, and a
+ // zero only earns "Everything here is published" when the backend has nothing left to add — a zero over
+ // unplaced folders says so in its own note (overview-counts.ts) and that note wins over the copy.
+ const unpublishedNote=zero?o.zero.unpublished:unpublished===0?(o.unpublished_note||o.zero.unpublished):o.unpublished_note===o.zero.unpublished?'':o.unpublished_note;
  return <div className="analytics-row">
   <StatTile label="Skills" value={zero?'0':o.skills}>{zero?<Small>{o.zero.skills}</Small>:<Small>{o.skills_note}</Small>}</StatTile>
   <StatTile label="Evaluated" value={zero?'—':o.evaluated}>{zero?<Small>{o.zero.evaluated}</Small>:evaluated===0?
    // Genuinely nothing evaluated: the zero caption alone, no meter and no provenance to attach it to.
    (meterText?<Small>{meterText}</Small>:null)
    :<>{m.total>0?<div className="analytics-meter">{[[m.pass_,'good'],[m.neutral,'text3'],[m.fail,'bad'],[m.total-m.pass_-m.neutral-m.fail,'bg4']].map(([n,color],i)=><span key={i} style={{flexGrow:Number(n),background:`var(--tk-${color})`}}/>)}</div>:null}{meterText?<Small>{meterText}</Small>:null}{provenance?<Small>{provenance}</Small>:null}</>}</StatTile>
-  <StatTile label="Unpublished" value={zero?'0':o.unpublished} grow={2}>{zero||unpublished===0?<Small>{o.zero.unpublished}</Small>:<Small>{o.unpublished_note}</Small>}</StatTile>
+  <StatTile label="Unpublished" value={zero?'0':o.unpublished} grow={2}>{unpublishedNote?<Small>{unpublishedNote}</Small>:null}</StatTile>
   <StatTile label="Needs attention" value={zero?'0':o.attention}>{zero?<Small>{o.zero.attention}</Small>:<><div className="board-column">{o.attention_lines.map(line=><Small key={line}>{line}</Small>)}</div>{o.attention_link&&surfaces.data?.inbox===true?<a href="#/inbox?filter=alerts" style={{fontSize:12}}>{o.attention_link}</a>:null}</>}</StatTile>
  </div>;
 }
