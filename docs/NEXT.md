@@ -22,7 +22,8 @@ the old README (the old text is in git history at `a01ccef0` if a fact needs che
 ## Suggestions
 
 - **CONTRIBUTING.md.** The README invites collaborators but `AGENTS.md` is the only build/gate
-  document, and it is written for agents. A short human one: clone, `npm install`, `npm run check`,
+  document, and it is written for agents. A short human one: clone, `npm ci`, `npm run lint`,
+  `npm run typecheck`, `npm test`,
   where the desktop app lives, how a PR gets merged.
 - **Issue and PR templates** under `.github/`, so "feedback and things people want" arrive in a
   shape that can be triaged. A "skill request" template would match the marketplace direction.
