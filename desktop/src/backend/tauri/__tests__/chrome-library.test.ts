@@ -76,6 +76,34 @@ it('counts never-published folders, and reports a dash when the overlay is absen
  expect(unknown.value.overview).toMatchObject({unpublished:'—',unpublished_note:''});
 });
 
+// The dash used to be the ONLY thing this tile ever drew on a real machine: a not-offered folder gets its
+// card from `notOfferedCard`, which carries no overlay key at all, and one such card sank the whole count.
+// Every machine has at least one — setup places the bundled manual — so the count now names its unknowns
+// beside a real number, and the manual itself is out of the reckoning (it can never become a team skill).
+it('counts around the folders the CLI could not offer instead of dashing the tile (B1)',async()=>{
+ const notOffered=(name:string,reason:string)=>({skillId:null,name,path:'/Users/teddy/.claude/skills/'+name,reason,detail:reason==='invalid-yaml'?'SKILL.md frontmatter is not valid YAML.':'',description:null,frontmatter:null,body:null,category:null,characters:null});
+ const f=chromeLibraryReplay({local:value=>{
+  const section=value.local[0]!,row=section.rows[0]!;
+  section.rows=[{...row,matchedVersion:null,knownToTeam:false,placement:null},{...row,path:row.path+'-second',matchedVersion:'v1',knownToTeam:true,placement:null}];
+  section.notOffered=[notOffered('broken-skill','invalid-yaml'),notOffered('terum-skills','managed-wrapper')];
+ }});
+ const result=await createTauriBackend(f.bridge).library(global);
+ expect(result.ok).toBe(true);if(!result.ok)throw new Error(result.error);
+ expect(result.value.skills).toHaveLength(4);
+ expect(result.value.overview).toMatchObject({unpublished:'1',unpublished_note:'never published to the marketplace · 1 folder with an unknown publish state'});
+});
+// A library whose every publishable folder is known needs no hedge, and the bundled manual must not add one.
+it('reads a clean zero when only the bundled manual is unplaceable (B1)',async()=>{
+ const f=chromeLibraryReplay({local:value=>{
+  const section=value.local[0]!,row=section.rows[0]!;
+  section.rows=[{...row,matchedVersion:'v1',knownToTeam:true,placement:null}];
+  section.notOffered=[{skillId:null,name:'terum-skills',path:'/Users/teddy/.claude/skills/terum-skills',reason:'managed-wrapper',detail:'',description:null,frontmatter:null,body:null,category:null,characters:null}];
+ }});
+ const result=await createTauriBackend(f.bridge).library(global);
+ expect(result.ok).toBe(true);if(!result.ok)throw new Error(result.error);
+ expect(result.value.overview).toMatchObject({unpublished:'0',unpublished_note:''});
+});
+
 // disablePerMachine (2026-09-14): `enabled` is read off the CLI row, which read it off Claude Code's skillOverrides; a CLI too old to send the key reads as enabled, never as off.
 it('carries each row\'s enabled onto its card and treats a missing key as enabled',async()=>{
  const f=chromeLibraryReplay({local:value=>{
