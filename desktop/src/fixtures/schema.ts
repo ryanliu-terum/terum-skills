@@ -55,7 +55,6 @@ SKILL_MD_BODY: z.array(z.tuple([z.enum(["h2","p","ol","code"]),z.union([z.string
 "TEDDY": z.object({"handle":z.string(),"name":z.string(),"role":z.string(),"initials":z.string()}),
 "LENA": z.object({"handle":z.string(),"name":z.string(),"role":z.string(),"initials":z.string()}),
 "TAB_ITEMS": z.array(z.array(z.string())),
-"METHOD": z.string(),
 "FILTER_DEFAULT": z.object({"verdicts":z.array(z.string()),"lift_min":z.number(),"tokens_max":z.number(),"installs_min":z.number()}),
 "INVITEE": z.string(),
 "TEAM_REPO": z.string(),
