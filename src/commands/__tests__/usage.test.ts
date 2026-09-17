@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 import type { Prompter } from '../../lib/prompt.js';
 import { createConfigStore } from '../../lib/config.js';
 import { archivePath } from '../../lib/usage/archive.js';
-import { placedSkills, renderReport, run, type UsageResult } from '../usage.js';
+import { normaliseSince, placedSkills, renderReport, run, type UsageResult } from '../usage.js';
 
 const io = { print: () => undefined } as unknown as Prompter;
 const NOW = Date.parse('2026-09-15T00:00:00.000Z');
@@ -152,6 +152,31 @@ describe('renderReport — §7 output', () => {
   it('discloses a partial-window placement rather than implying full availability', () => {
     expect(renderReport(report([row('a', 0, 1, 'partial')]))[0]).toContain('placed mid-window');
   });
+
+  it('--all folds the tail into the one table rather than stacking a block beneath it (§6)', () => {
+    const r = report([row('chosen', 2, 0)], { unrecognised: [{ skill: 'unplaced', d1: 0, d2: 3 }] });
+    const rendered = renderReport(r, { all: true });
+    expect(rendered.join('\n')).not.toContain('Fired here, but not placed by this machine');
+    // Folded means sorted as one table: never-chosen leads, whether or not the ledger placed it.
+    expect(rendered[0]).toContain('unplaced');
+    expect(rendered[1]).toContain('chosen');
+  });
+
+  it('marks an unplaced name apart from a placed one whose ledger records no date', () => {
+    const rendered = renderReport(report([row('dateless', 0, 1, 'unknown')], {
+      unrecognised: [{ skill: 'unplaced', d1: 0, d2: 1 }],
+    }), { all: true }).join('\n');
+    // Both are 'we cannot say how long it was available', but for different reasons, and a report
+    // that prints one sentence for two different facts is the conflation §2.2 names as the hazard.
+    expect(rendered).toContain('availability unknown');
+    expect(rendered).toContain('not placed by this machine');
+  });
+
+  it('still withholds the tail behind the hint when --all is absent', () => {
+    const rendered = renderReport(report([row('a', 1, 0)], { unrecognised: [{ skill: 'unplaced', d1: 6, d2: 0 }] })).join('\n');
+    expect(rendered).toContain('pass --all to list them');
+    expect(rendered).not.toContain('not placed by this machine');
+  });
 });
 
 describe('usage — a skill Terum did not place still has observable firings', () => {
@@ -180,5 +205,39 @@ describe('usage — a skill Terum did not place still has observable firings', (
     expect(rendered).toContain('1 autonomous');
     expect(rendered).not.toContain('--all');
     expect(rendered).not.toContain('No placed skill fired');
+  });
+});
+
+describe('usage — --since is compared as a string, so it has to be a real one', () => {
+  it('rejects an almost-right bound instead of silently reporting an empty window', async () => {
+    const m = await machine([typed('codex-spec', '2026-09-01T00:00:00.000Z')], PLACED);
+    // '2026-9-1' sorts ABOVE '2026-09-15' — '9' beats '0' at the third character — so unvalidated
+    // it would filter every event out and print a confident zero.
+    const result = await run({ config: m.store, projectsRoot: m.projectsRoot, since: '2026-9-1', now: () => NOW }, io);
+    if (result.ok) throw new Error('expected a malformed --since to fail, not to report an empty window');
+    expect(result.error).toContain('--since needs an ISO-8601 date');
+    expect(result.error).toContain('2026-9-1');
+  });
+
+  it('accepts a bare date, the form a person actually types, and reads it as midnight UTC', async () => {
+    const m = await machine([typed('codex-spec', '2026-09-01T12:00:00.000Z')], PLACED);
+    const result = await run({ config: m.store, projectsRoot: m.projectsRoot, since: '2026-09-01', now: () => NOW }, io);
+    expect(result.ok).toBe(true);
+    expect(result.value!.since).toBe('2026-09-01T00:00:00.000Z');
+    expect(result.value!.rows.find((row) => row.skill === 'codex-spec')!.d2).toBe(1);
+  });
+
+  it('canonicalises an offset timestamp so the downstream comparison is between like forms', () => {
+    expect(normaliseSince('2026-09-01T00:00:00+02:00')).toBe('2026-08-31T22:00:00.000Z');
+  });
+
+  it('rejects a date the calendar does not have', () => {
+    expect(normaliseSince('2026-02-30')).toBeNull();
+    expect(normaliseSince('2026-13-01')).toBeNull();
+  });
+
+  it('rejects prose, which Date.parse would otherwise take a guess at', () => {
+    expect(normaliseSince('last week')).toBeNull();
+    expect(normaliseSince('')).toBeNull();
   });
 });
