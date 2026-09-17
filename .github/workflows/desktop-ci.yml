@@ -23,7 +23,7 @@ defaults:
     working-directory: desktop
 
 jobs:
-  gates:
+  desktop-gates:
     runs-on: ubuntu-latest
     permissions:
       contents: read
