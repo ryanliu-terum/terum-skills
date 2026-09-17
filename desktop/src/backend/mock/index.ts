@@ -229,6 +229,24 @@ export function createMockBackend(opts:{latencyMs?:number}={}):Backend & {readon
    *  chosen by the model. `pr-review` is placed and silent. `incident-triage` fired but Terum never
    *  placed it, the case that wrongly read "not installed" before. A skill in neither map has
    *  nothing recorded, which is not a claim about whether it is installed. */
+  /** Screening is an ACTION that spends model calls, so the mock returns a `Run` like `eval` does,
+   *  not a resolved read. `deploy-check` is the interesting fixture: 0 autonomous / 4 explicit in
+   *  `usage`, so it is the skill a reader would actually screen. `pr-review` is the 0/0 row -- the
+   *  ambiguous one this whole feature exists to disambiguate -- and it comes back empty, which is a
+   *  real answer, not a failure. */
+  misses:({ref})=>long('library',async()=>{
+   const name=ref.replace(/^local:/,'').split('/').pop()??ref;
+   const found:Record<string,{prompt:string;ts:string;noPriorContext:boolean}[]>={
+    'deploy-check':[
+     {prompt:'ship the new build to staging and make sure nothing is broken',ts:'2026-09-12T09:14:00.000Z',noPriorContext:false},
+     {prompt:'ok do that before we cut the release',ts:'2026-09-10T16:02:00.000Z',noPriorContext:true},
+    ],
+    'incident-triage':[{prompt:'prod is throwing 500s on checkout, where do I start',ts:'2026-09-13T22:41:00.000Z',noPriorContext:false}],
+   };
+   return ok({candidates:found[name]??[],screened:340,calls:34,truncated:false,unjudged:0,
+    since:'2026-09-08T00:00:00.000Z',until:'2026-09-15T00:00:00.000Z',
+    caveats:['Counts are candidates for review, not measured misses; the judge sees a trimmed window, not the session.','Skills with no recorded placement date were left out of the catalogue and cannot appear here.']});
+  }),
   usage:async({ref})=>{
    const name=ref.replace(/^local:/,'').split('/').pop()??ref;
    const placed:Record<string,{d1:number;d2:number}>={'deploy-check':{d1:0,d2:4},'release-notes':{d1:3,d2:1},'pr-review':{d1:0,d2:0}};

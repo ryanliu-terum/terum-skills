@@ -2,6 +2,9 @@
 
 .partial-banner{box-sizing:content-box}
 
+.misses-candidate{display:flex;flex-direction:column;gap:3px;padding:8px 12px;border-radius:6px;background:var(--tk-bg2);border:1px solid var(--tk-border1);max-width:760px;box-sizing:border-box}
+.misses-candidate>div{font-size:13px;line-height:19px;color:var(--tk-text2);text-wrap:pretty;overflow-wrap:anywhere}
+
 .skill-install-scopes{display:flex;flex-direction:column;gap:1px}
 
 /* Note on the `.detail-repo` rule in the block above: the rail is 280px and clips (.detail-rail
