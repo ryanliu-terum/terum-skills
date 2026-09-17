@@ -12,7 +12,7 @@ import { basename } from 'node:path';
 import { ConfigStore, createConfigStore } from '../lib/config.js';
 import type { WithForm } from '../lib/invocation.js';
 import type { Prompter } from '../lib/prompt.js';
-import { fromError, type Result, success } from '../lib/result.js';
+import { failure, fromError, type Result, success } from '../lib/result.js';
 import { aggregate, type PlacedSkill, type UsageReport } from '../lib/usage/aggregate.js';
 import { appendEvents, archivePath, readArchive } from '../lib/usage/archive.js';
 import { eventKey } from '../lib/usage/archive.js';
@@ -57,6 +57,29 @@ const CAVEATS: readonly string[] = [
 ];
 
 /**
+ * `--since` reaches `aggregate`'s `within`, which compares ISO strings directly. That is only sound
+ * between canonical forms: an almost-right bound like `2026-9-1` sorts *above* `2026-09-15` — `'9'`
+ * beats `'0'` at the third character — so an unvalidated flag reports an empty window instead of
+ * failing, and an empty window is indistinguishable from "nothing fired". Validate the shape, then
+ * canonicalise, so every comparison downstream is between like forms.
+ *
+ * A bare `YYYY-MM-DD` is accepted and read as midnight UTC; it is the form a person actually types.
+ * Returns null when the input is not a date this can compare.
+ */
+export function normaliseSince(since: string): string | null {
+  const dateOnly = /^\d{4}-\d{2}-\d{2}$/.test(since);
+  if (!dateOnly && !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2})$/.test(since)) return null;
+  // The calendar check cannot be left to `Date.parse`: it rejects month 13, but *rolls over* day
+  // overflow, so `2026-02-30` would quietly become March 2 — a wrong window, silently, which is the
+  // whole failure this function exists to stop.
+  const [year, month, day] = since.slice(0, 10).split('-').map(Number);
+  const asWritten = new Date(Date.UTC(year!, month! - 1, day!));
+  if (asWritten.getUTCMonth() + 1 !== month || asWritten.getUTCDate() !== day) return null;
+  const ms = Date.parse(dateOnly ? `${since}T00:00:00.000Z` : since);
+  return Number.isNaN(ms) ? null : new Date(ms).toISOString();
+}
+
+/**
  * Rows come from the placements ledger (D1). The key is the placement path; the skill's name is its
  * basename, which is what the Placer wrote and what a firing record names.
  *
@@ -88,22 +111,39 @@ export function placedSkills(placements: Record<string, { team: string; placed_a
  */
 export function renderReport(report: UsageResult, options: { all?: boolean; single?: boolean } = {}): string[] {
   const lines: string[] = [];
-  const width = Math.max(0, ...report.rows.map((row) => row.skill.length), ...(options.all || options.single === true ? report.unrecognised.map((row) => row.skill.length) : []));
+  // §6: `--all` folds the tail INTO the main table. §5's "never folded into a row" governs the data
+  // model — an unplaced name never becomes a `UsageRow`, because `label` and `availability` are
+  // ledger evidence and would have to be invented for it. This is the render layer, where both
+  // rules hold: the entry appears in the one table, marked for exactly what the ledger cannot say.
+  const folded = options.all === true || options.single === true;
   const fired = report.rows.filter((row) => row.d1 + row.d2 > 0);
-  for (const row of fired) {
-    const note = row.autonomy === 0 ? '  ·  never chosen from its description' : '';
-    const partial = row.availability === 'full' ? '' : `  (${row.availability === 'partial' ? 'placed mid-window' : 'availability unknown'})`;
-    lines.push(`${row.skill.padEnd(width)}  ${String(row.d1).padStart(2)} autonomous   ${String(row.d2).padStart(2)} explicit${note}${partial}`);
+  const entries = [
+    ...fired.map((row) => ({
+      skill: row.skill, d1: row.d1, d2: row.d2, autonomy: row.autonomy,
+      // 'unknown' here means the ledger placed it but recorded no date — NOT the same claim as
+      // 'not placed by this machine' below, so the two never share a marker.
+      mark: row.availability === 'full' ? '' : `  (${row.availability === 'partial' ? 'placed mid-window' : 'availability unknown'})`,
+    })),
+    ...(folded ? report.unrecognised.map((row) => ({
+      skill: row.skill, d1: row.d1, d2: row.d2,
+      autonomy: row.d1 + row.d2 === 0 ? null : row.d1 / (row.d1 + row.d2),
+      mark: '  (not placed by this machine)',
+    })) : []),
+  ];
+  // Re-sorted as one table, on aggregate's comparator: never-chosen first, then most-asked-for.
+  // Appending the tail unsorted would leave it a block in all but name, which is what §6 rejects.
+  entries.sort((a, b) => (a.autonomy ?? 1) - (b.autonomy ?? 1) || b.d2 - a.d2 || a.skill.localeCompare(b.skill));
+
+  const width = Math.max(0, ...entries.map((entry) => entry.skill.length));
+  for (const entry of entries) {
+    const note = entry.autonomy === 0 ? '  ·  never chosen from its description' : '';
+    lines.push(`${entry.skill.padEnd(width)}  ${String(entry.d1).padStart(2)} autonomous   ${String(entry.d2).padStart(2)} explicit${note}${entry.mark}`);
   }
   if (fired.length === 0 && report.unrecognised.length === 0) lines.push('No placed skill fired in this window.');
   // A whole-machine tally means nothing when one skill was asked about, and reads as noise when
   // that skill has no placement row at all.
   if (!(options.single === true && report.rows.length === 0)) lines.push(`${report.unused} skill${report.unused === 1 ? '' : 's'} placed here and never fired in this window.`);
-  if ((options.all || options.single === true) && report.unrecognised.length > 0) {
-    if (lines.length > 0) lines.push('');
-    lines.push('Fired here, but not placed by this machine — so how long it was available is unknown:');
-    for (const row of report.unrecognised) lines.push(`${row.skill.padEnd(width)}  ${String(row.d1).padStart(2)} autonomous   ${String(row.d2).padStart(2)} explicit`);
-  } else if (report.unrecognised.length > 0) {
+  if (!folded && report.unrecognised.length > 0) {
     lines.push(`${report.unrecognised.length} fired name${report.unrecognised.length === 1 ? '' : 's'} had no placement here; pass --all to list them.`);
   }
   lines.push('', ...report.caveats);
@@ -117,7 +157,8 @@ export async function run(args: UsageArgs, io: Prompter): Promise<Result<UsageRe
     const now = args.now?.() ?? Date.now();
     const until = new Date(now).toISOString();
     const defaultSince = new Date(now - DEFAULT_WINDOW_DAYS * 86_400_000).toISOString();
-    const since = args.since ?? defaultSince;
+    const since = args.since === undefined ? defaultSince : normaliseSince(args.since);
+    if (since === null) return failure(`--since needs an ISO-8601 date or timestamp, like 2026-09-01 or 2026-09-01T00:00:00Z; received ${args.since}.`);
 
     const problems: { path: string; reason: string }[] = [];
     const scanned = await scanTranscripts({
