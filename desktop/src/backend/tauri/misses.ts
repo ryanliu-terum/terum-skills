@@ -24,19 +24,23 @@ export const cliMisses = z.object({
 export type CliMisses = z.infer<typeof cliMisses>;
 
 /**
- * One skill's candidates out of the run.
+ * The whole machine's screening result.
  *
- * Unlike `mapUsage`, this is called WITH a ref: the CLI filters before the judge is even asked, and
- * more to the point a whole-machine run would judge every prompt against every skill and bill for
- * it. Narrowing is the cheap thing here, not the expensive thing.
+ * Called ONCE with no ref, and the panel filters — the same rule `mapUsage` follows, for a sharper
+ * reason. Passing `misses <skill>` does NOT narrow the work: `judgePrompts` judges every harvested
+ * prompt against the full as-of-T catalog and `reconcile` filters only afterwards, so a per-skill
+ * run costs exactly what a whole-machine run costs. Calling it once per skill page would therefore
+ * bill the user once per page for a result the first run already computed.
  *
  * The caveats are carried through verbatim and the panel prints them every time. They are the only
  * thing standing between a candidate list and a reader who takes it for a measured miss rate.
  */
-export function mapMisses(report: CliMisses, skill: string): MissesModel {
-  const group = report.groups.find(g => g.skill === skill);
+export function mapMisses(report: CliMisses): MissesModel {
   return {
-    candidates: (group?.candidates ?? []).map(c => ({ prompt: c.prompt, ts: c.ts, noPriorContext: c.noPriorContext })),
+    groups: report.groups.map(g => ({
+      skill: g.skill,
+      candidates: g.candidates.map(c => ({ prompt: c.prompt, ts: c.ts, noPriorContext: c.noPriorContext })),
+    })),
     screened: report.screened,
     calls: report.calls,
     truncated: report.truncated,

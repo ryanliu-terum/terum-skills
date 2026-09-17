@@ -115,32 +115,37 @@ function Activity({skill:s}:{skill:SkillDetail}){
 function Misses({skill:s}:{skill:SkillDetail}){
  const backend=useBackend(),features=useFeatures(),supported=features?.misses===true;
  const print=useContext(PrintContext),unexpected=useContext(PromptContext);
+ const client=useQueryClient();
  const [busy,setBusy]=useState(false);
  const [error,setError]=useState<string|null>(null);
- const [model,setModel]=useState<MissesModel|null>(null);
+ // Read-only cache lookup, NOT a query: it returns what a previous screen already paid for and can
+ // never trigger a fetch. One run covers the whole machine, so any skill page can read this.
+ const model=client.getQueryData<MissesModel>(['misses'])??null;
  const active=useRef<ReturnType<Backend['misses']>|null>(null);
  async function screen(){
   if(busy||active.current)return;
   setBusy(true);setError(null);
   try{
-   const run=backend.misses({ref:s.name});
+   const run=backend.misses();
    active.current=run;
    const result=await driveRun<MissesModel>(run,{},unexpected,print);
    if(active.current!==run)return;
    active.current=null;setBusy(false);
    if(!result.ok){setError(result.error);return;}
-   setModel(result.value);
+   // Shared, so the next skill page reads it instead of paying for the same judgments again.
+   client.setQueryData(['misses'],result.value);
   }catch(e){active.current=null;setBusy(false);setError(e instanceof Error?e.message:'Screening failed.');}
  }
  if(!supported)return null;
+ const mine=model?.groups.find(g=>g.skill===s.name)?.candidates??[];
  return <div className="board-column" style={{gap:10,paddingTop:16}}>
   <SectionLabel trailing={model?<Small>{model.screened} prompts screened · {model.calls} model calls</Small>:undefined}>Miss screening</SectionLabel>
-  {model===null&&!busy&&error===null?<Small>Ask a model which prompts this skill looked right for but never fired on. Spends about one model call per ten prompts screened.</Small>:null}
+  {model===null&&!busy&&error===null?<Small>Ask a model which prompts this skill looked right for but never fired on. Screens every skill at once — about one model call per ten prompts, and the result serves every skill page.</Small>:null}
   {error!==null?<ErrorLine>{error}</ErrorLine>:null}
-  {model!==null?(model.candidates.length===0
+  {model!==null?(mine.length===0
    ?<Small>Nothing worth reviewing — no prompt in this window looked like it needed this skill.</Small>
    :<div className="board-column" style={{gap:8}}>
-     {model.candidates.map(c=><div key={c.ts+c.prompt} className="misses-candidate">
+     {mine.map(c=><div key={c.ts+c.prompt} className="misses-candidate">
       <Small>{c.ts.slice(0,10)}{c.noPriorContext?' · no prior context':''}</Small>
       <div>{c.prompt}</div>
      </div>)}

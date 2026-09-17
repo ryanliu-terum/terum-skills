@@ -86,7 +86,7 @@ export interface UsageModel{firings:{d1:number;d2:number;autonomy:number|null;av
  *  NEVER a measured miss rate. The CLI refuses to compute one and this model must not invent one:
  *  the judge sees a trimmed window, not the session. `truncated` means --limit dropped pairs;
  *  `unjudged` means a model call failed, so those prompts were scored in neither direction. */
-export interface MissesModel{candidates:{prompt:string;ts:string;noPriorContext:boolean}[];screened:number;calls:number;truncated:boolean;unjudged:number;since:string;until:string;caveats:string[]}
+export interface MissesModel{groups:{skill:string;candidates:{prompt:string;ts:string;noPriorContext:boolean}[]}[];screened:number;calls:number;truncated:boolean;unjudged:number;since:string;until:string;caveats:string[]}
 export type EvalReportModel=Pick<SkillDetail,'receipt'|'summary'|'incumbentLift'|'reportNumbers'|'history'|'versions'|'latestState'|'invalidReceiptFile'|'localRuns'|'evalEstimate'|'evalEstimateText'|'evalEstimateTip'|'scoreFractions'|'wlt'>;
 // D22: `update` (update-available) and `review` (PR review) are the two mechanisms this refactor
 // deletes, so they are no longer item kinds. design.json still records their canvas rows; the mock

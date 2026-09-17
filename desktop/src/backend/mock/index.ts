@@ -234,16 +234,14 @@ export function createMockBackend(opts:{latencyMs?:number}={}):Backend & {readon
    *  `usage`, so it is the skill a reader would actually screen. `pr-review` is the 0/0 row -- the
    *  ambiguous one this whole feature exists to disambiguate -- and it comes back empty, which is a
    *  real answer, not a failure. */
-  misses:({ref})=>long('library',async()=>{
-   const name=ref.replace(/^local:/,'').split('/').pop()??ref;
-   const found:Record<string,{prompt:string;ts:string;noPriorContext:boolean}[]>={
-    'deploy-check':[
+  misses:()=>long('library',async()=>{
+   return ok({groups:[
+    {skill:'deploy-check',candidates:[
      {prompt:'ship the new build to staging and make sure nothing is broken',ts:'2026-09-12T09:14:00.000Z',noPriorContext:false},
      {prompt:'ok do that before we cut the release',ts:'2026-09-10T16:02:00.000Z',noPriorContext:true},
-    ],
-    'incident-triage':[{prompt:'prod is throwing 500s on checkout, where do I start',ts:'2026-09-13T22:41:00.000Z',noPriorContext:false}],
-   };
-   return ok({candidates:found[name]??[],screened:340,calls:34,truncated:false,unjudged:0,
+    ]},
+    {skill:'incident-triage',candidates:[{prompt:'prod is throwing 500s on checkout, where do I start',ts:'2026-09-13T22:41:00.000Z',noPriorContext:false}]},
+   ],screened:340,calls:34,truncated:false,unjudged:0,
     since:'2026-09-08T00:00:00.000Z',until:'2026-09-15T00:00:00.000Z',
     caveats:['Counts are candidates for review, not measured misses; the judge sees a trimmed window, not the session.','Skills with no recorded placement date were left out of the catalogue and cannot appear here.']});
   }),

@@ -919,8 +919,8 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
      *  `cached` would hand a second click a stale answer for a run the user just paid for, and the
      *  serve session is reads-only precisely so a long-lived process never owns agent children.
      *  `touches` is empty -- screening changes no local state, so nothing needs invalidating. */
-    misses({ref,since,limit}) {
-      return run(['misses','--json',...(since?['--since',since]:[]),...(limit===undefined?[]:['--limit',String(limit)]),'--',ref],cliMisses,(value)=>mapMisses(value,ref),[]);
+    misses(q) {
+      return run(['misses','--json',...(q?.since?['--since',q.since]:[]),...(q?.limit===undefined?[]:['--limit',String(q.limit)])],cliMisses,mapMisses,[]);
     },
     async receipts({skillId,version},options) {
       const {report,lines}=await readEvalReport(skillId,undefined,options);

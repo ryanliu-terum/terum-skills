@@ -44,12 +44,22 @@ it('states the cost before it is spent, not after', async () => {
   expect(screen.getByText(/one model call per ten prompts/)).toBeTruthy();
 });
 
-it('screens on click and renders the candidates', async () => {
+it('screens on click and renders this skill candidates', async () => {
   const { spy } = await openActivity();
   fireEvent.click(button());
   await screen.findByText(/ship the new build to staging/);
   expect(spy).toHaveBeenCalledTimes(1);
-  expect(spy.mock.calls[0]![0]).toMatchObject({ ref: 'deploy-check' });
+  // No ref: a per-skill call costs exactly what a whole-machine call costs, because the judge runs
+  // over every prompt either way. One run answers every skill page.
+  expect(spy.mock.calls[0]![0]).toBeUndefined();
+});
+
+it('shows only THIS skill rows out of the whole-machine result', async () => {
+  await openActivity();
+  fireEvent.click(button());
+  await screen.findByText(/ship the new build to staging/);
+  // incident-triage is in the same report and must not leak onto deploy-check's page.
+  expect(screen.queryByText(/prod is throwing 500s/)).toBeNull();
 });
 
 it('marks a candidate the judge saw with no prior context', async () => {

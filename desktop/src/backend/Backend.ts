@@ -53,7 +53,7 @@ export interface Backend {
    *  It is deliberately NOT in SERVE_READ_VERBS: that list is reads-only because a long-lived
    *  process must not own agent children, which is exactly why `eval` is excluded from it too. Each
    *  call is a fresh one-shot CLI process. */
-  misses(q: { ref: string; since?: string; limit?: number }): Run<MissesModel>;
+  misses(q?: { since?: string; limit?: number }): Run<MissesModel>;
   receipts(q: { skillId: string; version: string }, options?: ReadOptions): Promise<Result<Receipt | null>>;
   inbox(q?: undefined, options?: ReadOptions): Promise<Result<InboxItem[]>>;
   catalog(q?: { q?: string }, options?: ReadOptions): Promise<Result<Catalog>>;
