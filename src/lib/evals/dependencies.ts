@@ -44,8 +44,8 @@ export interface DependencyPlan {
   /**
    * Repo-relative paths `stageDependencies` copies, each once, ancestors first: a staged script's
    * parent directory, or the script alone when that directory is the repo root, a `.claude`
-   * directory, or would carry the skill folder or `.claude/skills` (§6.1: never the skill's own
-   * folder or an ancestor of it).
+   * directory, or would carry the skill folder, the real target of its `evals/` or `fixtures/`, or
+   * `.claude/skills` (§6.1: never the skill's own folder, its answer key, or an ancestor of either).
    */
   copies: string[];
   /** Every directory and file `stageDependencies` writes for `copies`, parents first; the cap summed exactly these bytes. */
@@ -54,8 +54,11 @@ export interface DependencyPlan {
 
 export interface HeavyScan { heavy: boolean; evidence: string; }
 
-/** Real paths every staged path is measured against. */
-interface Fence { root: string; skill: string; installed: string; }
+/**
+ * Real paths every staged path is measured against. `keys` holds the real paths of the skill's
+ * `evals/` and `fixtures/` (the answer key): either may be a link out of the skill folder.
+ */
+interface Fence { root: string; skill: string; installed: string; keys: string[]; }
 
 /**
  * A named script as `dependencyPlan` resolved it: the one link a copy's walk still reads through.
@@ -94,7 +97,8 @@ async function real(path: string): Promise<string> {
 
 /**
  * A real path staging never reads: the skill folder, anything in it, or an ancestor of it; the same
- * for `<root>/.claude/skills`, which may be a link; a `.claude/skills` tree or `.git` anywhere
+ * for the real targets of its `evals/` and `fixtures/`, and for `<root>/.claude/skills`, each of
+ * which may be a link; a `.claude/skills` tree or `.git` anywhere
  * (measured from the repo root when the path is inside it); and the repo root or an ancestor.
  * `node_modules` is not fenced by real path: a harness that links `.claude/workflows` into an
  * installed package, in the repository or under a global npm prefix, is the skill's method. A token
@@ -104,7 +108,8 @@ function fenced(fence: Fence, path: string): boolean {
   const parts = (inside(fence.root, path) ? relative(fence.root, path) : path).split(sep);
   return gitTree(parts) || skillsTree(parts) || inside(path, fence.root)
     || inside(fence.skill, path) || inside(path, fence.skill)
-    || inside(fence.installed, path) || inside(path, fence.installed);
+    || inside(fence.installed, path) || inside(path, fence.installed)
+    || fence.keys.some((key) => inside(key, path) || inside(path, key));
 }
 
 /** A sandbox-relative path no dependency copy writes: a `.claude/skills` tree or a `.claude/settings*.json`, at any depth. */
@@ -173,7 +178,10 @@ export async function dependencyPlan(skillDir: string, cwd = process.cwd()): Pro
   // The names skill staging may put this skill under: `.claude/skills/<name>/…` is its own file.
   const names = new Set([basename(resolve(skillDir)), ...(typeof declared === 'string' ? [declared] : [])].map(folded));
   const skill = await real(skillDir);
-  const fence: Fence | null = root === null ? null : { root: await real(root), skill, installed: await real(join(root, '.claude', 'skills')) };
+  // The answer key may be a link whose real target lies outside the skill folder.
+  const keys: string[] = [];
+  for (const name of ['evals', 'fixtures']) if (await exists(join(skillDir, name))) keys.push(await real(join(skillDir, name)));
+  const fence: Fence | null = root === null ? null : { root: await real(root), skill, installed: await real(join(root, '.claude', 'skills')), keys };
   const found: { token: string; copy: string; source: string }[] = [];
   /** Every named script, keyed by its folded repo-relative path. */
   const named = new Map<string, Named>();
@@ -201,7 +209,7 @@ export async function dependencyPlan(skillDir: string, cwd = process.cwd()): Pro
     const parent = dirname(candidate);
     const parentReal = await real(parent);
     // The script travels alone when its directory is the repo root, a `.claude` directory (settings,
-    // notes and skills live there), or would carry the skill folder or `.claude/skills`.
+    // notes and skills live there), or would carry the skill folder, its answer key or `.claude/skills`.
     const alone = parent === root || claudeDir(parent) || claudeDir(parentReal) || inside(parent, resolve(skillDir)) || fenced(fence!, parentReal);
     const to = relative(root!, candidate);
     named.set(folded(to), { to, from: target, bytes: info.size, dev: info.dev, ino: info.ino });

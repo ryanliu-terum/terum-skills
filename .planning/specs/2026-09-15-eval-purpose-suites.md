@@ -411,7 +411,10 @@ anything in a `.claude/skills` tree at any depth (the root one belongs to skill
 staging, and another skill's files are not this skill's method); and a script whose
 **real** path, resolved from the repo root, lies in the skill folder, a
 `.claude/skills` tree or `.git`, so `.claude/skills/<self>/run.sh`, a global skill
-under a git-tracked HOME, and a link into a skill are all caught. The folder copy
+under a git-tracked HOME, and a link into a skill are all caught. The real paths of
+the skill's `evals/` and `fixtures/` are fenced like the skill folder, since either
+may be a link out of it: a script inside one is never kept, and a script whose
+directory would carry one travels alone (see Stage). The folder copy
 already carries a token that resolves to a file inside the skill folder, or that
 names `.claude/skills/<this skill>/<file>` for a file the folder has (except under
 `evals/` and `fixtures/`, which never travel). A script token that resolves nowhere,

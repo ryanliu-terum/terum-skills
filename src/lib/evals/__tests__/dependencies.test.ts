@@ -1,5 +1,5 @@
 import { chmod, lstat, mkdir, mkdtemp, readdir, readFile, rm, stat, symlink, truncate, writeFile } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -34,19 +34,24 @@ async function link(target: string, path: string): Promise<void> {
   await symlink(target, path);
 }
 
-/** Sandbox-relative paths of every symlink in an arm; dependency staging never writes one. */
-async function linksIn(arm: string): Promise<string[]> {
+/** Sandbox-relative paths of every entry in an arm that `keep` selects, links not followed. */
+async function entriesIn(arm: string, keep: (entry: { isSymbolicLink(): boolean; isFile(): boolean }) => boolean): Promise<string[]> {
   const found: string[] = [];
   const walk = async (dir: string): Promise<void> => {
     for (const entry of await readdir(dir, { withFileTypes: true })) {
       const path = join(dir, entry.name);
-      if (entry.isSymbolicLink()) found.push(relative(arm, path));
-      else if (entry.isDirectory()) await walk(path);
+      if (keep(entry)) found.push(relative(arm, path));
+      if (entry.isDirectory()) await walk(path);
     }
   };
   await walk(arm);
-  return found;
+  return found.sort();
 }
+
+/** Sandbox-relative paths of every symlink in an arm; dependency staging never writes one. */
+const linksIn = (arm: string): Promise<string[]> => entriesIn(arm, (entry) => entry.isSymbolicLink());
+/** Sandbox-relative paths of every regular file in an arm. */
+const filesIn = (arm: string): Promise<string[]> => entriesIn(arm, (entry) => entry.isFile());
 
 /**
  * A repository shaped like the harness: `.git`, a `state` skill carrying its answer key
@@ -94,6 +99,17 @@ async function arm(caseDir: string, skillName: string, skillDir: string | null, 
 
 const seed = (root: string, skillDir: string | null, plan: Awaited<ReturnType<typeof dependencyPlan>>, files: Record<string, string> = {}): Promise<string> =>
   arm(root, 'state', skillDir, plan, files);
+
+/** Two names differing only in case are one entry here (APFS by default), so a case-pair test has nothing to tell apart. */
+const caseInsensitiveTmp = ((): boolean => {
+  const probe = mkdtempSync(join(tmpdir(), 'dependency-case-'));
+  try {
+    writeFileSync(join(probe, 'a'), '');
+    return existsSync(join(probe, 'A'));
+  } finally {
+    rmSync(probe, { recursive: true, force: true });
+  }
+})();
 
 describe('heavy and dependency scans (§5 / §6.1)', () => {
   it('detects a Workflow tool, observes a frontmatter override, and plans named repository scripts', async () => {
@@ -330,6 +346,27 @@ describe('dependency staging never hands an arm the skill, its answer key, or th
     expect(existsSync(join(sandbox, 'skills-src', 'goal', 'evals'))).toBe(false);
   });
 
+  it.each(['evals', 'fixtures'])('the skill\'s %s/ linked out of its folder is fenced like the skill: a script beside the target travels alone, a script inside it is refused (R2-M1)', async (name) => {
+    const { root, skill } = await harnessRepo('Run shared/run.sh first; shared/state-key/grade.sh scores it.');
+    await rm(join(skill, name), { recursive: true });
+    await put(join(root, 'shared', 'run.sh'), 'echo shared');
+    await put(join(root, 'shared', 'lib.sh'), 'echo lib');
+    await put(join(root, 'shared', 'state-key', 'cases.yaml'), 'answer: key');
+    await put(join(root, 'shared', 'state-key', 'grade.sh'), 'echo grade');
+    await link(join(root, 'shared', 'state-key'), join(skill, name));
+    const plan = await dependencyPlan(skill, root);
+    // `shared/` would carry the answer key, so the method travels without its directory, exactly as
+    // a script beside the skill folder does; `grade.sh` is part of the key, so it never travels.
+    expect(plan).toMatchObject({ staged: ['shared/run.sh'], missing: [], skipped: [], copies: ['shared/run.sh'] });
+    expect(plan.entries.map((entry) => entry.to)).toEqual([join('shared', 'run.sh')]);
+    const sandbox = await seed(root, skill, plan);
+    expect(await readFile(join(sandbox, 'shared', 'run.sh'), 'utf8')).toBe('echo shared');
+    const files = await filesIn(sandbox);
+    expect(files.filter((path) => path.endsWith('cases.yaml') || path.endsWith('grade.sh') || path.endsWith('expected.txt'))).toEqual([]);
+    for (const path of [['shared', 'lib.sh'], ['shared', 'state-key'], ['.claude', 'skills', 'state', name]]) expect(existsSync(join(sandbox, ...path))).toBe(false);
+    expect(await linksIn(sandbox)).toEqual([]);
+  });
+
   it('a skill outside .claude/skills naming a script under .claude does not bring .claude along', async () => {
     const { root, skill } = await sourceRepo('Run .claude/tool.sh first');
     await put(join(root, '.claude', 'tool.sh'), 'echo tool');
@@ -413,6 +450,38 @@ describe('a copy never follows or writes a link beneath a copied directory (§6.
     expect(await readFile(join(sandbox, 'tools', 'sub', 'engine.js'), 'utf8')).toBe('export const engine = "outside";');
     expect(existsSync(join(sandbox, 'tools', 'sub', 'helper.js'))).toBe(true);
     expect(existsSync(join(sandbox, 'tools', 'sub', 'alias.js'))).toBe(false);
+    expect(await linksIn(sandbox)).toEqual([]);
+  });
+
+  it('a named script whose directory is a link inside another copy root arrives with its siblings, as real files (TQ2)', async () => {
+    const { root, skill } = await harnessRepo('node tools/run.js, then tools/wf/engine.js');
+    await put(join(root, 'tools', 'run.js'), 'export {};');
+    await put(join(root, 'shared-wf', 'engine.js'), 'export const engine = true;');
+    await put(join(root, 'shared-wf', 'helper.js'), 'export const helper = true;');
+    await link('../shared-wf', join(root, 'tools', 'wf'));
+    const plan = await dependencyPlan(skill, root);
+    // The outer walk skips the `tools/wf` link, so the nested root is not already written: it copies itself.
+    expect(plan).toMatchObject({ staged: ['tools/run.js', 'tools/wf/engine.js'], missing: [], skipped: [], copies: ['tools', 'tools/wf'] });
+    const sandbox = await seed(root, skill, plan);
+    expect((await lstat(join(sandbox, 'tools', 'wf'))).isDirectory()).toBe(true);
+    for (const name of ['engine.js', 'helper.js']) expect((await lstat(join(sandbox, 'tools', 'wf', name))).isFile()).toBe(true);
+    expect(await readFile(join(sandbox, 'tools', 'wf', 'engine.js'), 'utf8')).toBe('export const engine = true;');
+    expect(await linksIn(sandbox)).toEqual([]);
+  });
+
+  it.skipIf(caseInsensitiveTmp)('of two links differing only in case, only the one whose target is the named script is written (TQ3)', async () => {
+    const { root, skill } = await harnessRepo('node tools/engine.js');
+    const outside = await tmp('dependency-dotfiles-');
+    await put(join(outside, 'engine.js'), 'export const engine = "named";');
+    await put(join(outside, 'other.js'), 'export const engine = "other";');
+    await link(join(outside, 'engine.js'), join(root, 'tools', 'engine.js'));
+    await link(join(outside, 'other.js'), join(root, 'tools', 'Engine.js'));
+    const plan = await dependencyPlan(skill, root);
+    expect(plan).toMatchObject({ staged: ['tools/engine.js'], missing: [], copies: ['tools'] });
+    expect(plan.entries.map((entry) => entry.to)).toEqual(['tools', join('tools', 'engine.js')]);
+    const sandbox = await seed(root, skill, plan);
+    expect(await readFile(join(sandbox, 'tools', 'engine.js'), 'utf8')).toBe('export const engine = "named";');
+    expect(existsSync(join(sandbox, 'tools', 'Engine.js'))).toBe(false);
     expect(await linksIn(sandbox)).toEqual([]);
   });
 
@@ -618,6 +687,38 @@ describe('every .claude tree is fenced, at any depth and in any spelling (§6.1 
     for (const path of [['.claude', 'handoff.md'], ['.claude', 'settings.json'], ['.claude', 'skills', 'state', 'evals']]) {
       expect(existsSync(join(sandbox, ...path))).toBe(false);
     }
+  });
+
+  // In the two tests below `.claude/skills` links out of `.claude`, so no fence covers `.claude`
+  // itself and only its name keeps the script alone: each pins one of the two name tests.
+  it('a script directory whose real path is .claude, reached under another name, travels alone (TQ1, the real-path name)', async () => {
+    const { root, skill } = await sourceRepo('Run tools/claude/statusline.js first.');
+    await link('../skills-src', join(root, '.claude', 'skills'));
+    await put(join(root, '.claude', 'statusline.js'), 'export {};');
+    await put(join(root, '.claude', 'handoff.md'), 'handoff notes');
+    await put(join(root, '.claude', 'settings.json'), '{"hooks":{}}');
+    await link('../.claude', join(root, 'tools', 'claude'));
+    const plan = await dependencyPlan(skill, root);
+    expect(plan).toMatchObject({ staged: ['tools/claude/statusline.js'], missing: [], skipped: [], copies: ['tools/claude/statusline.js'] });
+    const sandbox = await arm(root, 'goal', skill, plan);
+    expect(await readFile(join(sandbox, 'tools', 'claude', 'statusline.js'), 'utf8')).toBe('export {};');
+    for (const name of ['settings.json', 'handoff.md', 'skills']) expect(existsSync(join(sandbox, 'tools', 'claude', name))).toBe(false);
+    expect(await linksIn(sandbox)).toEqual([]);
+  });
+
+  it('a script under .claude by path, where .claude links to another name, travels alone (TQ1, the path name)', async () => {
+    const { root, skill } = await sourceRepo('Run .claude/statusline.js first.');
+    await put(join(root, 'dotclaude', 'statusline.js'), 'export {};');
+    await put(join(root, 'dotclaude', 'handoff.md'), 'handoff notes');
+    await put(join(root, 'dotclaude', 'settings.json'), '{"hooks":{}}');
+    await link('../skills-src', join(root, 'dotclaude', 'skills'));
+    await link('dotclaude', join(root, '.claude'));
+    const plan = await dependencyPlan(skill, root);
+    expect(plan).toMatchObject({ staged: ['.claude/statusline.js'], missing: [], skipped: [], copies: ['.claude/statusline.js'] });
+    const sandbox = await arm(root, 'goal', skill, plan);
+    expect(await readFile(join(sandbox, '.claude', 'statusline.js'), 'utf8')).toBe('export {};');
+    for (const name of ['settings.json', 'handoff.md']) expect(existsSync(join(sandbox, '.claude', name))).toBe(false);
+    expect(await linksIn(sandbox)).toEqual([]);
   });
 
   it("a package directory is staged without its nested .claude/skills or settings", async () => {
