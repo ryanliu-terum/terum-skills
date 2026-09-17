@@ -1909,7 +1909,7 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "file": "README.md",
     "line": 139,
     "policy": "prose",
-    "pattern": "| Evals | `validate <path\\|name>` · `eval <skill…>` · `eval-report <skill>` · `usage [skill]` |"
+    "pattern": "| Evals | `validate <path\\|name>` · `eval <skill…>` · `eval-report <skill>` · `usage [skill]` · `misses [skill]` |"
   },
   {
     "file": "README.md",

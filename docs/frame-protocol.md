@@ -169,6 +169,7 @@ hello lines under `.planning/codex-runs/*/frames/` precede B5's three skill verb
   "eval",
   "eval-report",
   "usage",
+  "misses",
   "install",
   "uninstall-skill",
   "uninstall",
