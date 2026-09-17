@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { guard, GuardContext, GuardError, isMember } from '../guard.js';
+import { guard, guardRawPush, GuardContext, GuardError, isMember } from '../guard.js';
 
 const ID = '4e80fd2a-04bc-4d9f-88f7-a849d92879f1';
 const team = (overrides: Record<string, unknown> = {}) => JSON.stringify({ layout_version: 2, name: 't', categories: [], global: [], projects: { p: { remotes: ['github.com/a/p'], skills: [] } }, archived: [], policy: { publish: 'pr', skill_license: 'UNLICENSED' }, ...overrides });
@@ -93,6 +93,42 @@ describe('rows c, d, e — team.json', () => {
     refuse(tree({ 'team.json': [team({ archived: ['me', 'x'] }), team({ archived: ['y'] })] }), { action: 'join', handle: 'me' }, 'team.json');
     refuse(tree({ 'team.json': [team({ archived: ['me'] }), team({ archived: [], global: [ID] })] }), { action: 'join', handle: 'me' }, 'team.json');
     expect(() => guard(tree({ 'team.json': [team(), undefined] }), { action: 'join', handle: 'me' })).toThrow(/missing team\.json/);
+  });
+});
+
+describe('row h — a category is added by hand, on the raw-push path only', () => {
+  const SEED = ['debugging', 'docs', 'misc'];
+  const seeded = (categories: string[]) => team({ categories });
+  const push = (before: string, after: string) => () => guardRawPush(tree({ 'team.json': [before, after] }), { handle: 'me', author: ME });
+
+  it('accepts a new category inserted anywhere, including before the catch-all misc', () => {
+    expect(push(seeded(SEED), seeded(['debugging', 'docs', 'review', 'misc']))).not.toThrow();
+    expect(push(seeded(SEED), seeded([...SEED, 'review']))).not.toThrow();
+    expect(push(seeded(SEED), seeded(['review', ...SEED]))).not.toThrow();
+    expect(push(seeded(SEED), seeded(['review', 'ops', ...SEED]))).not.toThrow();
+    expect(push(seeded([]), seeded(['review']))).not.toThrow();
+  });
+
+  it('refuses a removal, a rename, a duplicate, and a blank', () => {
+    expect(push(seeded(SEED), seeded(['debugging', 'docs']))).toThrow(/Push guard refused team\.json/);
+    expect(push(seeded(SEED), seeded(['debugging', 'documentation', 'misc', 'review']))).toThrow(/Push guard refused team\.json/);
+    expect(push(seeded(SEED), seeded([...SEED, 'docs']))).toThrow(/Push guard refused team\.json/);
+    expect(push(seeded(SEED), seeded([...SEED, '  ']))).toThrow(/Push guard refused team\.json/);
+    // An unchanged team.json is a no-op the skill-list row already tolerates, and it cannot reach
+    // here in practice: guardPush only passes paths the diff actually touched.
+    expect(push(seeded(SEED), seeded(SEED))).not.toThrow();
+  });
+
+  it('refuses a category change bundled with any other field', () => {
+    const before = seeded(SEED);
+    expect(() => guardRawPush(tree({ 'team.json': [before, team({ categories: [...SEED, 'review'], archived: ['someone'] })] }), { handle: 'me', author: ME })).toThrow(/Push guard refused team\.json/);
+    expect(() => guardRawPush(tree({ 'team.json': [before, team({ categories: [...SEED, 'review'], policy: { publish: 'push', skill_license: 'UNLICENSED' } })] }), { handle: 'me', author: ME })).toThrow(/Push guard refused team\.json/);
+  });
+
+  it('stays refused on the safeWrite write-guard path: no verb writes categories', () => {
+    for (const action of ['publish', 'join', 'sync', 'team-remove'] as const) {
+      refuse(tree({ 'team.json': [seeded(SEED), seeded([...SEED, 'review'])] }), { action, handle: 'me' }, 'team.json');
+    }
   });
 });
 

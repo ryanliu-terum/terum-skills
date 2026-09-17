@@ -3,7 +3,7 @@ import { handleSchema, parseJson, parseSkillFrontmatter, personSchema, Team, tea
 import { canonicalSkillDigest } from './skills.js';
 
 /**
- * §6.0 write guard — the authorization model. A diff may touch only the rows a–f below, and
+ * §6.0 write guard — the authorization model. A diff may touch only the rows a–h below, and
  * nothing else is writable. It runs inside the safeWrite loop against the tree the mutation
  * actually produced; teamRepo additionally proves the staged diff equals that tree's changes.
  */
@@ -77,8 +77,8 @@ function permitsReceipt(tree: GuardTree, path: string): boolean {
  * D12's clone-local half, run by the pre-push hook. A raw `git push` cannot say which verb it
  * is, so every row any verb could take stands open to the pusher's own identity — README (f),
  * their own people file (b), a team.json change shaped like publish (c), team remove (d) or a
- * rejoin (e), and skill folders they author (a). Nothing else. Accidents, not abuse: the hook is
- * bypassable and the bypass is attributed.
+ * rejoin (e), a new category (h), and skill folders they author (a). Nothing else. Accidents, not
+ * abuse: the hook is bypassable and the bypass is attributed.
  */
 export function guardRawPush(tree: GuardTree, identity: { handle: string; author?: string }, form?: InvocationForm): void {
   const handle = normalizeHandle(identity.handle);
@@ -87,7 +87,7 @@ export function guardRawPush(tree: GuardTree, identity: { handle: string; author
     if (path === `people/${handle}.json`) continue;
     if (path === 'team.json') {
       if (teamChangeOpenToRawPush(tree, handle)) continue;
-      throw new GuardError('Push guard refused team.json: only the skill lists (publish), an archive of someone else (team remove), or your own rejoin may change it');
+      throw new GuardError('Push guard refused team.json: only the skill lists (publish), an archive of someone else (team remove), your own rejoin, or a new category may change it');
     }
     const skill = /^skills\/([^/]+)\/.+$/.exec(path);
     // Ownership is an author comparison (§5.3): with no local identity there is nothing to compare, and
@@ -101,7 +101,7 @@ export function guardRawPush(tree: GuardTree, identity: { handle: string; author
 function teamChangeOpenToRawPush(tree: GuardTree, handle: string): boolean {
   let before: Team; let after: Team;
   try { before = parseTeam(tree.before('team.json')); after = parseTeam(tree.after('team.json')); } catch { return false; }
-  if (onlySkillListsChanged(before, after) || archivedRemovedOnly(before, after, handle)) return true;
+  if (onlySkillListsChanged(before, after) || archivedRemovedOnly(before, after, handle) || categoriesAppendedOnly(before, after)) return true;
   const appended = after.archived.filter((item) => !before.archived.includes(item));
   return appended.length === 1 && appended[0] !== handle && archivedAppendedOnly(before, after, appended[0]!);
 }
@@ -190,6 +190,24 @@ function archivedAppendedOnly(before: Team, after: Team, target: string): boolea
 /** Row e: `archived` becomes exactly `before.archived` minus the actor's own handle — a set difference, never a length check. */
 function archivedRemovedOnly(before: Team, after: Team, handle: string): boolean {
   return sameExcept(before, after, ['archived']) && before.archived.includes(handle) && same(after.archived, before.archived.filter((item) => item !== handle));
+}
+
+/**
+ * Row h: the category list grows by hand — the M7 takeover walk's D3 ruling that "adding a category
+ * is an admin hand edit like a project". Open to a raw push only: no verb writes `categories`, so
+ * `guardTeam` deliberately still refuses it on the safeWrite path. Append-only as a set, not by
+ * position, because the starter list keeps its catch-all `misc` last and a new bucket is inserted
+ * before it. A removal or a rename stays refused: it would orphan every skill whose frontmatter
+ * names the category it deleted, and `skillFrontmatterSchema` gives those rows nowhere to land.
+ */
+function categoriesAppendedOnly(before: Team, after: Team): boolean {
+  if (!sameExcept(before, after, ['categories'])) return false;
+  if (after.categories.length <= before.categories.length) return false;
+  // A duplicate or a blank is not a category anyone can browse to; refuse rather than push garbage
+  // the desktop's facet list would render as an empty bucket.
+  if (new Set(after.categories).size !== after.categories.length) return false;
+  if (after.categories.some((name) => name.trim() === '')) return false;
+  return before.categories.every((name) => after.categories.includes(name));
 }
 
 /** §4.1 membership: active iff the people file exists (and parses as that handle) AND the handle is not archived. */

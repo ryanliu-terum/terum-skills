@@ -70,6 +70,15 @@ describe('guard-push — the clone-local pre-push hook entry (D12)', () => {
     expect(await run({ remote: 'origin', url: fixture.bare, refs: ['refs/heads/main', selfArchived, 'refs/heads/main', main], cwd: clone, config: store }, io)).toMatchObject({ ok: false, error: expect.stringContaining('Push guard refused team.json') });
     const otherArchived = await commitOnMain(clone, 'team.json', `${JSON.stringify({ ...team, archived: ['other'] }, null, 2)}\n`);
     expect(await run({ remote: 'origin', url: fixture.bare, refs: ['refs/heads/main', otherArchived, 'refs/heads/main', main], cwd: clone, config: store }, io)).toMatchObject({ ok: true, value: { checked: 1 } });
+    // Row h: an admin adds a category by hand (M7 D3). Growing the list is open to a raw push; shrinking it is not.
+    const categoryAdded = await commitOnMain(clone, 'team.json', `${JSON.stringify({ ...team, categories: [...team.categories.slice(0, -1), 'review', ...team.categories.slice(-1)] }, null, 2)}\n`);
+    expect(await run({ remote: 'origin', url: fixture.bare, refs: ['refs/heads/main', categoryAdded, 'refs/heads/main', main], cwd: clone, config: store }, io)).toMatchObject({ ok: true, value: { checked: 1 } });
+    // The seed team ships an empty list, so a removal has no before-image to shrink here; guard.test.ts
+    // covers removals and renames directly. What this path must prove is that growth is not a loophole.
+    const blankCategory = await commitOnMain(clone, 'team.json', `${JSON.stringify({ ...team, categories: [''] }, null, 2)}\n`);
+    expect(await run({ remote: 'origin', url: fixture.bare, refs: ['refs/heads/main', blankCategory, 'refs/heads/main', main], cwd: clone, config: store }, io)).toMatchObject({ ok: false, error: expect.stringContaining('Push guard refused team.json') });
+    const categoryPlusRename = await commitOnMain(clone, 'team.json', `${JSON.stringify({ ...team, categories: ['review'], name: 'hijacked' }, null, 2)}\n`);
+    expect(await run({ remote: 'origin', url: fixture.bare, refs: ['refs/heads/main', categoryPlusRename, 'refs/heads/main', main], cwd: clone, config: store }, io)).toMatchObject({ ok: false, error: expect.stringContaining('Push guard refused team.json') });
     // A deletion is pure loss the guard cannot attribute: a teammate's pending publish branch exists nowhere else.
     expect(await run({ remote: 'origin', url: fixture.bare, refs: ['(delete)', ZERO, 'refs/heads/publish/mine', endorsed], cwd: clone, config: store }, io)).toMatchObject({ ok: false, error: expect.stringContaining('Push guard refused deleting refs/heads/publish/mine') });
     // `git push --prune` arrives as one delete line per remote branch this clone does not carry — main itself included; the first refusal aborts the whole push.
