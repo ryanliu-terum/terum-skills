@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { dependencyPlan, scanHeavySkill } from '../dependencies.js';
+import { ANSWER_KEY_ENTRY_CAP, dependencyPlan, scanHeavySkill } from '../dependencies.js';
 import { seedSandbox, type EvalCase } from '../execution.js';
 
 const evalCase: EvalCase = { name: 'c', task: 'work', files: {}, checks: [], requires: [] };
@@ -784,5 +784,150 @@ describe('script spellings (§6.1 rev 3)', () => {
     const { root, skill } = await harnessRepo('Run ./scripts/x.sh; scripts/x.sh is idempotent.');
     await put(join(root, 'scripts', 'x.sh'), 'echo x');
     await expect(dependencyPlan(skill, root)).resolves.toMatchObject({ staged: ['./scripts/x.sh'], missing: [], copies: ['scripts'] });
+  });
+});
+
+/** The bytes every answer-key file in the tests below holds; no arm file may contain them. */
+const KEY = 'answer-key-bytes';
+
+/** Sandbox-relative paths of every regular file in an arm that holds answer-key bytes. */
+async function keyBytesIn(arm: string): Promise<string[]> {
+  const hits: string[] = [];
+  for (const path of await filesIn(arm)) if ((await readFile(join(arm, path), 'utf8')).includes(KEY)) hits.push(path);
+  return hits;
+}
+
+/** Each named `<dir>/run.sh` beside a `<dir>/lib.sh` sibling, which travels only when the directory does. */
+async function scripts(root: string, dirs: string[]): Promise<void> {
+  for (const dir of dirs) {
+    await put(join(root, dir, 'run.sh'), `echo ${dir}`);
+    await put(join(root, dir, 'lib.sh'), 'echo lib');
+  }
+}
+
+describe('everything the answer key reaches through a link is fenced, at any depth (§6.1 rev 3, R3-H1)', () => {
+  it.each([
+    { label: 'a directory link inside evals/', at: ['evals', 'cases'], target: ['shared', 'cases'], directory: true },
+    { label: 'a file link inside evals/', at: ['evals', 'suite.yaml'], target: ['shared', 'suite.yaml'], directory: false },
+    { label: 'a directory link inside fixtures/', at: ['fixtures', 'repo'], target: ['shared', 'repo'], directory: true },
+  ])('$label: a script beside its target travels alone, a script inside it is refused', async ({ at, target, directory }) => {
+    const grade = [...target, 'grade.sh'].join('/');
+    const { root, skill } = await harnessRepo(directory ? `Run shared/run.sh first; ${grade} scores it.` : 'Run shared/run.sh first.');
+    await scripts(root, ['shared']);
+    if (directory) {
+      await put(join(root, ...target, 'case.yaml'), KEY);
+      await put(join(root, ...target, 'grade.sh'), `echo ${KEY}`);
+    } else {
+      await put(join(root, ...target), KEY);
+    }
+    await link(join(root, ...target), join(skill, ...at));
+    const plan = await dependencyPlan(skill, root);
+    expect(plan).toMatchObject({ staged: ['shared/run.sh'], missing: [], skipped: [], copies: ['shared/run.sh'] });
+    expect(plan.entries.map((entry) => entry.to)).toEqual([join('shared', 'run.sh')]);
+    const sandbox = await seed(root, skill, plan);
+    expect(await readFile(join(sandbox, 'shared', 'run.sh'), 'utf8')).toBe('echo shared');
+    expect(existsSync(join(sandbox, 'shared', 'lib.sh'))).toBe(false);
+    expect(await keyBytesIn(sandbox)).toEqual([]);
+    expect(await linksIn(sandbox)).toEqual([]);
+  });
+
+  it('a two-hop chain is fenced: a link inside a linked directory, and a link to a link', async () => {
+    const { root, skill } = await harnessRepo('Run shared/run.sh, then data/run.sh and other/run.sh.');
+    await scripts(root, ['shared', 'data', 'other']);
+    await put(join(root, 'shared', 'cases', 'case.yaml'), KEY);
+    await put(join(root, 'data', 'deep', 'case.yaml'), KEY);
+    await put(join(root, 'other', 'key.yaml'), KEY);
+    await link(join(root, 'shared', 'cases'), join(skill, 'evals', 'cases'));
+    // Reached only through the first link: the second hop.
+    await link(join(root, 'data', 'deep'), join(root, 'shared', 'cases', 'deep'));
+    await link(join(root, 'other', 'key.yaml'), join(root, 'hop.yaml'));
+    await link(join(root, 'hop.yaml'), join(skill, 'fixtures', 'alias.yaml'));
+    const plan = await dependencyPlan(skill, root);
+    expect(plan).toMatchObject({
+      staged: ['data/run.sh', 'other/run.sh', 'shared/run.sh'], missing: [], skipped: [],
+      copies: ['data/run.sh', 'other/run.sh', 'shared/run.sh'],
+    });
+    const sandbox = await seed(root, skill, plan);
+    for (const dir of ['shared', 'data', 'other']) {
+      expect(await readFile(join(sandbox, dir, 'run.sh'), 'utf8')).toBe(`echo ${dir}`);
+      expect(existsSync(join(sandbox, dir, 'lib.sh'))).toBe(false);
+    }
+    expect(await keyBytesIn(sandbox)).toEqual([]);
+    expect(await linksIn(sandbox)).toEqual([]);
+  });
+
+  it('a loop beneath evals/ and fixtures/ ends, and a link listed after it is still fenced', async () => {
+    const { root, skill } = await harnessRepo('Run keys/run.sh, then tools/run.sh.');
+    await scripts(root, ['keys', 'tools']);
+    await put(join(root, 'keys', 'zz', 'case.yaml'), KEY);
+    await link('..', join(skill, 'evals', 'loop'));
+    await link('.', join(skill, 'evals', 'self'));
+    await link('../evals', join(skill, 'fixtures', 'back'));
+    await link(join(root, 'keys', 'zz'), join(skill, 'evals', 'zz'));
+    const plan = await dependencyPlan(skill, root);
+    // `tools/` carries nothing the key reaches, so it still travels whole: the walk finished.
+    expect(plan).toMatchObject({ staged: ['keys/run.sh', 'tools/run.sh'], missing: [], skipped: [], copies: ['keys/run.sh', 'tools'] });
+    const sandbox = await seed(root, skill, plan);
+    expect(existsSync(join(sandbox, 'keys', 'run.sh'))).toBe(true);
+    expect(existsSync(join(sandbox, 'keys', 'lib.sh'))).toBe(false);
+    expect(existsSync(join(sandbox, 'tools', 'lib.sh'))).toBe(true);
+    expect(await keyBytesIn(sandbox)).toEqual([]);
+    expect(await linksIn(sandbox)).toEqual([]);
+  });
+
+  it.skipIf(asRoot)('an unreadable directory or a dangling link inside evals/ is skipped, not thrown, and a link listed after it is still fenced', async () => {
+    const { root, skill } = await harnessRepo('Run shared/run.sh, then tools/run.sh.');
+    await scripts(root, ['shared', 'tools']);
+    await put(join(root, 'shared', 'cases', 'case.yaml'), KEY);
+    await put(join(skill, 'evals', 'locked', 'case.yaml'), 'locked');
+    await link(join(root, 'nowhere'), join(skill, 'evals', 'dangling'));
+    await link(join(root, 'shared', 'cases'), join(skill, 'evals', 'zz'));
+    await locked([[join(skill, 'evals', 'locked'), 0o000]], async () => {
+      const plan = await dependencyPlan(skill, root);
+      expect(plan).toMatchObject({ staged: ['shared/run.sh', 'tools/run.sh'], missing: [], skipped: [], copies: ['shared/run.sh', 'tools'] });
+      const sandbox = await seed(root, skill, plan);
+      expect(existsSync(join(sandbox, 'shared', 'run.sh'))).toBe(true);
+      expect(existsSync(join(sandbox, 'tools', 'lib.sh'))).toBe(true);
+      expect(await keyBytesIn(sandbox)).toEqual([]);
+      expect(await linksIn(sandbox)).toEqual([]);
+    });
+  });
+
+  it.skipIf(asRoot)('a directory inside evals/ the eval may search but not list sends every named script alone', async () => {
+    const { root, skill } = await harnessRepo('Run shared/run.sh, then tools/run.sh.');
+    await scripts(root, ['shared', 'tools']);
+    await put(join(root, 'shared', 'cases', 'case.yaml'), KEY);
+    // The runner can still reach `evals/sealed/zz` by name; the walk cannot see it.
+    await link(join(root, 'shared', 'cases'), join(skill, 'evals', 'sealed', 'zz'));
+    await locked([[join(skill, 'evals', 'sealed'), 0o111]], async () => {
+      const plan = await dependencyPlan(skill, root);
+      expect(plan).toMatchObject({ staged: ['shared/run.sh', 'tools/run.sh'], missing: [], skipped: [], copies: ['shared/run.sh', 'tools/run.sh'] });
+      const sandbox = await seed(root, skill, plan);
+      expect(existsSync(join(sandbox, 'shared', 'run.sh'))).toBe(true);
+      expect(existsSync(join(sandbox, 'tools', 'run.sh'))).toBe(true);
+      expect(existsSync(join(sandbox, 'tools', 'lib.sh'))).toBe(false);
+      expect(await keyBytesIn(sandbox)).toEqual([]);
+      expect(await linksIn(sandbox)).toEqual([]);
+    });
+  });
+
+  it('past the entry cap the walk stops and every named script travels alone', async () => {
+    const { root, skill } = await harnessRepo('Run shared/run.sh, then tools/run.sh.');
+    await scripts(root, ['shared', 'tools']);
+    await put(join(root, 'shared', 'cases', 'case.yaml'), KEY);
+    const many = join(skill, 'evals', 'a-many');
+    await mkdir(many, { recursive: true });
+    for (let from = 0; from <= ANSWER_KEY_ENTRY_CAP; from += 500) {
+      const count = Math.min(500, ANSWER_KEY_ENTRY_CAP + 1 - from);
+      await Promise.all(Array.from({ length: count }, (_, index) => writeFile(join(many, `f${from + index}`), '')));
+    }
+    // Listed after the cap is reached, so the walk never sees this link.
+    await link(join(root, 'shared', 'cases'), join(skill, 'evals', 'b-later', 'zz'));
+    const plan = await dependencyPlan(skill, root);
+    expect(plan).toMatchObject({ staged: ['shared/run.sh', 'tools/run.sh'], missing: [], skipped: [], copies: ['shared/run.sh', 'tools/run.sh'] });
+    const sandbox = await seed(root, skill, plan);
+    expect(existsSync(join(sandbox, 'tools', 'lib.sh'))).toBe(false);
+    expect(await keyBytesIn(sandbox)).toEqual([]);
+    expect(await linksIn(sandbox)).toEqual([]);
   });
 });
