@@ -492,9 +492,9 @@ export async function requireGitConfig(runner: Runner, cwd: string, identity: { 
  * `setup` deliberately keeps the throwing behaviour (its spec makes an unusable settings file a
  * resumable stopping point), so this helper is not used there.
  */
-async function offerHookAfterDurableWork(io: Prompter, args: { offerHook?: boolean; hook?: HookOptions }, storeRoot: string): Promise<void> {
+async function offerHookAfterDurableWork(io: Prompter, args: { offerHook?: boolean; hook?: HookOptions; form?: WithForm['form'] }, storeRoot: string): Promise<void> {
   if (args.offerHook === false) return;
-  try { await offerHook(io, { ...defaultHookOptions(storeRoot), ...args.hook }); }
+  try { await offerHook(io, { ...defaultHookOptions(storeRoot, undefined, args.form), ...args.hook }); }
   catch (error) { io.print(`Skipped the session hook: ${error instanceof Error ? error.message : String(error)}`); }
 }
 

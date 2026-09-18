@@ -1,3 +1,4 @@
+import { NPX_PREFIX } from '../invocation.js';
 import { access, mkdtemp, mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -20,8 +21,8 @@ export function editHookFor(storeRoot: string, settingsFile: string): { storeRoo
   return { storeRoot, source: BUNDLED_EDIT_HOOK_SOURCE, settingsFile, backupDir: join(storeRoot, 'backups') };
 }
 /** Wrapper options that place under a test home's global Claude Code skills root — never the real ~/.claude. */
-export function wrapperFor(home: string): { skillsRoot: string; source: string } {
-  return { skillsRoot: join(home, '.claude', 'skills'), source: BUNDLED_SKILL_SOURCE };
+export function wrapperFor(home: string): { skillsRoot: string; source: string; prefix: string } {
+  return { skillsRoot: join(home, '.claude', 'skills'), source: BUNDLED_SKILL_SOURCE, prefix: NPX_PREFIX };
 }
 
 /**

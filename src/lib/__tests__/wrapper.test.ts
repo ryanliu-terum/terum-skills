@@ -1,7 +1,9 @@
 import { mkdir, readFile, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { BUNDLED_WRAPPER, defaultWrapperOptions, inspectWrapper, installWrapper, isManagedWrapper, offerWrapper, removeWrapper, wrapperDestination, wrapperState } from '../wrapper.js';
+import { BUNDLED_WRAPPER, defaultWrapperOptions, inspectWrapper, installWrapper, isManagedWrapper, offerWrapper, removeWrapper, renderWrapper, wrapperDestination, wrapperState } from '../wrapper.js';
+import { NPX_PREFIX, pinnedPrefix } from '../invocation.js';
+import { packageVersion } from '../package.js';
 import { BUNDLED_SKILL_SOURCE, ScriptedPrompter, temporaryDirectory, wrapperFor } from './fixtures.js';
 
 const OLD_COPY = '---\nname: terum-skills\ndescription: an older bundled copy\nmetadata:\n  managed-by: terum-skills\n---\nold body\n';
@@ -18,7 +20,9 @@ describe('the bundled /terum-skills Claude Code skill', () => {
   it('the canonical skill carries the marker; the default source is the built bundle beside dist/lib; unmarked or broken frontmatter is not ours', async () => {
     expect(isManagedWrapper(await readFile(BUNDLED_SKILL_SOURCE, 'utf8'))).toBe(true);
     expect(BUNDLED_WRAPPER).toMatch(/[\\/]claude[\\/]skills[\\/]terum-skills[\\/]SKILL\.md$/);
-    expect(defaultWrapperOptions('/h')).toEqual({ skillsRoot: join('/h', '.claude', 'skills'), source: BUNDLED_WRAPPER });
+    expect(defaultWrapperOptions('/h')).toEqual({ skillsRoot: join('/h', '.claude', 'skills'), source: BUNDLED_WRAPPER, prefix: `npx -y terum-skills@${packageVersion()}` });
+    expect(defaultWrapperOptions('/h', 'bare').prefix).toBe('terum-skills');
+    expect(pinnedPrefix(undefined)).not.toContain('@latest');
     for (const raw of ['no frontmatter', '---\nname: terum-skills\n---\n', SOMEONE_ELSES, '---\nname: other\nmetadata:\n  managed-by: terum-skills\n---\n', '---\nname: terum-skills\nmetadata: [x]\n---\n', '---\nname: [\n---\n']) expect(isManagedWrapper(raw), raw).toBe(false);
   });
 
@@ -65,6 +69,27 @@ describe('the bundled /terum-skills Claude Code skill', () => {
     expect(await inspectWrapper(file.options.skillsRoot)).toEqual({ kind: 'foreign', why: 'it is not a directory' });
     expect(await removeWrapper(file.options)).toBe('foreign');
     expect(await readFile(file.destination, 'utf8')).toBe('x');
+  });
+
+  it('places the manual in this machine\'s spelling: the bundle says @latest, the placed copy names the bare binary or the pinned version, and a copy in another spelling is outdated', async () => {
+    const bundled = await readFile(BUNDLED_SKILL_SOURCE, 'utf8');
+    expect(bundled).toContain(NPX_PREFIX);
+    expect(renderWrapper(bundled, 'terum-skills')).not.toContain('@latest');
+    expect(renderWrapper(bundled, 'terum-skills')).toContain('Always `terum-skills <verb> …`');
+    expect(renderWrapper(bundled, NPX_PREFIX)).toBe(bundled);
+    const bare = await fresh(); const options = { ...bare.options, prefix: 'terum-skills' };
+    expect(await installWrapper(options)).toBe('installed');
+    const placed = await readFile(join(bare.destination, 'SKILL.md'), 'utf8');
+    expect(placed).toBe(renderWrapper(bundled, 'terum-skills'));
+    expect(isManagedWrapper(placed)).toBe(true);
+    expect(await wrapperState(options)).toBe('current');
+    // The same file judged by a copy pinned to a version: outdated, and a refresh rewrites it in that spelling.
+    const pinned = { ...bare.options, prefix: 'npx -y terum-skills@9.9.9' };
+    expect(await wrapperState(pinned)).toBe('outdated');
+    expect(await installWrapper(pinned)).toBe('replaced');
+    expect(await readFile(join(bare.destination, 'SKILL.md'), 'utf8')).toContain('npx -y terum-skills@9.9.9 <verb>');
+    expect(await wrapperState(pinned)).toBe('current');
+    expect(await wrapperState(options)).toBe('outdated');
   });
 
   it('a copy of the package built without the bundle is unavailable: it says so, asks nothing, writes nothing', async () => {

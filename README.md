@@ -145,7 +145,11 @@ Every verb runs as `npx -y terum-skills@latest <verb>`. The ones you'll type by 
 
 ## Updating and uninstalling
 
-Updates are automatic. The CLI runs the latest release every time through `npx -y`, and the desktop app downloads its own new version and installs it when you quit, overnight, or when you press Install now, whichever you chose in Settings ▸ Updates. `npx -y terum-skills@latest uninstall` removes your team from this machine, the session hook, the Claude Code skill, and the app bundle, and keeps your quarantine, backups, and local eval runs.
+Updates are yours to take. The session hook and the `/terum-skills` skill run the copy of the CLI that set them up: the bare `terum-skills` binary when you installed the package globally, otherwise `npx -y terum-skills@<version>` pinned to that release. Nothing fetches a newer CLI at session start. `terum-skills update` prints the newest advertised release and the exact command that updates *this* copy; after updating, re-run `setup` and the hook and skill move with it. The desktop app downloads its own new version and installs it when you quit, overnight, or when you press Install now, whichever you chose in Settings ▸ Updates; every download must match its published checksum and carry a build attestation from this repository's release workflow. `npx -y terum-skills@latest uninstall` removes your team from this machine, the session hook, the Claude Code skill, and the app bundle, and keeps your quarantine, backups, and local eval runs.
+
+## Security
+
+What runs on your machine and when, how a release is built, and how a download is checked: [SECURITY.md](SECURITY.md).
 
 ## License
 

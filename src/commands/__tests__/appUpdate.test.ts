@@ -26,6 +26,7 @@ const io = () => new ScriptedPrompter();
 function downloader(mode = 'ok') {
   return ghOnlyRunner(async args => {
     if (args[0] === '--version' || args[0] === 'auth') return ok;
+    if (args[0] === 'attestation') return mode === 'unattested' ? { ...ok, code: 1, stderr: 'no attestations found' } : ok;
     if (mode === 'missing') return ok;
     if (['release not found', 'Not Found (HTTP 404)', 'no assets match', 'dial tcp: lookup api.github.com: no such host'].includes(mode)) return { ...ok, code: 1, stderr: mode };
     if (mode === 'timeout') return { ...ok, code: 124, stderr: 'terum-skills: gh release exceeded 600 s' };
@@ -144,6 +145,9 @@ describe('app-update', () => {
   });
   it('--stage discards a checksum mismatch and leaves no version directory', async () => {
     const h = await setup(); expect(await run({ ...h.args, stage: true, runner: downloader('corrupt') }, io())).toMatchObject({ ok: false, error: expect.stringContaining('did not match its published checksum') }); expect(await fs.readdir(join(h.root,'app'))).toEqual([]);
+    const unattested = downloader('unattested');
+    expect(await run({ ...h.args, stage: true, runner: unattested }, io())).toMatchObject({ ok: false, error: expect.stringContaining(`no valid build attestation from ${APP_REPOSITORY}`) }); expect(await fs.readdir(join(h.root,'app'))).toEqual([]);
+    expect(unattested.calls.map(call => call.args.slice(0, 2))).toEqual([['release', 'download'], ['attestation', 'verify']]);
   });
   it.each(['release not found','Not Found (HTTP 404)','no assets match','missing','no-checksum'])('--stage treats missing assets (%s) as notPublished, not a failure', async mode => {
     const h = await setup(); expect(await run({ ...h.args, stage: true, runner: downloader(mode) }, io())).toMatchObject({ ok: true, value: { notPublished: true, staged: false, path: null } }); expect(await fs.readdir(join(h.root,'app'))).toEqual([]);

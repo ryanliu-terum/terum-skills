@@ -1,10 +1,22 @@
 import { join } from 'node:path';
 import type { Launch } from './launch.js';
+import { packageVersion } from './package.js';
 import { shellQuote } from './teamRepo.js';
 
 export type InvocationForm = 'bare' | 'npx';
 export interface WithForm { form?: InvocationForm; }
 export const NPX_PREFIX = 'npx -y terum-skills@latest';
+/**
+ * The spelling written into files that run WITHOUT the user typing them — the session hook entry and
+ * the placed /terum-skills manual: the bare binary when this copy is the global install on PATH,
+ * otherwise npx pinned to this copy's version. Never `@latest` there: what runs at the next session
+ * start is what the user installed, and a newer release reaches this machine only through the step
+ * `update` prints or a re-run of `setup`. `version` is null only when this copy's package.json
+ * cannot be read, and then nothing more specific than the registry's latest can be named.
+ */
+export function pinnedPrefix(form: InvocationForm | undefined, version: string | null = packageVersion()): string {
+  return form === 'bare' ? 'terum-skills' : `npx -y terum-skills@${version ?? 'latest'}`;
+}
 export interface FormEvidence {
   launch: Launch | undefined;
   env: NodeJS.ProcessEnv;

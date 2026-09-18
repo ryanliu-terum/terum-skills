@@ -1,7 +1,8 @@
 import { mkdir, readFile, readdir, stat, utimes, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { stampedAt, staleLine, stampPath, fsForTests, HOOK_COMMAND, HOOK_ENTRY, hookInstalled, installHook, offerHook, removeHook } from '../hook.js';
+import { stampedAt, staleLine, stampPath, fsForTests, HOOK_COMMAND, HOOK_ENTRY, hookCommand, hookEntry, hookInstalled, installedHookCommand, installHook, migrateHook, offerHook, removeHook } from '../hook.js';
+import { packageVersion } from '../package.js';
 import { ScriptedPrompter, temporaryDirectory } from './fixtures.js';
 
 async function options() {
@@ -55,6 +56,35 @@ describe('session hook (§8)', () => {
     await expect(offerHook(present, target)).resolves.toBe('present');
     expect(present.asked).toEqual([]);
     expect(HOOK_COMMAND).toContain('terum-skills');
+  });
+
+  it('the entry runs this copy, pinned: npx at this version by default, the bare binary for a global install, never @latest', async () => {
+    expect(HOOK_COMMAND).toBe(`npx -y terum-skills@${packageVersion()} sync --hook`);
+    expect(HOOK_COMMAND).not.toContain('@latest');
+    expect(hookCommand('bare')).toBe('terum-skills sync --hook');
+    expect(hookCommand('npx', '1.2.3')).toBe('npx -y terum-skills@1.2.3 sync --hook');
+    expect(HOOK_ENTRY).toEqual({ matcher: 'startup', hooks: [{ type: 'command', command: HOOK_COMMAND, async: true, timeout: 60 }] });
+    const target = { ...(await options()), command: hookCommand('bare') };
+    await expect(installHook(target)).resolves.toBe('installed');
+    expect(JSON.parse(await readFile(target.settingsFile, 'utf8'))).toEqual({ hooks: { SessionStart: [hookEntry('terum-skills sync --hook')] } });
+    expect(await installedHookCommand(target.settingsFile)).toBe('terum-skills sync --hook');
+  });
+
+  it('migrateHook re-points an installed entry of ours in place — the pre-0.21 @latest spelling or another pin — and never installs where none of ours exists', async () => {
+    const target = await options();
+    expect(await migrateHook(target)).toBe('absent');
+    expect(await installedHookCommand(target.settingsFile)).toBeNull();
+    const latest = { matcher: 'startup', hooks: [{ type: 'command', command: 'npx -y terum-skills@latest sync --hook', async: true, timeout: 60 }] };
+    const unrelated = { type: 'command', command: 'echo keep' };
+    await writeFile(target.settingsFile, JSON.stringify({ theme: 'dark', hooks: { SessionStart: [{ matcher: 'startup', extra: 'keep', hooks: [unrelated, latest.hooks[0]] }] } }));
+    expect(await installedHookCommand(target.settingsFile)).toBe('npx -y terum-skills@latest sync --hook');
+    expect(await migrateHook(target)).toBe('migrated');
+    expect(JSON.parse(await readFile(target.settingsFile, 'utf8'))).toEqual({ theme: 'dark', hooks: { SessionStart: [{ matcher: 'startup', extra: 'keep', hooks: [unrelated, HOOK_ENTRY.hooks[0]] }] } });
+    expect(await migrateHook(target)).toBe('current');
+    const bare = { ...target, command: hookCommand('bare') };
+    expect(await migrateHook(bare)).toBe('migrated');
+    expect(await installedHookCommand(target.settingsFile)).toBe('terum-skills sync --hook');
+    expect((await readdir(target.backupDir)).length).toBe(1);
   });
 
   it('offerHook surfaces an unreadable settings file as the thrown error, asks nothing, and changes no bytes', async () => {

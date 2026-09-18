@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import { mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { createConfigStore, type ConfigStore } from '../lib/config.js';
@@ -11,7 +10,7 @@ import type { Prompter } from '../lib/prompt.js';
 import { failure, success, type Result } from '../lib/result.js';
 import { execCommand, systemRunner, type Exec, type Runner } from '../lib/runner.js';
 import { compare, createReleaseState, describeUpdate, maintainReleaseState, probePolicy, type ProbePolicy, type ReleaseStateStore } from '../lib/update.js';
-import { APP_BUNDLE, APP_PRODUCT, APP_REPOSITORY, APP_SLUG, RELEASE_ASSETS_MISSING, applicationsDirectory, bundleVersion, explainDownloadFailure, locateApp, moveRetrying, placeBundle, removeRetrying, removeStaging, sweepStaleDownloads } from './app.js';
+import { APP_BUNDLE, APP_PRODUCT, APP_REPOSITORY, APP_SLUG, RELEASE_ASSETS_MISSING, applicationsDirectory, bundleVersion, explainDownloadFailure, locateApp, moveRetrying, placeBundle, removeRetrying, removeStaging, sweepStaleDownloads, verifyDownloadedAsset } from './app.js';
 
 export interface AppUpdateArgs extends WithForm {
   check?: boolean; stage?: boolean; apply?: boolean; applyNow?: boolean;
@@ -112,9 +111,8 @@ export async function run(args: AppUpdateArgs, io: Prompter): Promise<Result<App
         }
         const file = join(staging, asset);
         if (!(await exists(file)) || !(await exists(`${file}.sha256`))) return notPublished();
-        const expected = (await readFile(`${file}.sha256`, 'utf8')).trim().split(/\s+/)[0]?.toLowerCase();
-        const actual = createHash('sha256').update(await readFile(file)).digest('hex');
-        if (!expected || expected !== actual) return failure(`The downloaded desktop app did not match its published checksum, so it was discarded (expected ${expected ?? 'nothing readable'}, got ${actual}). ${tail(args.form)}`);
+        const problem = await verifyDownloadedAsset(file, runner, args.form);
+        if (problem !== null) return failure(problem);
         const bytes = (await stat(file)).size;
         let bundle: string | null = null;
         if (platform.startsWith('darwin')) {

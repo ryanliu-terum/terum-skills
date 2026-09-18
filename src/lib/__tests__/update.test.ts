@@ -119,7 +119,7 @@ describe('locked state and acknowledgment merges', () => {
 describe('notice wording and cadence', () => {
   it.each(['global', 'local', 'source', 'unknown', 'npx'] as const)('uses exact advertised advice for %s', (kind) => {
     const launch = fakeLaunch(kind);
-    const advice = kind === 'local' ? 'If installed locally with npm, run npm install terum-skills@latest in /work/app.' : kind === 'global' ? 'If installed globally with npm, run npm install -g terum-skills@latest.' : `This copy: ${launch.path}. Run the latest release with npx -y terum-skills@latest <command>.`;
+    const advice = kind === 'local' ? 'If installed locally with npm, run npm install terum-skills@latest in /work/app.' : kind === 'global' ? 'If installed globally with npm, run npm install -g terum-skills@latest.' : `This copy: ${launch.path}. Run the latest release with npx -y terum-skills@latest <command>; re-run setup with it to move the session hook and /terum-skills skill.`;
     expect(noticeLine({ version: '0.1.1', at, source: 'git-tags' }, '0.1.0', launch)).toBe(`Newer terum-skills release advertised: 0.1.1 (running 0.1.0). ${advice}`);
   });
   it('preserves devDependency advice and labels registry evidence as observed', () => {
