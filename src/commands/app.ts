@@ -126,9 +126,8 @@ export async function run(args: AppArgs, io: Prompter): Promise<Result<AppResult
         if (download.code !== 0) return failure(await explainDownloadFailure(download.stderr || download.stdout, version, asset, runner, args.form));
         const file = join(staging, asset);
         if (!(await exists(file)) || !(await exists(`${file}.sha256`))) return failure(`No desktop app is published for terum-skills ${version} (looked for ${asset} on release v${version} of ${APP_REPOSITORY}). ${tail(args.form)}`);
-        const expected = (await readFile(`${file}.sha256`, 'utf8')).trim().split(/\s+/)[0]?.toLowerCase();
-        const actual = createHash('sha256').update(await readFile(file)).digest('hex');
-        if (!expected || expected !== actual) return failure(`The downloaded desktop app did not match its published checksum, so it was discarded (expected ${expected ?? 'nothing readable'}, got ${actual}). ${tail(args.form)}`);
+        const problem = await verifyDownloadedAsset(file, runner, args.form);
+        if (problem !== null) return failure(problem);
         // Unpack (macOS: and place the bundle) or install from the staging directory, then move the record into place in one rename so <version>/ only ever exists complete.
         let bundle: string | null = null;
         if (platform.startsWith('darwin')) {
@@ -270,6 +269,25 @@ async function readProcVersion(): Promise<string | null> {
 export const RELEASE_ASSETS_MISSING = /release not found|Not Found \(HTTP 404\)|no assets match/i;
 
 /** D7: one sentence per cause, and always the same two next steps. */
+/**
+ * Two independent checks on a downloaded asset, both required. The `.sha256` beside it catches a
+ * damaged download; it ships in the same Release as the asset, so it cannot catch an asset swapped
+ * there together with its checksum. `gh attestation verify` checks the build provenance GitHub
+ * recorded when release.yml built the asset (actions/attest-build-provenance in the desktop job):
+ * the bytes must be the ones that workflow produced in this repository, or the asset is discarded.
+ * Returns the failure line, or null when both checks pass.
+ */
+export async function verifyDownloadedAsset(file: string, runner: Runner, form: WithForm['form']): Promise<string | null> {
+  const expected = (await readFile(`${file}.sha256`, 'utf8')).trim().split(/\s+/)[0]?.toLowerCase();
+  const actual = createHash('sha256').update(await readFile(file)).digest('hex');
+  if (!expected || expected !== actual) return `The downloaded desktop app did not match its published checksum, so it was discarded (expected ${expected ?? 'nothing readable'}, got ${actual}). ${tail(form)}`;
+  const verify = await runner.run('gh', ['attestation', 'verify', file, '--repo', APP_REPOSITORY], { deadlineMs: 120_000 }).catch((error: unknown) => ({ code: 1, stdout: '', stderr: message(error) }));
+  if (verify.code === 0) return null;
+  const text = (verify.stderr || verify.stdout).trim();
+  if (/unknown command "?attestation"?/i.test(text)) return `This copy of gh cannot verify build attestations (gh 2.49 or newer is needed), so the downloaded desktop app was discarded. ${tail(form)}`;
+  return `The downloaded desktop app has no valid build attestation from ${APP_REPOSITORY}, so it was discarded: ${text || 'gh reported no detail'}. ${tail(form)}`;
+}
+
 export async function explainDownloadFailure(output: string, version: string, asset: string, runner: Runner, form: WithForm['form']): Promise<string> {
   const text = output.trim();
   const gh = await explainGhFailure(runner);

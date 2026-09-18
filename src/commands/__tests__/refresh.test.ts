@@ -2,7 +2,7 @@ import { chmod, mkdir, readFile, utimes, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { createConfigStore } from '../../lib/config.js';
-import { stampedAt, stampIsFresh } from '../../lib/hook.js';
+import { HOOK_COMMAND, installedHookCommand, stampedAt, stampIsFresh } from '../../lib/hook.js';
 import { receiptSchema } from '../../lib/evals/receipt.js';
 import { systemRunner, type RunOptions } from '../../lib/runner.js';
 import { bareTeam, pushFromSeed, cloneWithIdentity, git, holdCloneLock, denyingRunner, fakeGh, ScriptedPrompter, clean, exists, wrapRunner, temporaryDirectory } from '../../lib/__tests__/fixtures.js';
@@ -333,6 +333,25 @@ describe('refresh when the team repository no longer exists (2026-09-13: terum-s
       expect(result.value?.notices).toEqual([expect.stringMatching(/^team: fetched, but the fetch stamp could not be written \(.+\); status may call the clone stale until the next sync\.$/)]);
       expect(await stampedAt(store.root, 'team')).toBeNull();
     } finally { await chmod(runDir, 0o700); }
+  });
+  it('--hook re-points its own SessionStart entry from the pre-0.21 @latest spelling at this copy, once, with a notice; a machine with no entry of ours gets none', async () => {
+    const { store } = await setup();
+    const settings = { settingsFile: join(store.root, 'settings.json'), backupDir: join(store.root, 'backups') };
+    const other = { matcher: 'startup', hooks: [{ type: 'command', command: 'echo keep' }] };
+    await writeFile(settings.settingsFile, JSON.stringify({ hooks: { SessionStart: [other, { matcher: 'startup', hooks: [{ type: 'command', command: 'npx -y terum-skills@latest sync --hook', async: true, timeout: 60 }] }] } }));
+    const first = await run({ config: store, hook: true, settings }, new ScriptedPrompter());
+    expect(first).toMatchObject({ ok: true, value: { notices: [`Pinned your session hook to this copy of terum-skills (${HOOK_COMMAND}); it no longer fetches the newest release at session start. Re-run \`npx -y terum-skills@latest setup\` after an update to move it.`] } });
+    expect(await installedHookCommand(settings.settingsFile)).toBe(HOOK_COMMAND);
+    expect(JSON.parse(await readFile(settings.settingsFile, 'utf8')).hooks.SessionStart[0]).toEqual(other);
+    expect(await run({ config: store, hook: true, settings }, new ScriptedPrompter())).toMatchObject({ ok: true, value: { notices: [] } });
+    // A plain sync never touches the entry, and hook mode installs nothing where the offer was declined.
+    await writeFile(settings.settingsFile, JSON.stringify({ hooks: { SessionStart: [other] } }));
+    expect(await run({ config: store, settings }, new ScriptedPrompter())).toMatchObject({ ok: true });
+    expect(await run({ config: store, hook: true, settings }, new ScriptedPrompter())).toMatchObject({ ok: true, value: { notices: [] } });
+    expect(JSON.parse(await readFile(settings.settingsFile, 'utf8'))).toEqual({ hooks: { SessionStart: [other] } });
+    // An unreadable settings file is reported, not fatal.
+    await writeFile(settings.settingsFile, '{not json');
+    expect(await run({ config: store, hook: true, settings }, new ScriptedPrompter())).toMatchObject({ ok: true, value: { notices: [`Could not pin the session hook in ${settings.settingsFile}: Cannot read ${settings.settingsFile}: it is not valid JSON.`] } });
   });
   it('--hook leaves a clone fetched within the hour alone and reports it as fresh; a plain sync still fetches', async () => {
     const { store, clone, seed } = await setup();

@@ -101,15 +101,15 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
   },
   {
     "file": "src/lib/hook.ts",
-    "line": 12,
-    "policy": "fixed",
-    "pattern": "export const HOOK_COMMAND = 'npx -y terum-skills@latest sync --hook';"
-  },
-  {
-    "file": "src/lib/hook.ts",
     "line": 42,
     "policy": "not-a-hint",
     "pattern": "return typeof command === 'string' && command.includes('terum-skills');"
+  },
+  {
+    "file": "src/lib/hook.ts",
+    "line": 180,
+    "policy": "not-a-hint",
+    "pattern": "if (typeof command === 'string' && command.includes('terum-skills')) return command;"
   },
   {
     "file": "src/lib/invocation.ts",
@@ -128,6 +128,18 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "line": 49,
     "policy": "routed",
     "pattern": "return [form === 'bare' ? 'terum-skills' : NPX_PREFIX, verb, ...args.map((arg) => typeof arg === 'string' ? shellQuote(arg) : arg.raw)].join(' ');"
+  },
+  {
+    "file": "src/lib/invocation.ts",
+    "line": 11,
+    "policy": "not-a-hint",
+    "pattern": "* the placed /terum-skills manual: the bare binary when this copy is the global install on PATH,"
+  },
+  {
+    "file": "src/lib/invocation.ts",
+    "line": 18,
+    "policy": "fixed",
+    "pattern": "return form === 'bare' ? 'terum-skills' : `npx -y terum-skills@${version ?? 'latest'}`;"
   },
   {
     "file": "src/lib/launch.ts",
@@ -295,7 +307,7 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "file": "src/lib/update.ts",
     "line": 170,
     "policy": "fixed",
-    "pattern": "return `${prefix}This copy: ${launch?.path ?? 'unknown'}. Run the latest release with npx -y terum-skills@latest <command>.`;"
+    "pattern": "return `${prefix}This copy: ${launch?.path ?? 'unknown'}. Run the latest release with npx -y terum-skills@latest <command>; re-run setup with it to move the session hook and /terum-skills skill.`;"
   },
   {
     "file": "src/lib/wrapper.ts",
@@ -398,6 +410,18 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "line": 141,
     "policy": "not-a-hint",
     "pattern": "io.print(`Installed the /terum-skills Claude Code skill at ${directory}.`);"
+  },
+  {
+    "file": "src/lib/wrapper.ts",
+    "line": 31,
+    "policy": "not-a-hint",
+    "pattern": "/** The command spelling the placed copy teaches (lib/invocation.ts pinnedPrefix); the bundled copy says `npx -y terum-skills@latest`. */"
+  },
+  {
+    "file": "src/lib/wrapper.ts",
+    "line": 40,
+    "policy": "not-a-hint",
+    "pattern": "* The bundled manual with every `npx -y terum-skills@latest` replaced by this machine's spelling. The"
   },
   {
     "file": "src/lib/placer/vendor/skillhub/skill-target-lock.ts",
@@ -530,6 +554,18 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "line": 171,
     "policy": "not-a-hint",
     "pattern": "notices.push('Updated your terum-skills edit hook for this CLI.');"
+  },
+  {
+    "file": "src/commands/refresh.ts",
+    "line": 164,
+    "policy": "not-a-hint",
+    "pattern": "// The SessionStart entry itself. Every release before 0.21 wrote `npx -y terum-skills@latest`,"
+  },
+  {
+    "file": "src/commands/refresh.ts",
+    "line": 171,
+    "policy": "not-a-hint",
+    "pattern": "try { if (await migrateHook(target) === 'migrated') notices.push(`Pinned your session hook to this copy of terum-skills (${target.command}); it no longer fetches the newest release at session start. Re-run \\`${invocation(args.form, 'setup')}\\` after an update to move it.`); }"
   },
   {
     "file": "src/commands/setup.ts",
@@ -773,27 +809,27 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
   },
   {
     "file": "src/commands/update.ts",
-    "line": 46,
-    "policy": "fixed",
-    "pattern": "case 'global': return ['If installed globally with npm, run:', '  npm install -g terum-skills@latest', 'Otherwise, update it with the tool that installed this copy.'];"
-  },
-  {
-    "file": "src/commands/update.ts",
     "line": 47,
     "policy": "fixed",
     "pattern": "case 'local': return [`If managed with npm, run in ${launch.root}:`, `  npm install ${launch.dependencyKind === 'devDependencies' ? '--save-dev ' : ''}terum-skills@latest`];"
   },
   {
     "file": "src/commands/update.ts",
+    "line": 46,
+    "policy": "fixed",
+    "pattern": "case 'global': return ['If installed globally with npm, run:', '  npm install -g terum-skills@latest', 'Otherwise, update it with the tool that installed this copy.', 'Then run terum-skills setup once if the session hook or /terum-skills skill names a version: it re-points them at this copy.'];"
+  },
+  {
+    "file": "src/commands/update.ts",
     "line": 48,
     "policy": "fixed",
-    "pattern": "case 'npx': return [`Cache request recorded as: ${launch.request ?? 'unknown'}`, \"To request the registry's latest release, run:\", '  npx -y terum-skills@latest <command>', 'This does not update other local or global installations.'];"
+    "pattern": "case 'npx': return [`Cache request recorded as: ${launch.request ?? 'unknown'}`, \"To request the registry's latest release, run:\", '  npx -y terum-skills@latest <command>', 'This does not update other local or global installations.', 'The session hook and /terum-skills skill keep the version that set them up until you re-run:', '  npx -y terum-skills@latest setup'];"
   },
   {
     "file": "src/commands/update.ts",
     "line": 50,
     "policy": "fixed",
-    "pattern": "default: return ['Installation method could not be established.', 'Update this copy with the tool that installed it.', \"To run the registry's latest release:\", '  npx -y terum-skills@latest <command>'];"
+    "pattern": "default: return ['Installation method could not be established.', 'Update this copy with the tool that installed it.', \"To run the registry's latest release:\", '  npx -y terum-skills@latest <command>', 'The session hook and /terum-skills skill keep the version that set them up until you re-run:', '  npx -y terum-skills@latest setup'];"
   },
   {
     "file": ".claude/skills/terum-skills/SKILL.md",
@@ -845,12 +881,6 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
   },
   {
     "file": ".claude/skills/terum-skills/SKILL.md",
-    "line": 15,
-    "policy": "prose",
-    "pattern": "announces `Updated your /terum-skills manual for this CLI.` A foreign copy is left alone."
-  },
-  {
-    "file": ".claude/skills/terum-skills/SKILL.md",
     "line": 18,
     "policy": "prose",
     "pattern": "note beginning *\"You edited <name>, a skill in this machine's terum-skills Library\"* appears after an"
@@ -860,12 +890,6 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "line": 21,
     "policy": "prose",
     "pattern": "publish hand-off it names. A skill edited and never published is a skill only that machine has."
-  },
-  {
-    "file": ".claude/skills/terum-skills/SKILL.md",
-    "line": 41,
-    "policy": "fixed",
-    "pattern": "- Always `npx -y terum-skills@latest <verb> …` for a runnable command."
   },
   {
     "file": ".claude/skills/terum-skills/SKILL.md",
@@ -1792,6 +1816,24 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "pattern": "| `skill category <abs-path> --to <name>` | none; the folder is the user's own | show stdout; it rewrites `metadata.terum-category` locally and publishes nothing, so the team keeps showing the category its newest version carries until the user runs the `publish` the output prints. Any name is accepted; an off-list one gets the same advisory warning `publish` gives |"
   },
   {
+    "file": ".claude/skills/terum-skills/SKILL.md",
+    "line": 15,
+    "policy": "prose",
+    "pattern": "announces `Updated your /terum-skills manual for this CLI.` A foreign copy is left alone. The placed"
+  },
+  {
+    "file": ".claude/skills/terum-skills/SKILL.md",
+    "line": 16,
+    "policy": "prose",
+    "pattern": "copy is written in this machine's command spelling — the bare binary of a global install, or npx"
+  },
+  {
+    "file": ".claude/skills/terum-skills/SKILL.md",
+    "line": 44,
+    "policy": "fixed",
+    "pattern": "- Always `npx -y terum-skills@latest <verb> …`, exactly that spelling, for a runnable command."
+  },
+  {
     "file": "docs/frame-protocol.md",
     "line": 294,
     "policy": "prose",
@@ -1927,7 +1969,7 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "file": "README.md",
     "line": 148,
     "policy": "fixed",
-    "pattern": "Updates are automatic. The CLI runs the latest release every time through `npx -y`, and the desktop app downloads its own new version and installs it when you quit, overnight, or when you press Install now, whichever you chose in Settings ▸ Updates. `npx -y terum-skills@latest uninstall` removes your team from this machine, the session hook, the Claude Code skill, and the app bundle, and keeps your quarantine, backups, and local eval runs."
+    "pattern": "Updates are yours to take. The session hook and the `/terum-skills` skill run the copy of the CLI that set them up: the bare `terum-skills` binary when you installed the package globally, otherwise `npx -y terum-skills@<version>` pinned to that release. Nothing fetches a newer CLI at session start. `terum-skills update` prints the newest advertised release and the exact command that updates *this* copy; after updating, re-run `setup` and the hook and skill move with it. The desktop app downloads its own new version and installs it when you quit, overnight, or when you press Install now, whichever you chose in Settings ▸ Updates; every download must match its published checksum and carry a build attestation from this repository's release workflow. `npx -y terum-skills@latest uninstall` removes your team from this machine, the session hook, the Claude Code skill, and the app bundle, and keeps your quarantine, backups, and local eval runs."
   },
   {
     "file": "docs/NEXT.md",
@@ -1940,5 +1982,107 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "line": 38,
     "policy": "prose",
     "pattern": "`npx -y terum-skills@<version>` for teams that want reproducible setups."
+  },
+  {
+    "file": "SECURITY.md",
+    "line": 3,
+    "policy": "prose",
+    "pattern": "What terum-skills runs on your machine, when, and how a release is built and checked. Written so"
+  },
+  {
+    "file": "SECURITY.md",
+    "line": 8,
+    "policy": "prose",
+    "pattern": "Everything is opt-in at `terum-skills setup`, each with its own y/N, and everything is removed by"
+  },
+  {
+    "file": "SECURITY.md",
+    "line": 9,
+    "policy": "prose",
+    "pattern": "`terum-skills uninstall`."
+  },
+  {
+    "file": "SECURITY.md",
+    "line": 13,
+    "policy": "prose",
+    "pattern": "| Session hook | Once per Claude Code session start, in the background, at most once an hour per team | The copy of the CLI that set it up (see *Pinned, not latest*) with `sync --hook` | Fetches your team's private git repository into `~/.terum/skills`; refreshes skills it placed under `~/.claude/skills/` and the two files below; uploads nothing |"
+  },
+  {
+    "file": "SECURITY.md",
+    "line": 14,
+    "policy": "prose",
+    "pattern": "| `/terum-skills` skill | Only when Claude Code decides the skill applies, or you invoke it | The CLI verbs the skill describes, in the same pinned spelling | Whatever the verb does; verbs that ask a question are handed to your terminal instead |"
+  },
+  {
+    "file": "SECURITY.md",
+    "line": 18,
+    "policy": "prose",
+    "pattern": "The CLI never runs a package manager on your behalf. `terum-skills update` prints the command that"
+  },
+  {
+    "file": "SECURITY.md",
+    "line": 23,
+    "policy": "prose",
+    "pattern": "The session hook and the placed `/terum-skills` skill name the copy of the CLI that installed them:"
+  },
+  {
+    "file": "SECURITY.md",
+    "line": 24,
+    "policy": "prose",
+    "pattern": "the bare `terum-skills` binary when you installed the package globally, otherwise"
+  },
+  {
+    "file": "SECURITY.md",
+    "line": 25,
+    "policy": "prose",
+    "pattern": "`npx -y terum-skills@<version>` with the exact version that ran `setup`. Nothing on this machine"
+  },
+  {
+    "file": "SECURITY.md",
+    "line": 27,
+    "policy": "prose",
+    "pattern": "yourself and, for the pinned `npx` spelling, re-run `setup` so the hook and the skill move with it."
+  },
+  {
+    "file": "SECURITY.md",
+    "line": 29,
+    "policy": "prose",
+    "pattern": "Releases before 0.21 wrote `npx -y terum-skills@latest` into the hook. The first session hook run of"
+  },
+  {
+    "file": "SECURITY.md",
+    "line": 37,
+    "policy": "prose",
+    "pattern": "grep -n terum-skills ~/.claude/settings.json"
+  },
+  {
+    "file": "SECURITY.md",
+    "line": 55,
+    "policy": "prose",
+    "pattern": "`terum-skills app` and `app-update` download the app for the CLI's own version through"
+  },
+  {
+    "file": "SECURITY.md",
+    "line": 60,
+    "policy": "prose",
+    "pattern": "2. `gh attestation verify <asset> --repo ryanliu-terum/terum-skills` succeeds. This checks the"
+  },
+  {
+    "file": "SECURITY.md",
+    "line": 68,
+    "policy": "prose",
+    "pattern": "npm audit signatures            # in a project where terum-skills is installed"
+  },
+  {
+    "file": "SECURITY.md",
+    "line": 69,
+    "policy": "prose",
+    "pattern": "gh attestation verify terum-skills-desktop_<version>_<suffix> --repo ryanliu-terum/terum-skills"
+  },
+  {
+    "file": "SECURITY.md",
+    "line": 80,
+    "policy": "prose",
+    "pattern": "- **Skill content itself.** A skill your team publishes is text Claude Code reads; terum-skills"
   }
 ];

@@ -21,7 +21,7 @@ import { invocation } from '../lib/invocation.js';
 import { run as move, type MoveResult } from './teamMove.js';
 import { defaultWrapperOptions, installWrapper, wrapperState } from '../lib/wrapper.js';
 import { defaultEditHookOptions, editHookState, installEditHook } from '../lib/editHook.js';
-import { stampIsFresh, writeStamp } from '../lib/hook.js';
+import { defaultHookOptions, migrateHook, stampIsFresh, writeStamp, type HookOptions } from '../lib/hook.js';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
@@ -34,8 +34,10 @@ export interface SyncArgs extends WithForm {
   lockStale?: number;
   /** How long the fetch may run before it is killed; default REFRESH_DEADLINE_MS. */
   deadlineMs?: number;
-  /** Session-start hook mode; it may refresh only Terum's managed bundled manual. */
+  /** Session-start hook mode; it may refresh only Terum's own files: the managed manual, the edit hook, and its own SessionStart entry. */
   hook?: boolean;
+  /** Test knob: where the SessionStart entry lives; defaults to ~/.claude/settings.json. */
+  settings?: HookOptions;
   /** Test knob: the successor lookup for a team whose repository no longer exists. Defaults to lib/successor's GitHub lookup. */
   successors?: (runner: Runner, remote: string) => Promise<SuccessorSearch>;
   /** Test knob: the clock the successor cache is judged by. */
@@ -159,8 +161,18 @@ export async function run(args: SyncArgs, io: Prompter): Promise<Result<SyncResu
         catch (error) { notices.push(`${team}: fetched, but the fetch stamp could not be written (${error instanceof Error ? error.message : String(error)}); status may call the clone stale until the next sync.`); }
       }
     }
-    if (args.hook && await wrapperState(defaultWrapperOptions()) === 'outdated') {
-      await installWrapper(defaultWrapperOptions());
+    // The SessionStart entry itself. Every release before 0.21 wrote `npx -y terum-skills@latest`,
+    // so the first hook run of a pinning release re-points the entry at the copy that is running.
+    // Same consent as the two refreshes below (the entry exists because the user said yes to it),
+    // and nothing is installed where nothing of ours is. A settings file this run cannot edit is
+    // reported, never fatal: the fetch above already happened.
+    if (args.hook) {
+      const target = { ...defaultHookOptions(store.root, undefined, args.form), ...args.settings };
+      try { if (await migrateHook(target) === 'migrated') notices.push(`Pinned your session hook to this copy of terum-skills (${target.command}); it no longer fetches the newest release at session start. Re-run \`${invocation(args.form, 'setup')}\` after an update to move it.`); }
+      catch (error) { notices.push(`Could not pin the session hook in ${target.settingsFile}: ${error instanceof Error ? error.message : String(error)}`); }
+    }
+    if (args.hook && await wrapperState(defaultWrapperOptions(undefined, args.form)) === 'outdated') {
+      await installWrapper(defaultWrapperOptions(undefined, args.form));
       notices.push('Updated your /terum-skills manual for this CLI.');
     }
     // Same rule for the edit hook's script, and only the same case: a copy of OUR OWN that this CLI
