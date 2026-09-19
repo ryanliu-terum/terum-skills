@@ -1906,6 +1906,102 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "pattern": "- **`publish` attaches them.** Every local receipt taken of exactly the bytes being published is copied into the repository, stamped with the skill's uuid and the version it landed at. Local runs of earlier bytes are left behind, and a publish that minted a version says how many:"
   },
   {
+    "file": "docs/contributing/release.md",
+    "line": 38,
+    "policy": "prose",
+    "pattern": "Dispatch with `dry_run=true` first. A dry run runs `validate`, `build`, `desktop` and `audit`, so it proves the gates, the tarball and the desktop matrix, and it performs neither the npm write nor the GitHub write. It does not exercise the `npm` environment approval: `publish` is the job that declares that environment, and a dry run skips it (`release.yml:296-298`). Then re-dispatch with the same `expected_version` and `expected_sha` and `dry_run=false`."
+  },
+  {
+    "file": "docs/contributing/release.md",
+    "line": 52,
+    "policy": "prose",
+    "pattern": "Runs only when the plan says `publish`. It installs with `npm ci`, runs `npm run lint`, `npm run typecheck` and `npm test`, then packs once."
+  },
+  {
+    "file": "docs/contributing/release.md",
+    "line": 56,
+    "policy": "prose",
+    "pattern": "The tarball is then inspected. It must contain `package.json`, `README.md`, `SECURITY.md`, `LICENSE`, `NOTICE`, `dist/index.js` and `dist/claude/skills/terum-skills/SKILL.md`, and no path may contain `__tests__` or start with `src/`. `SECURITY.md` and the shipped manual are what make this check stricter than the equivalent one in `ci.yml`, which requires neither (`ci.yml:84`). The packed tarball is then installed into a fresh throwaway project and run from a foreign directory, and uploaded as the `release-tarball` artifact with the digest that `publish` later compares against."
+  },
+  {
+    "file": "docs/contributing/release.md",
+    "line": 60,
+    "policy": "prose",
+    "pattern": "Builds the app on four runners. It is gated on the same `publish` state but runs on dry runs too, which is how the matrix is proven without publishing."
+  },
+  {
+    "file": "docs/contributing/release.md",
+    "line": 64,
+    "policy": "prose",
+    "pattern": "| `macos-latest` | `aarch64-apple-darwin` | `app` | `aarch64.app.tar.gz` |"
+  },
+  {
+    "file": "docs/contributing/release.md",
+    "line": 65,
+    "policy": "prose",
+    "pattern": "| `macos-latest` | `x86_64-apple-darwin` | `app` | `x64.app.tar.gz` |"
+  },
+  {
+    "file": "docs/contributing/release.md",
+    "line": 69,
+    "policy": "prose",
+    "pattern": "Each asset is named `terum-skills-desktop_<version>_<suffix>`, with a `.sha256` sidecar beside it. The matrix does not fail fast, so one broken runner still tells you about the other three."
+  },
+  {
+    "file": "docs/contributing/release.md",
+    "line": 73,
+    "policy": "prose",
+    "pattern": "On a run that is not a dry run, each asset then gets a build-provenance attestation from `actions/attest-build-provenance`, recorded by GitHub against this repository under the job's own OIDC identity (`release.yml:282-286`). The step is skipped on a dry run, so no attestation ever exists for bytes that no Release carries. `terum-skills app` and `app-update` check that attestation with `gh attestation verify` after the checksum, so an asset swapped on the Release together with its `.sha256` is refused (`src/commands/app.ts:280-289`)."
+  },
+  {
+    "file": "docs/contributing/release.md",
+    "line": 79,
+    "policy": "prose",
+    "pattern": "Runs only when the plan says `publish` and `dry_run` is `false`, and it needs `validate`, `build` and `desktop` to have succeeded. The desktop app is therefore always built before the npm publish, so a CLI version can never reach the registry without its app."
+  },
+  {
+    "file": "docs/contributing/release.md",
+    "line": 93,
+    "policy": "prose",
+    "pattern": "Finally it creates the GitHub Release with `gh release create <tag> --verify-tag --title \"terum-skills <version>\" --generate-notes`, bounded below by the previous stable tag when there is one, marked latest only when the plan says so, and marked prerelease when the version is one. The desktop assets are attached to that same Release. If the Release already exists the step prints `Release <tag> exists; left untouched` and does nothing."
+  },
+  {
+    "file": "docs/contributing/release.md",
+    "line": 112,
+    "policy": "prose",
+    "pattern": "| `publish` | Not on npm yet. | The full run: build, desktop, publish, finalize. |"
+  },
+  {
+    "file": "docs/contributing/release.md",
+    "line": 143,
+    "policy": "prose",
+    "pattern": "- `terum-skills-desktop_<version>_aarch64.app.tar.gz` for Apple silicon"
+  },
+  {
+    "file": "docs/contributing/release.md",
+    "line": 144,
+    "policy": "prose",
+    "pattern": "- `terum-skills-desktop_<version>_x64.app.tar.gz` for Intel Macs"
+  },
+  {
+    "file": "docs/contributing/release.md",
+    "line": 145,
+    "policy": "prose",
+    "pattern": "- `terum-skills-desktop_<version>_arm64-setup.exe` for Windows on ARM64"
+  },
+  {
+    "file": "docs/contributing/release.md",
+    "line": 146,
+    "policy": "prose",
+    "pattern": "- `terum-skills-desktop_<version>_x64-setup.exe` for Windows on x64"
+  },
+  {
+    "file": "docs/contributing/release.md",
+    "line": 150,
+    "policy": "prose",
+    "pattern": "What stands in for a certificate is the build-provenance attestation the desktop job records. The CLI discards any asset that carries no valid attestation for this repository, and says so. Releases cut before that step landed carry none, so a CLI built from this tree refuses their assets; `app` only ever downloads the app for its own version, so that reaches a user only through `app-update --release <version>` aimed at an older Release."
+  },
+  {
     "file": "docs/evaluating/generated-evals.md",
     "line": 3,
     "policy": "prose",
