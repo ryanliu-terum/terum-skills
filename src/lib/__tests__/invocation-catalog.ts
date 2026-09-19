@@ -1091,6 +1091,12 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
   },
   {
     "file": ".claude/skills/terum-skills/SKILL.md",
+    "line": 98,
+    "policy": "prose",
+    "pattern": "profile with no question, interactive or not; `profile --remove <name>` takes it off again."
+  },
+  {
+    "file": ".claude/skills/terum-skills/SKILL.md",
     "line": 113,
     "policy": "fixed",
     "pattern": "| `project add` (no path) | none | `npx -y terum-skills@latest project add` — asks for a folder |"
