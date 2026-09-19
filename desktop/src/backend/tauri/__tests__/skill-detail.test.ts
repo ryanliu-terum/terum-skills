@@ -126,6 +126,7 @@ it('does not install when reading destinations fails',async()=>{
 });
 it('omits an unknown author handle and remote rather than inventing a share ref',async()=>{
   const f=detailReplay((name,value)=>{
+    if(name==='ls')delete value.people; // Neither tracked source has an author handle in this case.
     if(name.startsWith('status')){const team=(value.teams as Record<string,unknown>[])[0]!;delete team.members;team.repository=null;}
   });
   expect(await createTauriBackend(f.bridge).skill({ref:'deploy-check'})).toMatchObject({ok:true,value:{author:{handle:''},repo:null,shareCommand:'—'}});

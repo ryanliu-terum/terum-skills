@@ -1,0 +1,17 @@
+.skill-share-trigger{flex-shrink:0;color:var(--tk-text3)}
+.skill-share-heading{display:flex;align-items:center;justify-content:space-between;gap:16px}.skill-share-heading .dialog-title{min-width:0;overflow-wrap:anywhere}
+.skill-share-preview-frame{margin:16px 0;display:grid;place-items:center;min-width:0}
+.skill-share-preview{display:block;width:100%;height:auto;max-height:48vh;object-fit:contain;object-position:center;border-radius:8px}
+.skill-share-loading{padding:48px 16px;text-align:center;color:var(--tk-text3)}
+.skill-share-options{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-top:18px}
+.skill-share-formats{display:flex;gap:4px}
+.skill-share-destinations{display:flex;justify-content:center;align-items:center;gap:12px;flex-wrap:wrap;padding:8px 0}
+.skill-share-circle{display:grid;place-items:center;width:48px;height:48px;padding:0;flex-shrink:0;border:1px solid var(--tk-border1);border-radius:50%;background:var(--tk-bg3);color:var(--tk-text1);cursor:pointer}
+.skill-share-circle:hover:not(:disabled){background:var(--tk-bg4);border-color:var(--tk-border2)}
+.skill-share-circle:focus-visible{outline:2px solid var(--tk-brand);outline-offset:3px}
+.skill-share-circle:disabled{opacity:.5;cursor:wait}
+.skill-share-action-divider{height:24px;width:1px;background:var(--tk-border1);margin:0 2px}
+.skill-share-platform-logo{width:23px;height:23px;object-fit:contain}
+:root[data-theme="dark"] .skill-share-platform-logo{filter:invert(1)}
+.skill-share-notice{font-size:12px;color:var(--tk-text2);margin:12px 0 0;text-align:center}
+@media(max-width:440px){.skill-share-destinations{gap:8px}.skill-share-circle{width:44px;height:44px}.skill-share-action-divider{display:none}}

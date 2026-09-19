@@ -28,6 +28,18 @@
         },
         {
           "url": "https://discord.gg/*"
+        },
+        {
+          "url": "https://twitter.com/intent/tweet*"
+        },
+        {
+          "url": "https://www.linkedin.com/feed/*"
+        },
+        {
+          "url": "https://www.reddit.com/submit*"
+        },
+        {
+          "url": "https://www.instagram.com/"
         }
       ]
     },

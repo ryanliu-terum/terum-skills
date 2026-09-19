@@ -78,6 +78,9 @@ export interface Backend {
   openInEditor(path: string): Promise<Result<void>>;
   copyToClipboard(text: string): Promise<Result<void>>;
   copyImage(png: Blob): Promise<Result<void>>;
+  canShareImage(png:Blob):boolean;
+  shareImage(png:Blob,name:string):Promise<Result<void>>;
+  saveImage(png:Blob,name:string):Promise<Result<void>>;
   readonly prefs: PrefStore;
   subscribe(listener: (source: ChangeSource) => void): Subscription;
 }
