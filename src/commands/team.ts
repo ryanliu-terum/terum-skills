@@ -75,7 +75,7 @@ export class HandleCollisionError extends Error {
   constructor(readonly handle: string) { super(`Handle ${handle} is already in use by an active member.`); this.name = 'HandleCollisionError'; }
 }
 
-const CATEGORIES = ['debugging', 'testing', 'docs', 'workflow', 'research', 'infra', 'misc'];
+const CATEGORIES = ['debugging', 'testing', 'docs', 'workflow', 'research', 'infra', 'review', 'misc'];
 export const MAX_HANDLE_ATTEMPTS = 3;
 /** `gh repo create` tries per `team create`: the first answer plus two re-asks, like the handle and every other askUntilValid question. */
 export const MAX_REPO_ATTEMPTS = 3;
