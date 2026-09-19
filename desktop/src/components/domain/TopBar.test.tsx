@@ -1,3 +1,4 @@
+// Share-image presets add only the four explicit destination URLs to the existing opener allowlist.
 import type { ReactNode } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { readFileSync } from 'node:fs';
@@ -44,7 +45,7 @@ it('keeps OS decorations and the locked minimum dimensions, with macOS overlay s
  expect(config.app.windows[0]).toMatchObject({decorations:true,minWidth:960,minHeight:600,titleBarStyle:'Overlay',hiddenTitle:true,trafficLightPosition:{x:16,y:13}});
  const permissions=JSON.parse(readFileSync('src-tauri/capabilities/default.json','utf8')).permissions;
  expect(permissions).toContain('core:window:allow-toggle-maximize');expect(permissions).toContain('core:window:allow-internal-toggle-maximize');
- expect(permissions).not.toContain('opener:default');expect(permissions).toContainEqual({identifier:'opener:allow-open-url',allow:[{url:'https://github.com/*'},{url:'https://discord.gg/*'}]});
+ expect(permissions).not.toContain('opener:default');expect(permissions).toContainEqual({identifier:'opener:allow-open-url',allow:[{url:'https://github.com/*'},{url:'https://discord.gg/*'},{url:'https://twitter.com/intent/tweet*'},{url:'https://www.linkedin.com/feed/*'},{url:'https://www.reddit.com/submit*'},{url:'https://www.instagram.com/'}]});
 });
 
 it.each(['absent','available','ready','unsupported','current','checking','mock'] as const)('update chip: %s',async state=>{
