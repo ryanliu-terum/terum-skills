@@ -52,4 +52,5 @@ npx -y terum-skills@latest setup
 ## Project
 
 - [Roadmap](roadmap.md): what is planned, under consideration, deferred, and not planned.
+- [Changelog](../CHANGELOG.md): every release, generated from the release record.
 - [Collaborate with us](../README.md#collaborate-with-us): Discord, issues, email.
