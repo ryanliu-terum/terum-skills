@@ -31,7 +31,8 @@ it('allows source and documentation command literals only at explicitly catalogu
   const verbs = [...new Set(names(buildProgram(async () => {})))].sort((a, b) => b.length - a.length).join('|');
   const command = new RegExp('(?:`|^)(?:' + verbs + ')(?=[ `])');
   const documents = ['.claude/skills/terum-skills/SKILL.md', 'README.md', 'SECURITY.md',
-    ...(await readdir(resolve(root, 'docs'), { recursive: true })).filter(path => path.endsWith('.md')).map(path => `docs/${path}`)];
+    // A recursive readdir spells nested paths with the host separator; catalogue keys use `/`.
+    ...(await readdir(resolve(root, 'docs'), { recursive: true })).map(path => path.split(sep).join('/')).filter(path => path.endsWith('.md')).map(path => `docs/${path}`)];
   for (const file of documents) {
     for (const line of (await readFile(resolve(root, file), 'utf8')).replaceAll('\r\n', '\n').split('\n')) {
       if (line.includes('terum-skills') || command.test(line) || /"argv"\s*:/.test(line)) hits.push({ file, pattern: line.trim() });

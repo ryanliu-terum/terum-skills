@@ -115,7 +115,7 @@ Your people file carries both lists, and they answer different questions.
 | Removed by | `uninstall-skill`, when the last local copy at that scope goes | `profile --remove <skill>` |
 | Carries | The skill uuid, the version, the scope, the date | The skill uuid, its name, the version, the date, and whether it arrived via publish or install |
 
-Publishing adds the entry without asking, because typing `publish` is the endorsement: you chose the skill, the team and the project by hand. Installing someone else's skill asks, because putting a copy on your machine is not a statement about the skill. Either way it is one entry per skill, updated in place, and `profile --remove` takes it off.
+Publishing and installing both add the entry without asking: typing `publish` or `install <name>` chose the skill by hand, and that is the endorsement. It is one entry per skill, updated in place, and `profile --remove` takes it off.
 
 `install member <handle>` installs that person's `profile[]`, not their `installed[]`. You get what they endorse, not everything they happen to have.
 

@@ -401,8 +401,9 @@ export async function run(args: PublishArgs, io: Prompter): Promise<Result<Publi
     let profileAdded = false;
     io.progress?.({ step: `Adding ${found.name} to your profile`, current: 5, total: PUBLISH_STEPS });
     try {
-      profileAdded = await recordProfileEntry({ store, clone, team, handle: binding.handle, remote: binding.remote, runner, id, name: found.name, version: at, via: 'publish' }, io);
-      if (profileAdded) io.print(`Your profile now lists ${found.name} at ${label}.`);
+      await recordProfileEntry({ store, clone, team, handle: binding.handle, remote: binding.remote, runner, id, name: found.name, version: at, via: 'publish' }, io);
+      profileAdded = true;
+      io.print(`Your profile now lists ${found.name} at ${label}.`);
     } catch (error) {
       io.print(`Published ${found.name}, but could not add it to your profile: ${error instanceof Error ? error.message : String(error)}`);
     }

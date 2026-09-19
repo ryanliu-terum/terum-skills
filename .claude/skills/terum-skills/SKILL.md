@@ -94,9 +94,8 @@ at the targeted root's sibling `.claude/old-skills/<name>` and placing the new v
 copy stays under that project. If the kept-copy path already exists, the command refuses; move
 that backup elsewhere yourself before retrying. Neither the Library nor `prune` cleans old-skills.
 Install seeds local eval receipts under each receipt's own content digest, preserving the runner's
-attribution. A receipt without a digest is skipped with a notice. Interactive install offers adding
-the skill to your profile (default no); noninteractive install skips that offer unless the user
-explicitly requests `--yes-profile`.
+attribution. A receipt without a digest is skipped with a notice. Install adds the skill to your
+profile with no question, interactive or not; `profile --remove <name>` takes it off again.
 
 Output handling for every verb in Table A:
 
