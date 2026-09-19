@@ -832,108 +832,6 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "pattern": "default: return ['Installation method could not be established.', 'Update this copy with the tool that installed it.', \"To run the registry's latest release:\", '  npx -y terum-skills@latest <command>', 'The session hook and /terum-skills skill keep the version that set them up until you re-run:', '  npx -y terum-skills@latest setup'];"
   },
   {
-    "file": "SECURITY.md",
-    "line": 3,
-    "policy": "prose",
-    "pattern": "What terum-skills runs on your machine, when, and how a release is built and checked. Written so"
-  },
-  {
-    "file": "SECURITY.md",
-    "line": 8,
-    "policy": "prose",
-    "pattern": "Everything is opt-in at `terum-skills setup`, each with its own y/N, and everything is removed by"
-  },
-  {
-    "file": "SECURITY.md",
-    "line": 9,
-    "policy": "prose",
-    "pattern": "`terum-skills uninstall`."
-  },
-  {
-    "file": "SECURITY.md",
-    "line": 13,
-    "policy": "prose",
-    "pattern": "| Session hook | Once per Claude Code session start, in the background, at most once an hour per team | The copy of the CLI that set it up (see *Pinned, not latest*) with `sync --hook` | Fetches your team's private git repository into `~/.terum/skills`; refreshes skills it placed under `~/.claude/skills/` and the two files below; uploads nothing |"
-  },
-  {
-    "file": "SECURITY.md",
-    "line": 14,
-    "policy": "prose",
-    "pattern": "| `/terum-skills` skill | Only when Claude Code decides the skill applies, or you invoke it | The CLI verbs the skill describes, in the same pinned spelling | Whatever the verb does; verbs that ask a question are handed to your terminal instead |"
-  },
-  {
-    "file": "SECURITY.md",
-    "line": 18,
-    "policy": "prose",
-    "pattern": "The CLI never runs a package manager on your behalf. `terum-skills update` prints the command that"
-  },
-  {
-    "file": "SECURITY.md",
-    "line": 23,
-    "policy": "prose",
-    "pattern": "The session hook and the placed `/terum-skills` skill name the copy of the CLI that installed them:"
-  },
-  {
-    "file": "SECURITY.md",
-    "line": 24,
-    "policy": "prose",
-    "pattern": "the bare `terum-skills` binary when you installed the package globally, otherwise"
-  },
-  {
-    "file": "SECURITY.md",
-    "line": 25,
-    "policy": "prose",
-    "pattern": "`npx -y terum-skills@<version>` with the exact version that ran `setup`. Nothing on this machine"
-  },
-  {
-    "file": "SECURITY.md",
-    "line": 27,
-    "policy": "prose",
-    "pattern": "yourself and, for the pinned `npx` spelling, re-run `setup` so the hook and the skill move with it."
-  },
-  {
-    "file": "SECURITY.md",
-    "line": 29,
-    "policy": "prose",
-    "pattern": "Releases before 0.21 wrote `npx -y terum-skills@latest` into the hook. The first session hook run of"
-  },
-  {
-    "file": "SECURITY.md",
-    "line": 37,
-    "policy": "prose",
-    "pattern": "grep -n terum-skills ~/.claude/settings.json"
-  },
-  {
-    "file": "SECURITY.md",
-    "line": 55,
-    "policy": "prose",
-    "pattern": "`terum-skills app` and `app-update` download the app for the CLI's own version through"
-  },
-  {
-    "file": "SECURITY.md",
-    "line": 60,
-    "policy": "prose",
-    "pattern": "2. `gh attestation verify <asset> --repo ryanliu-terum/terum-skills` succeeds. This checks the"
-  },
-  {
-    "file": "SECURITY.md",
-    "line": 68,
-    "policy": "prose",
-    "pattern": "npm audit signatures            # in a project where terum-skills is installed"
-  },
-  {
-    "file": "SECURITY.md",
-    "line": 69,
-    "policy": "prose",
-    "pattern": "gh attestation verify terum-skills-desktop_<version>_<suffix> --repo ryanliu-terum/terum-skills"
-  },
-  {
-    "file": "SECURITY.md",
-    "line": 80,
-    "policy": "prose",
-    "pattern": "- **Skill content itself.** A skill your team publishes is text Claude Code reads; terum-skills"
-  },
-  {
     "file": ".claude/skills/terum-skills/SKILL.md",
     "line": 2,
     "policy": "prose",
@@ -1478,6 +1376,108 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "line": 149,
     "policy": "fixed",
     "pattern": "Updates are yours to take. The session hook and the `/terum-skills` skill run the copy of the CLI that set them up: the bare `terum-skills` binary when that copy is a global install the CLI found on your PATH on macOS or Linux, otherwise `npx -y terum-skills@<version>` pinned to that release. Nothing fetches a newer CLI at session start. `update` prints the newest advertised release and the exact command that updates *this* copy; after updating, re-run `setup` and the hook and skill move with it. The desktop app asks GitHub for a new release once a day, downloads it, and installs it when you quit, overnight, or when you press Install now, whichever you chose in Settings ▸ Updates; every download must match its published checksum and carry a build attestation from this repository's release workflow. `npx -y terum-skills@latest uninstall` removes your team from this machine (placed skills, the local clone, the hooks, the Claude Code skill, and on macOS the app bundle) and keeps your backups, quarantine, and local eval runs. On Windows, remove the app from Settings ▸ Apps."
+  },
+  {
+    "file": "SECURITY.md",
+    "line": 3,
+    "policy": "prose",
+    "pattern": "What terum-skills runs on your machine, when, and how a release is built and checked. Written so"
+  },
+  {
+    "file": "SECURITY.md",
+    "line": 8,
+    "policy": "prose",
+    "pattern": "Everything is opt-in at `terum-skills setup`, each with its own y/N, and everything is removed by"
+  },
+  {
+    "file": "SECURITY.md",
+    "line": 9,
+    "policy": "prose",
+    "pattern": "`terum-skills uninstall`."
+  },
+  {
+    "file": "SECURITY.md",
+    "line": 13,
+    "policy": "prose",
+    "pattern": "| Session hook | Once per Claude Code session start, in the background, at most once an hour per team | The copy of the CLI that set it up (see *Pinned, not latest*) with `sync --hook` | Fetches your team's private git repository into `~/.terum/skills`; refreshes skills it placed under `~/.claude/skills/` and the two files below; uploads nothing |"
+  },
+  {
+    "file": "SECURITY.md",
+    "line": 14,
+    "policy": "prose",
+    "pattern": "| `/terum-skills` skill | Only when Claude Code decides the skill applies, or you invoke it | The CLI verbs the skill describes, in the same pinned spelling | Whatever the verb does; verbs that ask a question are handed to your terminal instead |"
+  },
+  {
+    "file": "SECURITY.md",
+    "line": 18,
+    "policy": "prose",
+    "pattern": "The CLI never runs a package manager on your behalf. `terum-skills update` prints the command that"
+  },
+  {
+    "file": "SECURITY.md",
+    "line": 23,
+    "policy": "prose",
+    "pattern": "The session hook and the placed `/terum-skills` skill name the copy of the CLI that installed them:"
+  },
+  {
+    "file": "SECURITY.md",
+    "line": 24,
+    "policy": "prose",
+    "pattern": "the bare `terum-skills` binary when you installed the package globally, otherwise"
+  },
+  {
+    "file": "SECURITY.md",
+    "line": 25,
+    "policy": "prose",
+    "pattern": "`npx -y terum-skills@<version>` with the exact version that ran `setup`. Nothing on this machine"
+  },
+  {
+    "file": "SECURITY.md",
+    "line": 27,
+    "policy": "prose",
+    "pattern": "yourself and, for the pinned `npx` spelling, re-run `setup` so the hook and the skill move with it."
+  },
+  {
+    "file": "SECURITY.md",
+    "line": 29,
+    "policy": "prose",
+    "pattern": "Releases before 0.21 wrote `npx -y terum-skills@latest` into the hook. The first session hook run of"
+  },
+  {
+    "file": "SECURITY.md",
+    "line": 37,
+    "policy": "prose",
+    "pattern": "grep -n terum-skills ~/.claude/settings.json"
+  },
+  {
+    "file": "SECURITY.md",
+    "line": 55,
+    "policy": "prose",
+    "pattern": "`terum-skills app` and `app-update` download the app for the CLI's own version through"
+  },
+  {
+    "file": "SECURITY.md",
+    "line": 60,
+    "policy": "prose",
+    "pattern": "2. `gh attestation verify <asset> --repo ryanliu-terum/terum-skills` succeeds. This checks the"
+  },
+  {
+    "file": "SECURITY.md",
+    "line": 68,
+    "policy": "prose",
+    "pattern": "npm audit signatures            # in a project where terum-skills is installed"
+  },
+  {
+    "file": "SECURITY.md",
+    "line": 69,
+    "policy": "prose",
+    "pattern": "gh attestation verify terum-skills-desktop_<version>_<suffix> --repo ryanliu-terum/terum-skills"
+  },
+  {
+    "file": "SECURITY.md",
+    "line": 80,
+    "policy": "prose",
+    "pattern": "- **Skill content itself.** A skill your team publishes is text Claude Code reads; terum-skills"
   },
   {
     "file": "docs/NEXT.md",

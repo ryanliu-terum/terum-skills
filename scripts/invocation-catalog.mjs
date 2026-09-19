@@ -2,7 +2,7 @@
 // Regenerates the documentation half of src/lib/__tests__/invocation-catalog.ts.
 //
 // The invocation tripwire (src/lib/__tests__/invocation-tripwire.test.ts) requires every line of
-// README.md, docs/**/*.md and the shipped /terum-skills manual that names the package or a verb to be
+// README.md, SECURITY.md, docs/**/*.md and the shipped /terum-skills manual that names the package or a verb to be
 // catalogued by file and exact trimmed content. Source entries (src/**) stay hand-maintained: a new
 // hint in code is a product decision and this script never touches those rows. Document rows are
 // mechanical, so this script rewrites them from the current files using the same scan the test runs.
@@ -40,7 +40,7 @@ const docs = (await readdir(resolve(root, 'docs'), { recursive: true }))
   .filter(path => path.endsWith('.md'))
   .sort()
   .map(path => `docs/${path}`);
-const documents = ['.claude/skills/terum-skills/SKILL.md', 'README.md', ...docs];
+const documents = ['.claude/skills/terum-skills/SKILL.md', 'README.md', 'SECURITY.md', ...docs];
 
 const source = await readFile(catalogPath, 'utf8');
 const open = /\]\s*=\s*\[/.exec(source);
@@ -51,7 +51,7 @@ if (!open || close < open.index) {
 }
 const arrayStart = open.index + open[0].length - 1;
 const existing = JSON.parse(source.slice(arrayStart, close + 1));
-const isDocument = row => row.file === 'README.md' || row.file === '.claude/skills/terum-skills/SKILL.md' || row.file.startsWith('docs/');
+const isDocument = row => documents.includes(row.file) || row.file.startsWith('docs/');
 const kept = existing.filter(row => !isDocument(row));
 // A row's policy is a human classification the test never asserts; keep it when the same
 // file-and-content row already exists, and classify only rows that are new.

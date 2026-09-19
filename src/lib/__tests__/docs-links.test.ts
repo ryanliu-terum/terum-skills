@@ -3,7 +3,7 @@ import { dirname, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { expect, it } from 'vitest';
 
-// Every relative link in the public documentation must resolve to a file in the repository, and
+// Every relative link in the public documentation (README.md, SECURITY.md, docs/**) must resolve to a file in the repository, and
 // every `#fragment` on such a link must name a heading in the target file (GitHub's slug rule:
 // lower-case, drop everything except letters, digits, spaces, hyphens and underscores, spaces to
 // hyphens, then -1, -2 … for repeats). External links are not fetched; this is a rot check for the
@@ -48,8 +48,8 @@ const links = (markdown: string): { target: string; line: number }[] => {
   return out;
 };
 
-it('every relative link in README.md and docs/**/*.md resolves, fragments included', async () => {
-  const documents = ['README.md',
+it('every relative link in README.md, SECURITY.md and docs/**/*.md resolves, fragments included', async () => {
+  const documents = ['README.md', 'SECURITY.md',
     ...(await readdir(resolve(root, 'docs'), { recursive: true })).map(path => path.split('\\').join('/')).filter(path => path.endsWith('.md')).sort().map(path => `docs/${path}`)];
   for (const optional of ['CONTRIBUTING.md', 'CHANGELOG.md']) {
     if (await stat(resolve(root, optional)).then(() => true, () => false)) documents.push(optional);
