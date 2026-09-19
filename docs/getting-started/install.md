@@ -104,7 +104,7 @@ Setup is a wizard with named steps. Re-run it any time: it resumes the team this
 
 14. **Edit hook.** "Remind Claude Code to publish a skill after it edits one? (installs ~/.terum/skills/hooks/terum-skills-edit.mjs and a Write/Edit hook in ~/.claude/settings.json)" (default No).
 
-    These are three separate questions on purpose. The session hook fetches on a schedule; the edit hook runs after every Write and Edit the agent makes and reads the path it touched. Folding the second into a yes already given would install something else. All three default to No, and declining any of them is remembered only in the sense that nothing was written: a later `sync --hook` never installs a copy you declined, it only refreshes one you accepted. A re-run does not ask again for one you already have. An installed session hook is reported rather than offered, and an out-of-date `/terum-skills` skill or edit-hook script of ours is refreshed without a question, because the consent was given when it was installed. Anything at either path that is not ours is named and left alone. See [Claude Code integration](../guides/claude-code-integration.md).
+    These are three separate questions on purpose. The session hook fetches on a schedule; the edit hook runs after every Write and Edit the agent makes and reads the path it touched. Folding the second into a yes already given would install something else. All three default to No, and declining any of them is remembered only in the sense that nothing was written: a later `sync --hook` never installs a copy you declined, it only refreshes one you accepted. A re-run does not ask again for one you already have. An installed session hook is reported rather than offered, and an out-of-date `/terum-skills` skill or edit-hook script of ours is refreshed without a question, because the consent was given when it was installed. Anything at either path that is not ours is named and left alone. The hook entry and the `/terum-skills` skill both name the copy of the CLI that wrote them rather than the registry's latest release, so a session runs the copy you installed; a later `sync --hook` re-points an entry written by an earlier release at the copy that is running and says so on stderr. See [Claude Code integration](../guides/claude-code-integration.md), and [security](../../SECURITY.md) for what runs on this machine and when.
 
 15. **Done.** The members, the repository URL, and the team README URL.
 
@@ -127,7 +127,7 @@ Windows spellings differ: `~` is `%USERPROFILE%`, so the state root is `%USERPRO
 | `~/.terum/skills/config.json` | Always, at `team create` or `team join` | Your team binding, your identity defaults, the placement ledger, tool-consent records, registered projects. Mode 0600. |
 | `~/.terum/skills/teams/<team>/` | `team create`, `team join` | The clone of the team repo, on `main`, with a `pre-push` guard armed in `.git/hooks`. |
 | `~/.terum/skills/run/` | Throughout | Machine-local run state: sync stamps and locks, the eval queue, the app's launch record. |
-| `~/.claude/settings.json` | Only if you accept the session hook | A `hooks.SessionStart` entry with matcher `startup` running `npx -y terum-skills@latest sync --hook` (`async`, 60 s timeout). |
+| `~/.claude/settings.json` | Only if you accept the session hook | A `hooks.SessionStart` entry with matcher `startup` that runs `sync --hook` through the copy of the CLI that installed it, in the same bare-or-npx form the CLI uses for the commands it prints: `terum-skills sync --hook` for a global install the CLI found on your PATH on macOS or Linux, otherwise `npx -y terum-skills@<version> sync --hook` pinned to the release that ran setup (`async`, 60 s timeout). See *Other ways to run it* below. |
 | `~/.claude/settings.json` | Only if you accept the edit hook | A `hooks.PostToolUse` entry with matcher `Write\|Edit` running `node "<home>/.terum/skills/hooks/terum-skills-edit.mjs"` (10 s timeout, not async). |
 | `~/.terum/skills/backups/settings.<stamp>.json` | Once ever, before the first settings write | A verbatim copy of your `~/.claude/settings.json`. |
 | `~/.claude/skills/terum-skills/` | Only if you accept the `/terum-skills` skill | The bundled skill that teaches Claude Code which verbs it may run. Anything else already at that path is named and left alone. |
@@ -149,12 +149,12 @@ npx -y terum-skills@latest status
 
 ## Other ways to run it
 
-The `npx -y terum-skills@latest …` form resolves the registry's latest release on each run, so there is nothing to keep up to date.
+The `npx -y terum-skills@latest …` form resolves the registry's latest release on each run, so a command you type is always the newest release. The session hook and the `/terum-skills` skill are the exception: each is pinned to the copy that installed it, and re-running `setup` is what moves them.
 
 Pin a version when you want one exact release, for example in a script:
 
 ```sh
-npx -y terum-skills@0.20.0 setup
+npx -y terum-skills@0.20.1 setup
 ```
 
 Install it globally when you would rather type less:
@@ -170,9 +170,9 @@ When you then run the bare command on macOS or Linux, the CLI prints its own com
 
 | How you run it | How it updates |
 | --- | --- |
-| `npx -y terum-skills@latest` | Each run requests the registry's latest release. Nothing to do. |
-| Global install | Run what `update` prints: `npm install -g terum-skills@latest`. |
-| Local dependency | Run what `update` prints: `npm install terum-skills@latest` (or `--save-dev`) in that project. |
+| `npx -y terum-skills@latest` | Each run requests the registry's latest release. Re-run `setup` to move the session hook and the `/terum-skills` skill onto it. |
+| Global install | Run what `update` prints: `npm install -g terum-skills@latest`. Where the hook and the skill were written in the bare form they follow the new global install on their own; where they name a version, re-run `setup`, which is what `update` says. |
+| Local dependency | Run what `update` prints: `npm install terum-skills@latest` (or `--save-dev`) in that project, then re-run `setup` to move the hook and the skill. |
 | Source checkout | Update the checkout, then `npm run build`. |
 | The app | It updates itself. See [the desktop app](../guides/desktop-app.md). |
 
@@ -180,7 +180,7 @@ When you then run the bare command on macOS or Linux, the CLI prints its own com
 npx -y terum-skills@latest update
 ```
 
-`update` prints the running version, where this copy lives, the latest advertised release, and the command that would update it. It never runs a package manager. The release advertisement comes from a `git ls-remote --tags` probe of this project's public repository, capped at once a day for the passive notice and forced when you run `update` yourself. A machine whose team remote is not on GitHub does not probe at all, and says so: "Release advertisements are not checked on this machine."
+`update` prints the running version, where this copy lives, the latest advertised release, and the command that would update this copy. Where that copy is a global install, an npx run, or one whose installation method could not be established, it also names the re-run of `setup` that moves the session hook and the `/terum-skills` skill onto the release you updated to. It never runs a package manager. The release advertisement comes from a `git ls-remote --tags` probe of this project's public repository, capped at once a day for the passive notice and forced when you run `update` yourself. A machine whose team remote is not on GitHub does not probe at all, and says so: "Release advertisements are not checked on this machine."
 
 ## Uninstalling
 

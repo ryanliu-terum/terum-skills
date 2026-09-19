@@ -77,7 +77,7 @@ So we treat skill evaluation the way medicine treats a new drug: with a control 
 ```mermaid
 flowchart LR
     S["Skill folder"] --> H["Hygiene gates<br/>frontmatter, secrets, hidden unicode, license"]
-    H --> G["Test set<br/>authored cases, or 3–7 generated<br/>across explicit / implicit / contextual /<br/>negative / adversarial"]
+    H --> G["Test set<br/>authored cases or a suite, or generated<br/>across explicit / implicit / contextual /<br/>negative / adversarial"]
     G --> T["Trigger eval<br/>prompts that should and should not trigger it,<br/>against your local catalog → precision, recall"]
     G --> B["Baseline arm<br/>no skill"]
     G --> K["Candidate arm<br/>this folder"]
@@ -94,7 +94,7 @@ flowchart LR
 
 The question is never "what score did the skill get?" It's the only question that matters in practice: is the agent measurably better with this skill than without it, and better than the version we already had?
 
-- **Cases** live in the skill folder and travel with it. A skill with none still gets evaluated: `eval` generates between three and seven, sized to the skill's complexity and spread across the five prompt buckets, plus five should-trigger and five should-not-trigger prompts. Every generated file is marked as generated.
+- **Cases** live in the skill folder and travel with it. A skill with none still gets evaluated: `eval` generates either one suite or between three and seven cases, sized to the skill's complexity, plus five should-trigger and five should-not-trigger prompts. Every generated file is marked as generated.
 - **Arms** run in fresh sandboxes through `claude -p` with your user-level settings and hooks left out, and the engine refuses to run if the skill under test leaks into the baseline. Each case runs once by default; `--k 3` gives an estimate you can gate on.
 - **Verdicts** come from the deterministic checks. Only a tie goes to a judge, which compares the two transcripts twice with the order reversed and must agree with itself, or the row stays a tie.
 - **Receipts** record who ran it, the engine and Claude Code versions, the models requested, `k`, and the cases. A card shows one receipt's own result with that provenance beside it; scores are never averaged across receipts.
@@ -146,7 +146,7 @@ Every verb runs as `npx -y terum-skills@latest <verb>`. The ones you'll type by 
 
 ## Updating and uninstalling
 
-Updates are yours to take. The session hook and the `/terum-skills` skill run the copy of the CLI that set them up: the bare `terum-skills` binary when you installed the package globally, otherwise `npx -y terum-skills@<version>` pinned to that release. Nothing fetches a newer CLI at session start. `update` prints the newest advertised release and the exact command that updates *this* copy; after updating, re-run `setup` and the hook and skill move with it. The desktop app asks GitHub for a new release once a day, downloads it, and installs it when you quit, overnight, or when you press Install now, whichever you chose in Settings ▸ Updates; every download must match its published checksum and carry a build attestation from this repository's release workflow. `npx -y terum-skills@latest uninstall` removes your team from this machine (placed skills, the local clone, the hooks, the Claude Code skill, and on macOS the app bundle) and keeps your backups, quarantine, and local eval runs. On Windows, remove the app from Settings ▸ Apps.
+Updates are yours to take. The session hook and the `/terum-skills` skill run the copy of the CLI that set them up: the bare `terum-skills` binary when that copy is a global install the CLI found on your PATH on macOS or Linux, otherwise `npx -y terum-skills@<version>` pinned to that release. Nothing fetches a newer CLI at session start. `update` prints the newest advertised release and the exact command that updates *this* copy; after updating, re-run `setup` and the hook and skill move with it. The desktop app asks GitHub for a new release once a day, downloads it, and installs it when you quit, overnight, or when you press Install now, whichever you chose in Settings ▸ Updates; every download must match its published checksum and carry a build attestation from this repository's release workflow. `npx -y terum-skills@latest uninstall` removes your team from this machine (placed skills, the local clone, the hooks, the Claude Code skill, and on macOS the app bundle) and keeps your backups, quarantine, and local eval runs. On Windows, remove the app from Settings ▸ Apps.
 
 ## Security
 

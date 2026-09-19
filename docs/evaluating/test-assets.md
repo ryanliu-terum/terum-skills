@@ -125,7 +125,7 @@ A `should_not_trigger` prompt earns its keep by being a plausible near miss draw
 
 `evals/suite.yaml` exists for the case where one session can answer many questions. The engine runs one agent session per arm per repetition, and scores every sub-case against that single transcript. Ten planted defects become ten independently decided rows from two sessions rather than twenty.
 
-A suite is hand-authored only. There is no generator for `evals/suite.yaml`, and no flag that asks for one.
+A suite is authored by hand or written by the generator. `eval` generates one when the folder holds no execution asset at all and the generator judges the skill measurable against a planted ground truth; `metadata.eval.shape: suite` in your frontmatter demands that shape, and no flag asks for one. A generated suite is written in the format below, with `timeout_minutes: 120`, `requires: []`, and a `setup` the engine composes rather than the model. See [generated evals](generated-evals.md#suites).
 
 The top level takes the same fields a case does, and `task` is required in exactly the same way. `fixture` is resolved relative to `evals/`, not `evals/cases/`, because that is where the file lives. `checks`, `judge`, and `bucket` are parsed at the top level and then discarded: checks belong to the sub-cases, and a suite is never judged, so a check tie on a sub-case is always an ordinary no-rubric tie.
 

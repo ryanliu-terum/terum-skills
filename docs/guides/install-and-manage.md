@@ -252,10 +252,10 @@ fetch-free, so a teammate's commit reaches this machine only when something fetc
 
 The verb's help text says `Nothing on this machine is changed: no placement, no upload, no edit to
 your skills.` The fetch itself uploads nothing and writes only the clone and the stamp. The run as a
-whole goes further in two places on this page: hook mode rewrites this tool's own managed files, and
-accepting the successor offer runs `team move`, which removes and re-places every placed skill. The
-stamp means the clone was fetched at that time and left at that commit. It makes no claim about your
-folders.
+whole goes further in two places on this page: hook mode rewrites this tool's own managed files and
+its own hook entry, and accepting the successor offer runs `team move`, which removes and re-places
+every placed skill. The stamp means the clone was fetched at that time and left at that commit. It
+makes no claim about your folders.
 
 A team that cannot be refreshed is reported, not fatal:
 
@@ -267,14 +267,24 @@ The states are `refreshed`, `fresh`, `busy`, `unreachable`, `no-clone` and `erro
 
 ### Hook mode
 
-`sync --hook` is what a Claude Code session-start hook runs. It differs in three ways:
+`sync --hook` is what a Claude Code session-start hook runs. It differs in four ways:
 
 - a clone fetched within the last hour is reported as `fresh` and left alone,
+- the `SessionStart` entry in `~/.claude/settings.json` is re-pointed at the copy of the CLI that is
+  running when it names anything else, which is what moves an entry written by a release that spelled
+  the command `npx -y terum-skills@latest`. The run says `Pinned your session hook to this copy of
+  terum-skills (<command>)` and names the `setup` to re-run after your next update. Nothing is
+  installed where no entry of ours exists, and a settings file this run cannot edit is a notice, not
+  a failure,
 - an outdated managed copy of the bundled `/terum-skills` skill is refreshed, printing `Updated your
   /terum-skills manual for this CLI.`, and so is the edit hook's script, printing `Updated your
   terum-skills edit hook for this CLI.` A copy you declined, or never saw offered, is never installed
   by the hook, and a file that is not this tool's own is never touched,
 - stdout carries only Claude Code's reload directive, so diagnostics travel as notices.
+
+The entry and the manual both name one copy of the CLI on purpose: a session start runs the release
+you installed, never the registry's newest. [Security](../../SECURITY.md) sets out what runs on your
+machine and when.
 
 ### When a repository is gone
 

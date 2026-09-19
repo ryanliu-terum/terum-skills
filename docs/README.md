@@ -38,7 +38,7 @@ npx -y terum-skills@latest setup
 - [Generated evals](evaluating/generated-evals.md): what `eval` writes when a skill has no tests.
 - [Running evals](evaluating/running-evals.md): arms, sandboxes, options, batches, the queue, the lock.
 - [Results and receipts](evaluating/results-and-receipts.md): the report, the numbers, the receipt, how scores reach cards.
-- [Usage](evaluating/usage.md): which placed skills fired on this machine.
+- [Usage](evaluating/usage.md): which placed skills fired on this machine, and what `misses` screens for when one never did.
 
 ## Reference
 

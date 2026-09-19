@@ -232,7 +232,7 @@ of it. Transcripts and run trees stay local and unredacted; the boundary is shar
     run.jsonl
     transcripts/<case|suite>.<arm>.<rep>[.attempt-1].jsonl
     sandboxes/arm-XXXXXX/
-    generated/{triggers.yaml,cases/*.yaml}
+    generated/{triggers.yaml,suite.yaml,cases/*.yaml}
 ```
 
 On Windows the root is `%USERPROFILE%\.terum\skills\`.
@@ -244,7 +244,8 @@ matches on the digest it has computed.
 `run.jsonl` is one meta line then one line per comparison row, arm sample and trigger block. It
 carries more than the receipt does: the team, the heavy flag and its evidence, the staged and missing
 dependencies, whether any arm spawned agents, the per-arm resolved model ids, and which assets this
-run generated.
+run generated, as `generated_assets`, which carries `cases` and `triggers` as booleans and `suite`
+only when the generator returned one.
 
 Sandboxes are kept, at mode 0700, and eval never cleans them up.
 

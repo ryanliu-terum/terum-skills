@@ -10,7 +10,7 @@ For what the app does once it is running, see [the desktop app](../guides/deskto
 | --- | --- | --- |
 | Node | Everything | The package declares `"engines": { "node": ">=22.12.0" }` and the shipped bundle targets Node 22. There is no runtime version gate: npm and npx print an `EBADENGINE` warning on an older runtime and run it anyway unless you have set `engine-strict`. |
 | `git` | Everything repository-shaped: cloning, `sync`, publish, install | Probed for `status`'s report and otherwise never gated. A command that needs git and cannot find it fails with git's own message. |
-| `gh` | Creating a GitHub team, `invite`, access-revoking `team remove`, the admin chips behind `status --permissions`, and downloading the desktop app and its updates | Presence and login are distinct states. `status` reports presence only and never runs `gh auth status`. |
+| `gh` | Creating a GitHub team, `invite`, access-revoking `team remove`, the admin chips behind `status --permissions`, and downloading the desktop app and its updates | Presence and login are distinct states. `status` reports presence only and never runs `gh auth status`. Downloading the app also needs gh 2.49 or newer, which is the first version with `gh attestation`; an older one discards the download and says so. |
 | Claude Code (`claude` on your PATH, logged in) | Eval runs, and the category suggestion publish asks for when your folder declares none | The eval preflight runs `claude --version` in a temporary directory with a 15-second timeout, then one real one-turn task. Point `TERUM_SKILLS_AGENT_CMD` at a different binary to override the name. |
 
 Who needs `gh` logged in, by role:
@@ -34,7 +34,12 @@ The desktop app matrix:
 | Linux | None | |
 | WSL | None | |
 
-Every asset ships with a `.sha256` beside it, and the CLI verifies the checksum before it installs anything. A mismatch discards the download.
+Every asset ships with a `.sha256` beside it, and every asset carries a build-provenance attestation that GitHub recorded when the release workflow produced those bytes. The CLI requires both before it installs anything, and a failure of either discards the download and names the reason:
+
+1. The asset's SHA-256 equals the first field of the `.sha256` file beside it. A mismatch reads `The downloaded desktop app did not match its published checksum, so it was discarded (expected <hash>, got <hash>).`
+2. `gh attestation verify <asset> --repo ryanliu-terum/terum-skills` exits 0. A failure reads `The downloaded desktop app has no valid build attestation from ryanliu-terum/terum-skills, so it was discarded: <what gh reported>.`, and a `gh` too old to know the sub-command reads `This copy of gh cannot verify build attestations (gh 2.49 or newer is needed), so the downloaded desktop app was discarded.`
+
+The checksum alone catches a damaged download. It cannot catch an asset replaced on the Release together with its `.sha256`, which is what the attestation is for. Both checks run for `app` and for a staged `app-update`. See [security](../../SECURITY.md) for how a release is built and how to verify one yourself.
 
 ## macOS
 
@@ -44,7 +49,7 @@ Install the app from a terminal:
 npx -y terum-skills@latest app
 ```
 
-That downloads the archive for this CLI's own version from the `ryanliu-terum/terum-skills` releases through `gh`, verifies its checksum, unpacks it, and moves the bundle onto `~/Applications/Terum Skills.app`. The path is fixed on purpose: it is visible, Spotlight indexes it, and it stays the same across updates, so a Dock pin survives them. The bundle already there is renamed aside first and removed last, so a failure halfway through puts the old one back rather than leaving you with no app. Then the CLI runs `open` on it.
+That downloads the archive for this CLI's own version from the `ryanliu-terum/terum-skills` releases through `gh`, verifies its checksum and its build attestation, unpacks it, and moves the bundle onto `~/Applications/Terum Skills.app`. The path is fixed on purpose: it is visible, Spotlight indexes it, and it stays the same across updates, so a Dock pin survives them. The bundle already there is renamed aside first and removed last, so a failure halfway through puts the old one back rather than leaving you with no app. Then the CLI runs `open` on it.
 
 `~/Applications` is the per-user folder, so nothing here needs admin rights.
 

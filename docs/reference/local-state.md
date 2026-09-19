@@ -144,7 +144,7 @@ State that is corrupt, or that names a different upstream, is invisible to reade
 - `run.jsonl`, one `_meta` line then one line per comparison, arm sample and trigger block
 - `transcripts/`, the agent transcripts
 - `sandboxes/`, the scratch directories the arms ran in
-- `generated/` with `cases/` and `triggers.yaml`, when that run generated the eval assets, kept as the run's own copy of what it wrote into your skill folder
+- `generated/` with `cases/`, `suite.yaml` and `triggers.yaml`, when that run generated the eval assets, kept as the run's own copy of what it wrote into your skill folder
 
 The run id is a UTC timestamp, so lexicographic order is chronological.
 
@@ -192,7 +192,7 @@ One more lock lives in the system temporary directory, because it protects a des
 
 ## Claude Code files
 
-These are the only files terum-skills writes outside its own state root. Setup offers the two hook entries and the `/terum-skills` skill separately, each with its own question, and each can be declined.
+These are the only files terum-skills writes outside its own state root. Setup offers the two hook entries and the `/terum-skills` skill separately, each with its own question, and each can be declined. What each of them runs, and when, is summarised in [security](../../SECURITY.md).
 
 ### ~/.claude/settings.json
 
@@ -202,10 +202,12 @@ Two entries, each added only if you say yes. Under `hooks.SessionStart`:
 {
   "matcher": "startup",
   "hooks": [
-    { "type": "command", "command": "npx -y terum-skills@latest sync --hook", "async": true, "timeout": 60 }
+    { "type": "command", "command": "npx -y terum-skills@0.20.1 sync --hook", "async": true, "timeout": 60 }
   ]
 }
 ```
+
+The command is not fixed text. It is `sync --hook` behind the spelling of the copy of the CLI that wrote the entry, which is the same bare-or-npx form that copy uses for every command it prints: `terum-skills` when it is a global install found on your PATH on macOS or Linux, and `npx -y terum-skills@<version>` pinned to that copy's own version otherwise, which is what the example above shows. The `@latest` spelling never appears in a fresh entry, so a session start runs the release you installed and fetches no other. A copy whose own `package.json` cannot be read falls back to `npx -y terum-skills@latest`, because nothing more specific can be named.
 
 Under `hooks.PostToolUse`:
 
@@ -220,6 +222,14 @@ Under `hooks.PostToolUse`:
 
 The session hook is `async` because a fetch must not hold up your session. The edit hook is not, because its reminder has to reach the model's next turn, and its first act is a path test that costs nothing.
 
+`sync --hook` rewrites the `SessionStart` entry when its command is anything other than this copy's spelling: the `@latest` command earlier releases wrote, or a pin on an older version. It re-installs the entry exactly as setup would, in the file the entry already lives in, and reports:
+
+```
+Pinned your session hook to this copy of terum-skills (npx -y terum-skills@0.20.1 sync --hook); it no longer fetches the newest release at session start. Re-run `npx -y terum-skills@latest setup` after an update to move it.
+```
+
+It never installs an entry where none of ours exists, because absent means you declined the hook, and a settings file it cannot edit is reported as a notice rather than failing the run.
+
 Writes to this file are atomic (temp file, fsync, rename), at 0600, preserving the original file's mode, and are preceded by the one-time backup described above. Re-installing strips every existing terum-skills command from the file first, so there is never a duplicate; a hook group holding other people's commands as well keeps those commands and loses only ours.
 
 terum-skills refuses to edit this file at all when it is not valid JSON, or when `hooks`, `hooks.SessionStart` or `hooks.PostToolUse` is the wrong shape. The message is `Cannot edit <path>: it is not valid JSON. Fix it by hand or move it aside, then re-run.`
@@ -228,11 +238,11 @@ This file also holds `skillOverrides` for Global skills. See below.
 
 ### ~/.claude/skills/terum-skills/
 
-The `/terum-skills` Claude Code skill, a single `SKILL.md` copied byte for byte from the package. Its managed marker is two fields in its own frontmatter: `name: terum-skills` and `metadata.managed-by: terum-skills`. Anything else at that path, including a symbolic link, a file, a folder with no `SKILL.md`, or a different skill, is judged foreign: it is named and never written to or removed.
+The `/terum-skills` Claude Code skill, a single `SKILL.md` written from the copy bundled in the package with one substitution: every `npx -y terum-skills@latest` in the bundled text becomes this machine's own spelling, by the same rule as the hook entry above. Its managed marker is two fields in its own frontmatter: `name: terum-skills` and `metadata.managed-by: terum-skills`. Anything else at that path, including a symbolic link, a file, a folder with no `SKILL.md`, or a different skill, is judged foreign: it is named and never written to or removed.
 
-It tells Claude Code how to run terum-skills on your behalf: that the Bash tool has no TTY, to invoke the CLI as `npx -y terum-skills@latest <verb>`, which verbs it may run in-session, which verbs it must hand to your terminal because they ask questions, and what an eval costs.
+It tells Claude Code how to run terum-skills on your behalf: that the Bash tool has no TTY, to invoke the CLI in that one spelling and no other, which verbs it may run in-session, which verbs it must hand to your terminal because they ask questions, and what an eval costs.
 
-A copy of terum-skills' own that this CLI has moved past is refreshed without a second question, both by `setup` and by `sync --hook` at every session start. A copy that is absent is never installed by anything but `setup`, because absent means you said no.
+A copy of terum-skills' own that this CLI has moved past is refreshed without a second question, both by `setup` and by `sync --hook` at every session start. The comparison is against the bundled text already rendered in this copy's spelling, so a manual placed by a different release counts as outdated and is rewritten. A copy that is absent is never installed by anything but `setup`, because absent means you said no.
 
 The discovery scan also refuses this folder by name, so it can never be published as a team skill.
 

@@ -9,11 +9,13 @@ terum-skills puts four things inside your Claude Code setup. Three of them are s
 | The edit hook | `~/.terum/skills/hooks/terum-skills-edit.mjs` and `~/.claude/settings.json` | Reminds Claude to publish a skill after it edits one |
 | The per-machine switch | `skillOverrides` in Claude Code's own settings | Turns a skill off for this machine without moving the folder |
 
-Two more places where the two tools meet are covered at the end: evals drive your own logged-in Claude Code, and `usage` reads Claude Code's session transcripts.
+Two more places where the two tools meet are covered at the end: evals drive your own logged-in Claude Code, and `usage` and `misses` read Claude Code's session transcripts.
 
 ## The /terum-skills skill
 
-This is the operator manual for Claude Code. It ships inside the npm package and setup copies it to `~/.claude/skills/terum-skills/SKILL.md`. With it installed, asking Claude to "list my team's skills" or "evaluate this skill" gets a correct `npx -y terum-skills@latest …` invocation instead of a guess.
+This is the operator manual for Claude Code. It ships inside the npm package and setup copies it to `~/.claude/skills/terum-skills/SKILL.md`. With it installed, asking Claude to "list my team's skills" or "evaluate this skill" gets a correct invocation instead of a guess.
+
+The copy that lands on your machine is not the bundled copy byte for byte. Every `npx -y terum-skills@latest` in it is rewritten to the spelling this machine uses: `terum-skills` where the [bare invocation form](../reference/cli.md#invocation) is available, and `npx -y terum-skills@<the version that placed it>` everywhere else, including every Windows machine. A session therefore runs the copy you installed, never whatever the registry has published since.
 
 Setup asks:
 
@@ -27,7 +29,7 @@ Answering no prints `Skipped the /terum-skills skill; re-run setup to install it
 
 Terum's copy is marked in the SKILL.md frontmatter: `name: terum-skills` plus `metadata.managed-by: terum-skills`. That marker is the whole idempotency key.
 
-An outdated copy carrying that marker is refreshed in place without a second question, because the consent was given when it was installed and a stale manual teaches Claude the wrong verbs. Setup does it, and `sync --hook` does it too, printing `Updated your /terum-skills manual for this CLI.` on its notice channel.
+An outdated copy carrying that marker is refreshed in place without a second question, because the consent was given when it was installed and a stale manual teaches Claude the wrong verbs. Setup does it, and `sync --hook` does it too, printing `Updated your /terum-skills manual for this CLI.` on its notice channel. Outdated means byte-different from the bundled copy rendered in this machine's spelling, so a manual placed by a different copy of the CLI is outdated by that definition and is rewritten on the next setup or hook run.
 
 Anything else at that path is foreign and is never written to or removed: a symlink, a plain file, a folder with no SKILL.md, or a different skill. The CLI names it and leaves it alone. A folder you declined is absent, and the hook never installs what you said no to.
 
@@ -71,10 +73,12 @@ Yes writes one entry into `hooks.SessionStart` in `~/.claude/settings.json`:
 {
   "matcher": "startup",
   "hooks": [
-    { "type": "command", "command": "npx -y terum-skills@latest sync --hook", "async": true, "timeout": 60 }
+    { "type": "command", "command": "npx -y terum-skills@0.20.1 sync --hook", "async": true, "timeout": 60 }
   ]
 }
 ```
+
+The command is this copy of the CLI, pinned, and never `@latest`. Where the [bare invocation form](../reference/cli.md#invocation) is available, which means a global install this CLI found first on `PATH` on macOS or Linux, the entry reads `terum-skills sync --hook` instead; everywhere else, including every Windows machine, it is the npx form carrying this copy's version. Nothing fetches a newer CLI at the start of a session, and a newer release reaches the entry only when you update the package and re-run `setup`.
 
 Before the first write it takes one verbatim backup of your settings file to `~/.terum/skills/backups/settings.<timestamp>.json`, and only if no settings backup exists yet. Writes are atomic and keep the file's mode. A settings file that is not valid JSON, or whose `hooks`, `hooks.SessionStart` or `hooks.PostToolUse` is the wrong shape, is refused outright: `Cannot edit <path>: it is not valid JSON. Fix it by hand or move it aside, then re-run.` Reinstalling strips every terum-skills command already under `SessionStart` first, so there is never a duplicate, and a group that holds other people's commands keeps them.
 
@@ -82,7 +86,15 @@ Before the first write it takes one verbatim backup of your settings file to `~/
 
 For each configured team it fetches the clone and resets it to `origin/main`, under the per-clone lock, with a 20-second deadline and a git environment that cannot open a credential dialog. A team fetched within the last hour is left alone. A successful fetch writes `~/.terum/skills/run/<team>.stamp`.
 
-It places nothing, uploads nothing and edits none of your skill folders. The two exceptions are Terum's own artefacts described on this page: an outdated `/terum-skills` manual and an outdated edit-hook script are rewritten.
+It places nothing, uploads nothing and edits none of your skill folders. The exceptions are Terum's own artefacts described on this page: its own `SessionStart` entry, an outdated `/terum-skills` manual and an outdated edit-hook script.
+
+Re-pointing its own entry is a one-time migration. Releases before the pinning change wrote `npx -y terum-skills@latest sync --hook`, so a hook run compares the command in the entry against the one this copy would write and rewrites the entry when the two differ. It never installs an entry where none of ours exists, because an hourly hook must not install what somebody declined. When it does rewrite one, stderr carries:
+
+```
+Pinned your session hook to this copy of terum-skills (npx -y terum-skills@0.20.1 sync --hook); it no longer fetches the newest release at session start. Re-run `npx -y terum-skills@latest setup` after an update to move it.
+```
+
+A settings file it cannot read or edit costs one more stderr line, `Could not pin the session hook in <path>: <reason>`, and nothing else. The fetch has already happened by then, so the run is not failed over it.
 
 Its stdout is exactly one line, the reload directive:
 
@@ -168,6 +180,10 @@ The switch on a Library card in [the app](desktop-app.md) calls exactly this ver
 
 Evals run on your own machine, on your own Claude Code subscription. There is no Terum account and no API key: the eval engine spawns the `claude` binary on your `PATH` (or whatever `TERUM_SKILLS_AGENT_CMD` names), one headless session per arm, with `--setting-sources project` so your user-level settings and hooks stay out of the sandbox. The arms, the sandbox, the preflight and its failure lines are in [Running evals](../evaluating/running-evals.md); the Windows `claude.cmd` shim resolution is in [Platforms](../reference/platforms.md).
 
-## How usage counts firings
+## How usage and misses read your transcripts
 
-`usage` reads Claude Code's own transcripts under `~/.claude/projects` and counts the sessions in which each placed skill fired, then archives what it scanned to `~/.terum/skills/run/usage-events.jsonl` so the count survives Claude Code's roughly 30-day transcript retention. The detectors, the row model, the sample output and the archive rules are in [Usage](../evaluating/usage.md).
+`usage` reads Claude Code's own transcripts under `~/.claude/projects` and counts each placed skill's firings, then archives what it scanned to `~/.terum/skills/run/usage-events.jsonl` so the count survives Claude Code's roughly 30-day transcript retention. It makes no model call at all, which is what lets the app run it on every skill page. Its `--since` bound is validated and canonicalised before the scan, and `--all` folds the names that fired with no placement here into the one table.
+
+`misses` reads the same transcripts for the question `usage` cannot answer: which prompts a placed skill should have been chosen for and was not. It harvests the prompts themselves rather than firing records, and it does spend Claude Code sessions, one `claude -p` call per ten prompts, so it is a verb you run rather than something a page opens. It writes nothing.
+
+The detectors, the row model, the sample output and the archive rules are in [Usage](../evaluating/usage.md); both verbs' flags and refusals are in [the CLI reference](../reference/cli.md#usage).

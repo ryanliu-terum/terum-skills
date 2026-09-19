@@ -12,7 +12,7 @@ the old README (the old text is in git history at `a01ccef0` if a fact needs che
   README has a `TODO(docs)` comment where the eval link goes.
 - **Roadmap.** A public one, so the "Collaborate with us!" section has something to point
   collaborators at. Candidates already named in the README: the open skill marketplace ranked by
-  effectiveness, category-specific generated tests.
+  effectiveness. (Written: `docs/roadmap.md`.)
 - **Updated website.** terum.ai should say what the README says, with the same hero video and the
   one-line install.
 - **Changelog / newsletter.** Releases already go through `release/<version>` PRs; a `CHANGELOG.md`
