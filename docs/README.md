@@ -53,4 +53,6 @@ npx -y terum-skills@latest setup
 
 - [Roadmap](roadmap.md): what is planned, under consideration, deferred, and not planned.
 - [Changelog](../CHANGELOG.md): every release, generated from the release record.
+- [Contributing](../CONTRIBUTING.md): building, testing, the documentation gates, adding a verb.
+- [Releasing](contributing/release.md): the release PR, the two-stage dispatch, the release workflow, the changelog step.
 - [Collaborate with us](../README.md#collaborate-with-us): Discord, issues, email.
