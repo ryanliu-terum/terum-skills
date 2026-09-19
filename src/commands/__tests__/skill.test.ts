@@ -8,7 +8,7 @@ import { run as list } from '../ls.js';
 import { createConfigStore } from '../../lib/config.js';
 import { fsForTests, lockTarget } from '../../lib/placer.js';
 import { snapshotSkillDirectory } from '../../lib/placer/vendor/skillhub/skill-fingerprint.js';
-import { bareTeam, cloneWithIdentity, person, pushFromSeed, ScriptedPrompter, TEAM_JSON, temporaryDirectory } from '../../lib/__tests__/fixtures.js';
+import { bareTeam, cloneWithIdentity, person, pushFromSeed, ScriptedPrompter, SYMLINKS_SUPPORTED, TEAM_JSON, temporaryDirectory } from '../../lib/__tests__/fixtures.js';
 vi.mock('node:fs/promises', async original => ({ ...await original<typeof import('node:fs/promises')>() }));
 afterEach(()=>vi.restoreAllMocks());
 const id='11111111-1111-4111-8111-111111111111';
@@ -35,7 +35,8 @@ describe('skill fix',()=>{
   expect(await fix(f)).toMatchObject({ok:true,value:{notices:['alpha: nothing to fix; hygiene passes.']}});
   expect(await fs.readFile(join(f.path,'SKILL.md'),'utf8')).toBe(after);
  });
- it('applies every covered repair in one pass and lists what still needs the author',async()=>{
+ // The executable-bit repair needs a file that reports an executable mode; Windows has no such bit (Node never reports 0o111), so the "clears the mode" half cannot be staged there.
+ it.skipIf(process.platform==='win32')('applies every covered repair in one pass and lists what still needs the author',async()=>{
   const f=await fixture(false);
   await fs.writeFile(join(f.path,'SKILL.md'),`---\nname: other\ndescription: Ends in a triage: every finding\n---\nSee\u200B notes. token ghp_abcdefghijklmnopqrstuvwxyz0123456789\n`);
   await fs.writeFile(join(f.path,'notes.txt'),'plain');await fs.chmod(join(f.path,'notes.txt'),0o755);
@@ -58,7 +59,7 @@ describe('skill fix',()=>{
   expect(await fix(f)).toMatchObject({ok:true,value:{installed:true}});
   expect((await f.store.read()).placements[f.path]).toMatchObject({fingerprint:f.fingerprint});
  });
- it('fails without writing when nothing here is a fault it covers, and refuses a missing SKILL.md or a symlinked folder',async()=>{
+ it.skipIf(!SYMLINKS_SUPPORTED)('fails without writing when nothing here is a fault it covers, and refuses a missing SKILL.md or a symlinked folder',async()=>{
   const f=await fixture(false);
   await fs.writeFile(join(f.path,'SKILL.md'),'---\nname: [\ndescription: x\n---\n');
   expect(await fix(f)).toMatchObject({ok:false,error:expect.stringMatching(/^alpha: nothing here is a fault fix covers; \d+ findings? still needs? you \(listed above\)\.$/),value:{notices:expect.arrayContaining([expect.stringMatching(/^Still needs you \(\d+\):$/),expect.stringMatching(/not valid YAML/)])}});
@@ -114,7 +115,7 @@ describe('skill category',()=>{
   const f=await fixture(false);await team(f,['workflow'],{version:2,category:'workflow'});
   expect(await categorise(f,'workflow')).toMatchObject({ok:true,value:{notices:['Changed alpha from testing to workflow.','The team already shows workflow: Version 2 declares it too, so there is nothing to publish.']}});
  });
- it('refuses a missing SKILL.md, frontmatter YAML cannot read, and a symlinked folder',async()=>{
+ it.skipIf(!SYMLINKS_SUPPORTED)('refuses a missing SKILL.md, frontmatter YAML cannot read, and a symlinked folder',async()=>{
   const f=await fixture(false);
   await fs.writeFile(join(f.path,'SKILL.md'),'---\nname: [\ndescription: x\n---\n');
   expect(await categorise(f,'infra')).toMatchObject({ok:false,error:expect.stringMatching(/frontmatter is not readable YAML; run `npx -y terum-skills@latest skill fix /)});
@@ -217,7 +218,8 @@ describe('D6 Library file operations',()=>{
   if(point==='journal')vi.spyOn(privateFs,'writeJsonPrivate').mockImplementation(async(path,value)=>{await journalWrite(path,value);if((value as {done?:boolean}).done&&!fired){fired=true;throw new Error('interrupted after journal');}});
   const first=await f.invoke('delete');expect(first.ok).toBe(false);expect(fired).toBe(true);vi.restoreAllMocks();const second=await f.invoke('delete');expect(second).toMatchObject({ok:true,value:{installed:false,quarantined:expect.any(String)}});if(second.ok)expect(await fs.readFile(join(second.value.quarantined!,'SKILL.md'),'utf8')).toBe(raw());
  });
- it.each(['outside','nested','symlink','wrong-name'] as const)('refuses %s without changing the folder',async mode=>{
+ it.for(['outside','nested','symlink','wrong-name'] as const)('refuses %s without changing the folder',async(mode,{skip})=>{
+  if(mode==='symlink'&&!SYMLINKS_SUPPORTED)skip();
   const f=await fixture(false);let path=f.path;
   if(mode==='outside')path=join(f.home,'outside');if(mode==='nested')path=join(f.path,'nested');if(mode==='symlink'){path=join(f.root,'link');await fs.symlink(f.path,path);}
   expect(await run({kind:'delete',path,home:f.home,config:f.store},new ScriptedPrompter(['wrong']))).toMatchObject({ok:false});expect(await fs.readFile(join(f.path,'SKILL.md'),'utf8')).toBe(raw());
@@ -265,7 +267,7 @@ it('permits a case-only rename when both spellings address the same directory',a
  expect(await fs.readFile(join(f.path,'SKILL.md'),'utf8')).toContain('name: alpha');
 });
 
-it('accepts a registered project reached through a symlink as the move destination',async()=>{
+it.skipIf(!SYMLINKS_SUPPORTED)('accepts a registered project reached through a symlink as the move destination',async()=>{
  // hybrid review r1 (high): config.projects[].root is stored realpath'd while --to arrived verbatim, so
  // a project behind any symlink component was refused as unregistered.
  const f=await fixture(false),alias=join(await temporaryDirectory(),'proj');await fs.symlink(f.project,alias,'dir');
@@ -274,7 +276,7 @@ it('accepts a registered project reached through a symlink as the move destinati
  expect(await fs.readFile(join(dest,'SKILL.md'),'utf8')).toBe(raw());
 });
 
-it('rekeys ledger provenance when the registered root is reached through an alias',async()=>{
+it.skipIf(!SYMLINKS_SUPPORTED)('rekeys ledger provenance when the registered root is reached through an alias',async()=>{
  const f=await fixture(),alias=join(await temporaryDirectory(),'home');await fs.symlink(f.home,alias,'dir');
  const path=join(alias,'.claude','skills','alpha'),destination=join(alias,'.claude','skills','beta');
  expect(await run({kind:'rename',path,to:'beta',config:f.store,home:alias},new ScriptedPrompter())).toMatchObject({ok:true});

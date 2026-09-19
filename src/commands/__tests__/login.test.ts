@@ -14,7 +14,8 @@ describe('login (§6, rev 9 Decision 4: bare, no team entry, no token)', () => {
     const config = await store.read();
     expect(config).toMatchObject({ default_handle: 'octocat', github: 'octocat', display_name: 'Ryan', email: 'ryan@example.com' });
     expect(config.teams).toEqual({});
-    expect(((await stat(pathJoin(store.root, 'config.json'))).mode & 0o777).toString(8)).toBe('600');
+    // Windows has no POSIX mode bits (Node reports 666 for every file).
+    if (process.platform !== 'win32') expect(((await stat(pathJoin(store.root, 'config.json'))).mode & 0o777).toString(8)).toBe('600');
     expect(io.lines.some((line) => line.includes('gh is logged in'))).toBe(true);
     expect(io.asked.some((question) => /PAT|token/i.test(question))).toBe(false);
   });

@@ -62,7 +62,7 @@ export async function place(source: string, targetRoot: string, name: string, op
     try {
       await fsForTests.rename(temporary, destination);
     } catch (error) {
-      if (!options.replace || !isExistingDestination(error)) throw error;
+      if (!options.replace || !(await destinationOccupied(error, destination))) throw error;
       await fsForTests.rename(destination, displaced);
       displacedExists = true;
       await fsForTests.rename(temporary, destination);
@@ -217,6 +217,20 @@ export async function listDirectories(root: string): Promise<string[]> {
 function isMissing(error: unknown): boolean { return error instanceof Error && 'code' in error && error.code === 'ENOENT'; }
 export function isExistingDestination(error: unknown): boolean {
   return error instanceof Error && 'code' in error && (error.code === 'EEXIST' || error.code === 'ENOTEMPTY');
+}
+
+/**
+ * Whether a rename onto `destination` failed because something is already there. POSIX says so
+ * with EEXIST or ENOTEMPTY. Windows reports EPERM for a rename onto an existing directory — the
+ * same code it gives a directory something has open — so there the code alone decides nothing and
+ * the destination is probed: present means "occupied, move it aside and retry"; absent means the
+ * EPERM was about the source (or a lock) and the placement fails as it should. Before this probe
+ * every replace of an installed skill on Windows failed with the raw EPERM.
+ */
+async function destinationOccupied(error: unknown, destination: string): Promise<boolean> {
+  if (isExistingDestination(error)) return true;
+  if (!(error instanceof Error && 'code' in error && error.code === 'EPERM')) return false;
+  return !(await isAbsent(destination));
 }
 
 async function assertNoSymlinks(root: string): Promise<void> {

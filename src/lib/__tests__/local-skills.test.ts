@@ -6,7 +6,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { candidatesOf, createLibraryScan, expandRefPath, librarySize, localSkillCounts, localSkills, localSkillRoots, nearestRepoRoot, refIsPath, resolveLibrarySkill, unusableSkillFolder } from '../local-skills.js';
 import { emptyConfig } from '../schema.js';
 import { assertSkillSource } from '../skill-source.js';
-import { BUNDLED_SKILL_SOURCE, temporaryDirectory } from './fixtures.js';
+import { BUNDLED_SKILL_SOURCE, SYMLINKS_SUPPORTED, temporaryDirectory } from './fixtures.js';
 
 // Clone the ESM namespace so individual permission failures can be injected and restored.
 vi.mock('node:fs/promises', async (importOriginal) => ({ ...await importOriginal<typeof import('node:fs/promises')>() }));
@@ -102,7 +102,7 @@ describe('issue 9 local inventory', () => {
     expect(await candidateSummary(root, emptyConfig())).toEqual({ names: [], omitted: [{ name: 'missing', reason: 'description is missing' }], unreadable: 0 });
   });
 
-  it('retains each inspection outcome and offers stock sources, with privileged sources only by opt-in', async () => {
+  it.skipIf(!SYMLINKS_SUPPORTED)('retains each inspection outcome and offers stock sources, with privileged sources only by opt-in', async () => {
     const root = await temporaryDirectory();
     await candidate(root, 'stock');
     await candidate(root, 'gsd-x', '---\nname: gsd:x\ndescription: x\n---\n');
@@ -200,7 +200,7 @@ describe('project local discovery (Ryan 2026-09-06)', () => {
     expect(await localSkillRoots(home, [{ root: home, label: 'home' }])).toEqual({ roots: [{ root: join(home, '.claude', 'skills'), scope: 'global', registered: false }], problems: [] });
   });
 
-  it.each(['alias-to-real', 'real-to-alias', 'deduplicated-alias'])('joins both ledgers through canonical parents: %s', async (direction) => {
+  it.skipIf(!SYMLINKS_SUPPORTED).each(['alias-to-real', 'real-to-alias', 'deduplicated-alias'])('joins both ledgers through canonical parents: %s', async (direction) => {
     const base = await temporaryDirectory(); const home = join(base, 'real'); const alias = join(base, 'alias');
     const root = join(home, '.claude', 'skills'); const path = await candidate(root, 'tracked');
     await symlink(home, alias); await mkdir(join(home, '.git'));
@@ -217,7 +217,7 @@ describe('project local discovery (Ryan 2026-09-06)', () => {
     expect(candidatesOf(inventory)).toEqual([]);
   });
 
-  it('excludes canonical state-root entries but retains tracked provenance and project scope', async () => {
+  it.skipIf(!SYMLINKS_SUPPORTED)('excludes canonical state-root entries but retains tracked provenance and project scope', async () => {
     const home = await temporaryDirectory(); const stateRoot = join(home, 'state'); const root = join(stateRoot, 'sources');
     await candidate(root, 'untracked'); await candidate(root, 'tracked');
     const alias = join(home, 'alias'); await symlink(root, alias);
@@ -276,7 +276,7 @@ describe('a rejected folder reports the description its frontmatter parsed to', 
 });
 
 describe('project roots CLI-1 (§7.1)', () => {
-  it('lists the added projects in order, carrying their labels, and deduplicates aliases and home', async () => {
+  it.skipIf(!SYMLINKS_SUPPORTED)('lists the added projects in order, carrying their labels, and deduplicates aliases and home', async () => {
     const home = await temporaryDirectory();
     const a = join(home, 'a'), b = join(home, 'b');
     for (const root of [a, b]) await mkdir(join(root, '.git'), { recursive: true });
@@ -305,7 +305,7 @@ describe('W-02 parallel folder scan', () => {
     try { await localSkills(root, emptyConfig(), { scope: 'global', stateRoot: join(root, '.state') }); expect(spy.mock.calls).toEqual([[root]]); }
     finally { spy.mockRestore(); }
   });
-  it('returns the same entries, in the same order, as a sequential scan', async () => {
+  it.skipIf(!SYMLINKS_SUPPORTED)('returns the same entries, in the same order, as a sequential scan', async () => {
     const root = await temporaryDirectory();
     const names = ['a','B','a-10','a-2','Z',...Array.from({length:25},(_,i)=>`skill-${i}`)];
     for (const name of names) await candidate(root,name);
@@ -328,7 +328,7 @@ describe('W-02 parallel folder scan', () => {
   });
   // RM-38: the app's Library sorts local folders by "recently updated", so a local row needs an honest
   // last-changed stamp. It is SKILL.md's own mtime and nothing else — no folder walk, no synthesised now().
-  it('stamps each readable SKILL.md with its own mtime and leaves every other entry unstamped', async () => {
+  it.skipIf(!SYMLINKS_SUPPORTED)('stamps each readable SKILL.md with its own mtime and leaves every other entry unstamped', async () => {
     const root = await temporaryDirectory();
     const fresh = await candidate(root, 'fresh');
     const stale = await candidate(root, 'stale');
@@ -366,7 +366,7 @@ describe('W-02 parallel folder scan', () => {
 });
 
 describe('run-local library inventory reuse', () => {
-  it.each([false, true])('matches fresh counts without another walk (unreadable root: %s)', async unreadable => {
+  it.skipIf(!SYMLINKS_SUPPORTED).each([false, true])('matches fresh counts without another walk (unreadable root: %s)', async unreadable => {
     const home = await temporaryDirectory();
     const global = join(home, '.claude', 'skills');
     const checkout = join(home, 'project');
@@ -402,7 +402,7 @@ describe('run-local library inventory reuse', () => {
     } finally { reads.mockRestore(); }
   });
 
-  it('rebinds placement provenance through aliases without rescanning or mutating the snapshot', async () => {
+  it.skipIf(!SYMLINKS_SUPPORTED)('rebinds placement provenance through aliases without rescanning or mutating the snapshot', async () => {
     const home = await temporaryDirectory();
     const root = join(home, '.claude', 'skills');
     const source = await candidate(root, 'alpha');
@@ -461,7 +461,7 @@ describe('resolveLibrarySkill (D72)', () => {
   // The desktop passes the Library card's PATH for a skill the team has never seen (SkillScreen,
   // RunEvalDialog), and a name cannot tell two roots' same-named folders apart — so a ref may be a
   // folder path. The roots stay the only place a ref can land.
-  it('resolves a folder path — absolute, ~-prefixed, relative, or through a realpath alias — to the entry it names', async () => {
+  it.skipIf(!SYMLINKS_SUPPORTED)('resolves a folder path — absolute, ~-prefixed, relative, or through a realpath alias — to the entry it names', async () => {
     const home = await temporaryDirectory();
     const root = join(home, '.claude', 'skills');
     const global = await candidate(root, 'dup');
@@ -511,7 +511,7 @@ describe('resolveLibrarySkill (D72)', () => {
 // §7.4(b) / D16: the count is "direct child directories". A plain file (.DS_Store, README.md) still
 // becomes a LocalEntry so the inventory mirrors readdir, but it is neither a skill folder nor a card;
 // a symlink stays counted because it stays a (refused) card (hybrid review r1, high).
-it('counts folders and symlinks but never a plain file', async () => {
+it.skipIf(!SYMLINKS_SUPPORTED)('counts folders and symlinks but never a plain file', async () => {
   const home = await temporaryDirectory(), root = join(home, '.claude', 'skills');
   await candidate(root, 'alpha'); await mkdir(join(root, 'empty')); await symlink(join(root, 'alpha'), join(root, 'link'));
   await writeFile(join(root, '.DS_Store'), ''); await writeFile(join(root, 'README.md'), '# notes\n');

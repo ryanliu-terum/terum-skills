@@ -2,7 +2,7 @@ import { mkdir, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { createConfigStore } from '../../lib/config.js';
-import { ScriptedPrompter, temporaryDirectory } from '../../lib/__tests__/fixtures.js';
+import { ScriptedPrompter, SYMLINKS_SUPPORTED, temporaryDirectory } from '../../lib/__tests__/fixtures.js';
 import { run } from '../ls.js';
 
 /**
@@ -64,7 +64,7 @@ describe('ls --local enabled', () => {
     expect(listed.sections.find((s) => s.scope === 'global')!.problems).toEqual([]);
   });
 
-  it('a folder the inventory does not offer (a symlink) still carries enabled, read from the same files', async () => {
+  it.skipIf(!SYMLINKS_SUPPORTED)('a folder the inventory does not offer (a symlink) still carries enabled, read from the same files', async () => {
     const f = await fixture();
     const target = join(f.home, 'elsewhere', 'linked');
     await mkdir(target, { recursive: true });

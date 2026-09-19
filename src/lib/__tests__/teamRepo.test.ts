@@ -7,7 +7,7 @@ import { GuardError } from '../guard.js';
 import { Runner, systemRunner } from '../runner.js';
 import { packageVersion } from '../package.js';
 import { skillVersions, describeClone, cloneOrigin, assertSafePath, CloneBusy, cloneTeam, localPushGuardLauncher, openTeamRepo, pushGuardHook, PushRefused, refreshClone, SafeWriteExhausted, shellQuote, treeText, withCloneLock, cloneLockPath, lockWait } from '../teamRepo.js';
-import { bareTeam, cloneWithIdentity, holdCloneLock, mappedRunner, git, originSha, person, pushFromSeed, temporaryDirectory, wrapRunner } from './fixtures.js';
+import { bareTeam, cloneWithIdentity, holdCloneLock, mappedRunner, git, originSha, person, pushFromSeed, SYMLINKS_SUPPORTED, temporaryDirectory, wrapRunner } from './fixtures.js';
 
 const exists = (path: string) => access(path).then(() => true, () => false);
 const personJson = (handle: string) => `${JSON.stringify(person(handle))}\n`;
@@ -183,7 +183,7 @@ describe('safeWrite (§6.0)', () => {
     expect(await exists(join(clone, 'skills', 'new', 'v1'))).toBe(false);
   });
 
-  it('never writes or deletes through a symlinked parent that leaves the clone', async () => {
+  it.skipIf(!SYMLINKS_SUPPORTED)('never writes or deletes through a symlinked parent that leaves the clone', async () => {
     const fixture = await bareTeam();
     const outside = await temporaryDirectory();
     await writeFile(join(outside, 'me.json'), 'precious');

@@ -2,7 +2,7 @@ import { mkdir, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { inspectSkillSource, scanSkillFolder } from '../skill-source.js';
-import { temporaryDirectory } from './fixtures.js';
+import { SYMLINKS_SUPPORTED, temporaryDirectory } from './fixtures.js';
 
 describe('shared source inspection', () => {
   it('accepts stock sources and the stored frontmatter delimiter, including CRLF', () => {
@@ -24,7 +24,7 @@ describe('shared source inspection', () => {
     expect(inspectSkillSource('---\nname: [\n---\n', 'stock')).toMatchObject({ ok: false, reason: 'invalid-yaml', detail: expect.stringMatching(/^SKILL.md frontmatter is not valid YAML: /) });
   });
 
-  it('one walk reports a nested link and privileged content without following links', async () => {
+  it.skipIf(!SYMLINKS_SUPPORTED)('one walk reports a nested link and privileged content without following links', async () => {
     const root = await temporaryDirectory(); await mkdir(join(root, 'hooks')); await mkdir(join(root, 'assets'));
     await writeFile(join(root, 'hooks', 'hook.json'), '{}'); await symlink(root, join(root, 'assets', 'cycle'));
     expect(await scanSkillFolder(root)).toEqual({ symlink: join(root, 'assets', 'cycle'), privileged: true });

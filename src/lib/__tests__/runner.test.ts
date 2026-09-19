@@ -61,7 +61,10 @@ describe('systemRunner', () => {
 
 
 describe('bounded runner calls', () => {
-  it('kills a sleeping git alias and its child, settling on close', async () => {
+  // Windows has no process group to kill: the runner terminates git alone, then bounds the wait by dropping its
+  // pipe ends (deadline + 2 s + 2 s, see runner.ts), and the alias's child outlives it by design. Neither the
+  // "settles within 3.5 s" bound nor the "child is dead" check describe that platform; both hold on POSIX.
+  it.skipIf(process.platform === 'win32')('kills a sleeping git alias and its child, settling on close', async () => {
     const cwd = await temporaryDirectory(); const start = Date.now();
     const result = await systemRunner.run('git', ['-c', 'alias.s=!sleep 30 & child=$!; echo "$child"; wait "$child"', 's'], { cwd, deadlineMs: 200, maxOutputBytes: 65536 });
     expect(Date.now() - start).toBeLessThan(3500);

@@ -110,9 +110,12 @@ describe('team create (§6)', () => {
     const config = await store.read();
     expect(config.teams['new-team']).toEqual({ remote: 'git.example/new-team', handle: 'me' });
     expect(config).toMatchObject({ default_handle: 'me', display_name: 'Me', email: 'me@example.com', github: 'me' });
-    expect(((await stat(pathJoin(store.root, 'config.json'))).mode & 0o777).toString(8)).toBe('600');
-    expect(((await stat(store.root)).mode & 0o777).toString(8)).toBe('700');
-    expect(((await stat(pathJoin(store.root, 'teams'))).mode & 0o777).toString(8)).toBe('700');
+    // Windows has no POSIX mode bits (Node reports 666/777 for everything).
+    if (process.platform !== 'win32') {
+      expect(((await stat(pathJoin(store.root, 'config.json'))).mode & 0o777).toString(8)).toBe('600');
+      expect(((await stat(store.root)).mode & 0o777).toString(8)).toBe('700');
+      expect(((await stat(pathJoin(store.root, 'teams'))).mode & 0o777).toString(8)).toBe('700');
+    }
     expect(io.askedAbout('PAT')).toBe(false);
     expect(io.lines.at(-1)).toContain('Created team new-team');
   });

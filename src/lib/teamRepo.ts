@@ -225,8 +225,23 @@ async function safeWrite<R = void>(root: string, remote: string, runner: Runner,
       // touch exactly that one new file. GitHub teams still regenerate on the existing Action.
       let changed = tree.changedPaths;
       for (const path of changed) if (!tracked.has(path) && tree.after(path) !== undefined) created.add(path);
+      // §4.5(4) again, for the index: `git add` copies the on-disk mode only where core.filemode is
+      // on. On Windows (and any checkout with filemode off) it keeps the index's old mode, so an
+      // executable bit the mutation set would never reach the commit and a mode-only change would
+      // stage nothing — tripping the staged-diff proof below. Declaring the mode to the index directly
+      // makes the commit carry what the tree says on every platform; on POSIX it restates a mode
+      // `git add` already recorded. `-x` is only needed where HEAD had the bit: a fresh add is 644.
+      const stageModes = async (paths: readonly string[]): Promise<void> => {
+        const wanted = tree.executablePaths();
+        const present = paths.filter((path) => tree.after(path) !== undefined);
+        const plus = present.filter((path) => wanted.has(path));
+        const minus = present.filter((path) => !wanted.has(path) && executable.has(path));
+        if (plus.length) await requireGit(['update-index', '--chmod=+x', '--', ...plus]);
+        if (minus.length) await requireGit(['update-index', '--chmod=-x', '--', ...minus]);
+      };
       await applyTree(root, realRoot, tree, changed);
       await requireGit(['add', '-A', '--', ...changed]);
+      await stageModes(changed);
       if (!isGitHubRemote(remote)) {
         // §4.1(d): the generator derives every skill's latest version from the in-memory post-image,
         // so there is no `write-tree` spawn and no git call inside its loop.
@@ -240,6 +255,7 @@ async function safeWrite<R = void>(root: string, remote: string, runner: Runner,
         if (readmeChanged.length) {
           await applyTree(root, realRoot, tree, readmeChanged);
           await requireGit(['add', '-A', '--', ...readmeChanged]);
+          await stageModes(readmeChanged);
         }
       }
       const staged = (await requireGit(['diff', '--cached', '--name-only', '--no-renames', '-z'])).stdout.split('\0').filter(Boolean).sort();

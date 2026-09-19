@@ -50,8 +50,14 @@ describe('suite loading (§3.2)', () => {
   });
 });
 
+// The engine runs setup hooks, requirement probes and `command_succeeds` checks under `/bin/sh` (spec:
+// eval-purpose-suites; SETUP_RULE in generate.ts). Windows has no `/bin/sh`, so every case that reaches
+// a shell fails there before the code under test runs — a product gap of the eval engine, not of these
+// tests, and one that a Windows user sees as "setup failed: spawn /bin/sh ENOENT".
+const POSIX_SHELL = process.platform !== 'win32';
+
 describe('environment requirements (§7.1 rev 8)', () => {
-  it('parses requires, probes binaries and python modules', async () => {
+  it.skipIf(!POSIX_SHELL)('parses requires, probes binaries and python modules', async () => {
     expect(loadCase('task: x\nrequires:\n  - ffmpeg\n  - python3:openpyxl\n', 'a')).toMatchObject({ ok: true, value: { requires: ['ffmpeg', 'python3:openpyxl'] } });
     expect(await missingRequirements(['sh'])).toEqual([]);
     expect(await missingRequirements(['definitely-not-a-real-binary-xq7'])).toEqual(['definitely-not-a-real-binary-xq7']);
@@ -76,7 +82,7 @@ describe('environment requirements (§7.1 rev 8)', () => {
 });
 
 describe('sandbox seeding (§4.3, strictly in order)', () => {
-  it('copies fixtures, writes inline files (.sh → 0755), runs setup, stages the skill without evals/fixtures', async () => {
+  it.skipIf(!POSIX_SHELL)('copies fixtures, writes inline files (.sh → 0755), runs setup, stages the skill without evals/fixtures', async () => {
     const caseDir = join(scratch, 'cases');
     await mkdir(join(caseDir, '..', 'fixtures', 'repo'), { recursive: true });
     await writeFile(join(caseDir, '..', 'fixtures', 'repo', 'seed.txt'), 'from fixture');
@@ -132,13 +138,13 @@ describe('sandbox seeding (§4.3, strictly in order)', () => {
     expect(casePathViolation('bin/codex')).toBeNull();
   });
 
-  it('D1/D3: a bin/ stub is made executable so a setup that calls it can start', async () => {
+  it.skipIf(!POSIX_SHELL)('D1/D3: a bin/ stub is made executable so a setup that calls it can start', async () => {
     const sandbox = await seedSandbox(caseOf({ files: { 'bin/codex': '#!/bin/sh\necho ok\n' }, setup: './bin/codex > out.txt' }), { caseDir: scratch, skillName: 's', skillDir: null, scratch });
     expect((await stat(join(sandbox, 'bin', 'codex'))).mode & 0o111).toBeTruthy();
     expect(await readFile(join(sandbox, 'out.txt'), 'utf8')).toBe('ok\n');
   });
 
-  it('D3: dryRunCase reports the run-time abort message for a case that cannot start, and leaves nothing behind', async () => {
+  it.skipIf(!POSIX_SHELL)('D3: dryRunCase reports the run-time abort message for a case that cannot start, and leaves nothing behind', async () => {
     expect(await dryRunCase(caseOf({ setup: 'touch ok.txt' }), scratch)).toBeNull();
     expect(await dryRunCase(caseOf({ setup: 'Assume codex is logged in.' }), scratch)).toMatch(/^case 'c': setup failed \(rc=127\): .*Assume.*not found/s);
     expect(await dryRunCase(caseOf({ files: { '/tmp/x': 'x' } }), scratch)).toBe("case 'c': unsafe file path in case: /tmp/x");
@@ -153,7 +159,7 @@ describe('cases that never start (eval-gen D4)', () => {
   };
   const options = () => ({ k: 1, skillName: 's', caseDir: scratch, arms: { candidate: scratch }, scratch, transcriptDir: scratch });
 
-  it('a failing setup drops the case with kind setup and the shell error, scoring nothing', async () => {
+  it.skipIf(!POSIX_SHELL)('a failing setup drops the case with kind setup and the shell error, scoring nothing', async () => {
     const lines: string[] = [];
     const out = await runCase({ agent: untouchable, rng: () => 0.5, log: (line) => lines.push(line) }, caseOf({ setup: 'No AGENTS.md exists.' }), options());
     expect(out.rows).toEqual([]);
@@ -461,7 +467,7 @@ describe('the three-arm matrix (§7.1 / §7.3)', () => {
     )).rejects.toThrow(ContaminationError);
   });
 
-  it('a failing setup hook aborts this case without throwing (§17.9)', async () => {
+  it.skipIf(!POSIX_SHELL)('a failing setup hook aborts this case without throwing (§17.9)', async () => {
     const skillDir = await skillFixture();
     const output = await runCase(
       { agent: armAwareAgent('s'), rng: () => 0.9 }, caseOf({ setup: 'exit 3' }),

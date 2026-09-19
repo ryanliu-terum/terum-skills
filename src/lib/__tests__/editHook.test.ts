@@ -3,7 +3,7 @@ import { mkdir, readFile, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
-  BUNDLED_EDIT_HOOK_SOURCE, editHookFor, ScriptedPrompter, temporaryDirectory,
+  BUNDLED_EDIT_HOOK_SOURCE, editHookFor, ScriptedPrompter, SYMLINKS_SUPPORTED, temporaryDirectory,
 } from './fixtures.js';
 import {
   editHookCommand, editHookDestination, editHookInstalled, editHookState, inspectEditHook,
@@ -22,7 +22,8 @@ async function fixture() {
 /** The placed script, driven the way Claude Code drives it: one JSON object on stdin, JSON or nothing on stdout. */
 function runHook(script: string, home: string, payload: unknown): Promise<{ stdout: string; code: number | null }> {
   return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [script], { env: { ...process.env, HOME: home }, stdio: ['pipe', 'pipe', 'pipe'] });
+    // The hook finds home through `os.homedir()`, which reads HOME on POSIX and USERPROFILE on Windows.
+    const child = spawn(process.execPath, [script], { env: { ...process.env, HOME: home, USERPROFILE: home }, stdio: ['pipe', 'pipe', 'pipe'] });
     let stdout = '';
     child.stdout.on('data', (chunk: Buffer) => { stdout += chunk.toString(); });
     child.on('error', reject);
@@ -156,7 +157,7 @@ describe('placing the edit hook', () => {
     expect(await readFile(editHookDestination(storeRoot), 'utf8')).toBe('// somebody else\n');
   });
 
-  it('treats a symbolic link as foreign — the repo rule everywhere: refuse, never follow', async () => {
+  it.skipIf(!SYMLINKS_SUPPORTED)('treats a symbolic link as foreign — the repo rule everywhere: refuse, never follow', async () => {
     const { storeRoot, options } = await fixture();
     await mkdir(join(storeRoot, 'hooks'), { recursive: true });
     await writeFile(join(storeRoot, 'elsewhere.mjs'), await readFile(BUNDLED_EDIT_HOOK_SOURCE, 'utf8'));

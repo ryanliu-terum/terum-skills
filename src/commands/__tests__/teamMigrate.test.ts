@@ -47,6 +47,8 @@ async function prepared(github = false, evalFolder = ID) {
   for (const [path, bytes] of files) { await mkdir(dirname(join(fixture.seed, path)), { recursive: true }); await writeFile(join(fixture.seed, path), bytes); }
   await chmod(join(fixture.seed, 'skills/sample/scripts/run.sh'), 0o755);
   await git(['add', '-A'], fixture.seed);
+  // The legacy repo must carry the executable bit whatever the fixture's filesystem does with chmod (Windows: nothing).
+  await git(['update-index', '--chmod=+x', '--', 'skills/sample/scripts/run.sh'], fixture.seed);
   await git(['commit', '-qm', 'legacy skill'], fixture.seed);
   const hash = (await git(['rev-parse', 'HEAD:skills/sample'], fixture.seed)).trim();
   const archived = `  ${JSON.stringify(receipt(OLD))}\n\n`;

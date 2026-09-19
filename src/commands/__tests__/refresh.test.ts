@@ -324,7 +324,8 @@ describe('refresh when the team repository no longer exists (2026-09-13: terum-s
     expect(young.value?.teams[0]?.detail).toContain('delete it and sync again');
     expect(await exists(lock)).toBe(true);
   });
-  it('reports a fetch that landed as refreshed even when the stamp cannot be written, with a notice instead', async () => {
+  // The unwritable directory is staged with chmod 0500, which Windows ignores (no POSIX modes), so the stamp write cannot be made to fail there.
+  it.skipIf(process.platform === 'win32')('reports a fetch that landed as refreshed even when the stamp cannot be written, with a notice instead', async () => {
     const { store, seed } = await setup(); await pushFromSeed(seed, 'update.txt', 'new');
     const runDir = join(store.root, 'run'); await mkdir(runDir, { recursive: true }); await chmod(runDir, 0o500);
     try {
