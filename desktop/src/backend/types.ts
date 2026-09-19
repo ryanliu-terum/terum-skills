@@ -16,7 +16,7 @@ export interface Run<T>{readonly frames:AsyncIterable<Frame>;answer(id:string,va
 export interface Capabilities {appVersion:string;windowChrome:'mac-overlay'|'native'|'cosmetic';windowControlsEnd:number|null;disablePerMachine:boolean;inboxEventLog:boolean;offtargetKind:boolean;machineRegistry:boolean;perCaseEvalTables:boolean;openInEditor:boolean;clipboard:boolean}
 // §7.1: the local key is `libraryProjects`, not `projects` — `projects` is already the marketplace's
 // team-projects screen, and desktop/AGENTS.md invariant 2 forbids one flag meaning two things.
-export const FEATURE_KEYS = ['favorites','follow','roles','lastSeen','installScope','inviteScoping','disablePerMachine','projectMembers','liftOnCards','runEvalInApp','perCase','progress','memberRole','localIdentity','libraryProjects','projects','refresh','appUpdate','reconcile','serve','usage'] as const;
+export const FEATURE_KEYS = ['favorites','follow','roles','lastSeen','installScope','inviteScoping','disablePerMachine','projectMembers','liftOnCards','runEvalInApp','perCase','progress','memberRole','localIdentity','libraryProjects','projects','refresh','appUpdate','reconcile','serve','usage','misses'] as const;
 export type FeatureKey = typeof FEATURE_KEYS[number];
 export type Features = Readonly<Record<FeatureKey, boolean>>;
 export interface Surfaces {libraryProjects:boolean;divergence:boolean;status:boolean;settings:boolean;onboarding:boolean;library:boolean;skill:boolean;receipts:boolean;inbox:boolean;catalog:boolean;roster:boolean;update:boolean;appUpdate:boolean}
@@ -80,6 +80,13 @@ export type SkillDetail=Omit<Design['DETAIL'],keyof SkillCard|'root'|'history'|'
  *  means it was installed and the model ignored it anyway. The second is the case this whole
  *  feature exists to find; a panel that renders both as "no firings" throws it away. */
 export interface UsageModel{firings:{d1:number;d2:number;autonomy:number|null;availability:'full'|'partial'|'unknown';placed:boolean}|null;since:string;until:string;caveats:string[]}
+/** One skill's miss-screening result, from the CLI's `misses` verb.
+ *
+ *  A candidate is a (prompt, skill) PAIR the judge said applied and no firing was observed for --
+ *  NEVER a measured miss rate. The CLI refuses to compute one and this model must not invent one:
+ *  the judge sees a trimmed window, not the session. `truncated` means --limit dropped pairs;
+ *  `unjudged` means a model call failed, so those prompts were scored in neither direction. */
+export interface MissesModel{groups:{skill:string;candidates:{prompt:string;ts:string;noPriorContext:boolean}[]}[];screened:number;calls:number;truncated:boolean;unjudged:number;since:string;until:string;caveats:string[]}
 export type EvalReportModel=Pick<SkillDetail,'receipt'|'summary'|'incumbentLift'|'reportNumbers'|'history'|'versions'|'latestState'|'invalidReceiptFile'|'localRuns'|'evalEstimate'|'evalEstimateText'|'evalEstimateTip'|'scoreFractions'|'wlt'>;
 // D22: `update` (update-available) and `review` (PR review) are the two mechanisms this refactor
 // deletes, so they are no longer item kinds. design.json still records their canvas rows; the mock
