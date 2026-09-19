@@ -1,3 +1,4 @@
+// Share-image presets add only the four explicit destination URLs to the existing opener allowlist.
 import { readFileSync } from 'node:fs';
 import { expect, it, vi } from 'vitest';
 import { createTauriBackend } from '../index';
@@ -22,7 +23,7 @@ it('allows home paths including dot directories and GitHub and Discord URLs',()=
  expect(path).toMatchObject({identifier:'opener:allow-open-path',allow:[{path:'$HOME/**'}]});
  expect(capability.permissions).not.toContain('opener:allow-open-path');
  const url=capability.permissions.find(entry=>typeof entry!=='string'&&entry.identifier==='opener:allow-open-url');
- expect(url).toEqual({identifier:'opener:allow-open-url',allow:[{url:'https://github.com/*'},{url:'https://discord.gg/*'}]});
+ expect(url).toEqual({identifier:'opener:allow-open-url',allow:[{url:'https://github.com/*'},{url:'https://discord.gg/*'},{url:'https://twitter.com/intent/tweet*'},{url:'https://www.linkedin.com/feed/*'},{url:'https://www.reddit.com/submit*'},{url:'https://www.instagram.com/'}]});
  const config=JSON.parse(readFileSync('src-tauri/tauri.conf.json','utf8')) as {plugins:{opener:{requireLiteralLeadingDot:boolean}}};
  expect(config.plugins.opener.requireLiteralLeadingDot).toBe(false);
 });
