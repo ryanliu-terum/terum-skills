@@ -1,5 +1,5 @@
 import type { FileDropEvent, SkillFileResult, SkillToggleResult } from './types';
-import type { AppUpdateStaged, AppUpdateStatus, LaunchContext, IdentityArgs, IdentityWrite, Settings, Onboarding, Features, Capabilities, Surfaces, ReadOptions, Catalog, ChangeSource, EvalArgs, EvalManyArgs, EvalManyResult, EvalResult, UsageModel, EvalReportModel, InboxItem, InstallArgs, InstalledResult, InviteArgs, InviteResult, MachineUninstallResult, PrefStore, PublishArgs, PublishResult, UnpublishArgs, UnpublishResult, Receipt, ReconcileResult, Result, Roster, Run, LibraryScope, ProjectAdded, ProjectRemoved, ProjectCreated, SearchArgs, SearchHit, SetupArgs, SetupResult, Library, SkillDetail, StatusResult, Subscription, SyncArgs, SyncResult, TeamArgs, TeamResult, UninstallArgs, UninstalledResult, UpdateAdvice, ValidateArgs, ValidateResult } from './types';
+import type { AppUpdateStaged, AppUpdateStatus, LaunchContext, IdentityArgs, IdentityWrite, Settings, Onboarding, Features, Capabilities, Surfaces, ReadOptions, Catalog, ChangeSource, EvalArgs, EvalManyArgs, EvalManyResult, EvalResult, UsageModel, MissesModel, EvalReportModel, InboxItem, InstallArgs, InstalledResult, InviteArgs, InviteResult, MachineUninstallResult, PrefStore, PublishArgs, PublishResult, UnpublishArgs, UnpublishResult, Receipt, ReconcileResult, Result, Roster, Run, LibraryScope, ProjectAdded, ProjectRemoved, ProjectCreated, SearchArgs, SearchHit, SetupArgs, SetupResult, Library, SkillDetail, StatusResult, Subscription, SyncArgs, SyncResult, TeamArgs, TeamResult, UninstallArgs, UninstalledResult, UpdateAdvice, ValidateArgs, ValidateResult } from './types';
 export interface Backend {
   setWindowBackground(color: string): Promise<Result<void>>;
   quit(): Promise<void>;
@@ -43,6 +43,17 @@ export interface Backend {
   /** Live firing counts for one skill. Read-only over the team repo; the CLI's own archive append is
    *  machine-local (see SERVE_READ_VERBS). Gated on `features.usage`. */
   usage(q: { ref: string }, options?: ReadOptions): Promise<Result<UsageModel>>;
+  /** Screen real prompts for skills that looked applicable and never fired. Gated on `features.misses`.
+   *
+   *  Returns a `Run`, not a `Promise<Result>`, and the difference is the point: this SPENDS MODEL
+   *  CALLS (about one per ten prompts screened), so it is an ACTION like `eval`, never a read like
+   *  `usage`. It must only ever be started from an explicit user action -- never from a query that
+   *  fires on mount, and never from a loader. `Run` carries `cancel()` for the same reason.
+   *
+   *  It is deliberately NOT in SERVE_READ_VERBS: that list is reads-only because a long-lived
+   *  process must not own agent children, which is exactly why `eval` is excluded from it too. Each
+   *  call is a fresh one-shot CLI process. */
+  misses(q?: { since?: string; limit?: number }): Run<MissesModel>;
   receipts(q: { skillId: string; version: string }, options?: ReadOptions): Promise<Result<Receipt | null>>;
   inbox(q?: undefined, options?: ReadOptions): Promise<Result<InboxItem[]>>;
   catalog(q?: { q?: string }, options?: ReadOptions): Promise<Result<Catalog>>;

@@ -1393,7 +1393,7 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "file": "docs/frame-protocol.md",
     "line": 147,
     "policy": "prose",
-    "pattern": "`hello.features` names `libraryProjects`, `projects`, `memberRole`, `localIdentity`, `roles`, `favorites`, `follow`, `lastSeen`, `installScope`, `inviteScoping`, `disablePerMachine`, `projectMembers`, `liftOnCards`, `runEvalInApp`, `perCase`, `progress`, `refresh`, `appUpdate`, `reconcile`, `serve`, and `usage`."
+    "pattern": "`hello.features` names `libraryProjects`, `projects`, `memberRole`, `localIdentity`, `roles`, `favorites`, `follow`, `lastSeen`, `installScope`, `inviteScoping`, `disablePerMachine`, `projectMembers`, `liftOnCards`, `runEvalInApp`, `perCase`, `progress`, `refresh`, `appUpdate`, `reconcile`, `serve`, `usage`, and `misses`."
   },
   {
     "file": "docs/frame-protocol.md",

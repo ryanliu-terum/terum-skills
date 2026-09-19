@@ -22,6 +22,7 @@ import { createReadSession } from './session.js';
 import { prepareRun } from './prepare-run';
 import { cliEvalReport, mapEvalReport, cliReceipt } from './eval-report';
 import { cliUsage, mapUsage } from './usage';
+import { cliMisses, mapMisses } from './misses';
 import { receiptSummary } from '../receipt-summary';
 import { relativeTime } from '../../lib/relative-time';
 import { personPlaceNote, plural } from '../../screens/marketplace/market-data';
@@ -913,6 +914,13 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
     async usage({ref},options) {
       const report=await readUsage(options);
       return report.ok?{ok:true as const,value:mapUsage(report.value,ref)}:{ok:false as const,error:report.error};
+    },
+    /** A one-shot spawn, NOT `cached()` and NOT the serve session. Both of those are read paths:
+     *  `cached` would hand a second click a stale answer for a run the user just paid for, and the
+     *  serve session is reads-only precisely so a long-lived process never owns agent children.
+     *  `touches` is empty -- screening changes no local state, so nothing needs invalidating. */
+    misses(q) {
+      return run(['misses','--json',...(q?.since?['--since',q.since]:[]),...(q?.limit===undefined?[]:['--limit',String(q.limit)])],cliMisses,mapMisses,[]);
     },
     async receipts({skillId,version},options) {
       const {report,lines}=await readEvalReport(skillId,undefined,options);
