@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { BUNDLED_WRAPPER, defaultWrapperOptions, inspectWrapper, installWrapper, isManagedWrapper, offerWrapper, removeWrapper, renderWrapper, wrapperDestination, wrapperState } from '../wrapper.js';
 import { NPX_PREFIX, pinnedPrefix } from '../invocation.js';
 import { packageVersion } from '../package.js';
-import { BUNDLED_SKILL_SOURCE, ScriptedPrompter, temporaryDirectory, wrapperFor } from './fixtures.js';
+import { BUNDLED_SKILL_SOURCE, ScriptedPrompter, SYMLINKS_SUPPORTED, temporaryDirectory, wrapperFor } from './fixtures.js';
 
 const OLD_COPY = '---\nname: terum-skills\ndescription: an older bundled copy\nmetadata:\n  managed-by: terum-skills\n---\nold body\n';
 const SOMEONE_ELSES = '---\nname: terum-skills\ndescription: someone else\'s skill under the same name\n---\n';
@@ -48,7 +48,7 @@ describe('the bundled /terum-skills Claude Code skill', () => {
     expect(await removeWrapper(options)).toBe('foreign');
   });
 
-  it('never writes to or removes anything that is not its own copy: another skill, a symlink, a plain file', async () => {
+  it.skipIf(!SYMLINKS_SUPPORTED)('never writes to or removes anything that is not its own copy: another skill, a symlink, a plain file', async () => {
     const other = await fresh();
     await mkdir(other.destination, { recursive: true }); await writeFile(join(other.destination, 'SKILL.md'), SOMEONE_ELSES);
     expect(await wrapperState(other.options)).toBe('foreign');

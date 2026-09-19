@@ -13,6 +13,11 @@
  * a positional even if a future path skips this file. Every accepted shape goes through ONE parser
  * (`parseRemote`), so the comparison spelling and the git spelling can never disagree about what
  * is a remote.
+ *
+ * A local path is accepted in its POSIX (`/srv/team.git`) and Windows (`C:\Users\me\team.git`,
+ * `C:/Users/me/team.git`) absolute spellings, plus `file:` and `file://` in front of either. A
+ * drive path normalizes to `file:C:/…` with forward slashes, so the same directory typed with
+ * either separator is one remote.
  */
 
 type ParsedRemote =
@@ -26,9 +31,16 @@ type ParsedRemote =
 const URL_FORM = /^(https?|ssh|git):\/\/(?:([^/]*)@)?([^/:@]+)(?::(\d+))?\/(.+)$/i;
 // [user@]host:path — the host has no slash and is followed by a colon that does not start "//".
 const SCP_FORM = /^(?:([^@/:]+)@)?([^/:@]+):(?!\/\/)(.+)$/;
-const FILE_URL_FORM = /^file:\/\/(\/.*)$/i;
-// Our own normalized spelling for a local path: `file:<absolute path>`.
-const FILE_CANONICAL = /^file:(\/.*)$/;
+// file://<rest>; `parseRemote` then requires <rest> to be an absolute path, POSIX or drive-lettered.
+const FILE_URL_FORM = /^file:\/\/(.*)$/i;
+// In `file:///C:/x` (git's own spelling for a drive path) the third slash belongs to the URL, not the path.
+const FILE_URL_DRIVE_SLASH = /^\/(?=[A-Za-z]:[\\/])/;
+// Our own normalized spelling for a local path: `file:<absolute path>`, POSIX or drive-lettered.
+const FILE_CANONICAL = /^file:((?:\/|[A-Za-z]:[\\/]).*)$/;
+// A Windows absolute path: a drive letter, a colon, and a separator of either kind. `C:foo`
+// (drive-relative) is not absolute and is still refused. Accepted on every platform: a drive
+// path is a recognizable local spelling, and git — not this file — says whether it exists.
+const WINDOWS_DRIVE_PATH = /^([A-Za-z]):[\\/]/;
 // An already-normalized "host/path" for a dotted host; also what the CLI accepts for `--remote`.
 // A single-label host (an ssh alias, `localhost`) normalizes to the scp spelling `host:path`
 // instead, so a GitHub shorthand typed without its host (`org/repo`) is never mistaken for one.
@@ -77,11 +89,18 @@ function assertRemoteParts(input: string, parts: { host: string; path: string; u
  * A local path. Trailing slashes are dropped and an empty result is refused. `.git` is KEPT: on
  * disk `team.git` and `team` are different directories, so the path is the identity, and what
  * normalizes must still be fetchable (`remoteToGitUrl(normalizeRemote(p))` names the same dir).
+ *
+ * A drive-lettered path is respelled once, here, before it is either compared or handed to git:
+ * backslashes become forward slashes (git for Windows reads both, and `git remote get-url` then
+ * echoes the spelling it was given, so what we store is what we read back) and the drive letter is
+ * uppercased (`c:` and `C:` are the same volume). The rest of the path keeps its case, as on POSIX.
  */
 function filePath(rawPath: string, input: string): ParsedRemote {
-  const canonical = rawPath.replace(/\/+$/, '');
-  if (!canonical) throw unsupported(input);
-  return { kind: 'file', path: rawPath, canonical };
+  const drive = WINDOWS_DRIVE_PATH.exec(rawPath);
+  const path = drive ? `${drive[1]!.toUpperCase()}:/${rawPath.slice(drive[0].length).replace(/\\/g, '/')}` : rawPath;
+  const canonical = path.replace(/\/+$/, '');
+  if (!canonical || (drive && canonical.length <= 2)) throw unsupported(input);
+  return { kind: 'file', path, canonical };
 }
 
 /** The one parser. Every shape check lives here, so `normalizeRemote` and `remoteToGitUrl` cannot drift. */
@@ -91,10 +110,14 @@ function parseRemote(input: string): ParsedRemote {
   if (trimmed.startsWith('-')) throw unsupported(input, 'looks like an option');
   if (HELPER_PREFIX.test(trimmed)) throw unsupported(input, 'transport helpers are not allowed');
   const fileUrl = FILE_URL_FORM.exec(trimmed);
-  if (fileUrl) return filePath(fileUrl[1]!, input);
+  if (fileUrl) {
+    const path = fileUrl[1]!.replace(FILE_URL_DRIVE_SLASH, '');
+    if (!path.startsWith('/') && !WINDOWS_DRIVE_PATH.test(path)) throw unsupported(input);
+    return filePath(path, input);
+  }
   const fileCanonical = FILE_CANONICAL.exec(trimmed);
   if (fileCanonical) return filePath(fileCanonical[1]!, input);
-  if (trimmed.startsWith('/')) return filePath(trimmed, input);
+  if (trimmed.startsWith('/') || WINDOWS_DRIVE_PATH.test(trimmed)) return filePath(trimmed, input);
   const url = URL_FORM.exec(trimmed);
   if (url) {
     const scheme = url[1]!;
@@ -106,7 +129,8 @@ function parseRemote(input: string): ParsedRemote {
     return { kind: 'url', scheme, user, host, port: url[4] ?? '', path };
   }
   const scp = SCP_FORM.exec(trimmed);
-  // A one-character "host" is a Windows drive letter, never an SSH host.
+  // A one-character "host" is a Windows drive letter, never an SSH host. An absolute drive path
+  // was accepted above; what reaches here is the drive-relative `C:foo`, which is refused.
   if (scp && scp[2]!.length > 1) {
     // scp-style remotes carry no password, so `user:tok@host:path` parses as host `user` with the
     // token inside the path — wherever the `@` lands once the password contains `/` or `:`. A

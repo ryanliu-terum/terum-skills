@@ -6,12 +6,13 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { bareTeam } from '../lib/__tests__/fixtures.js';
+import { bareTeam, SYMLINKS_SUPPORTED } from '../lib/__tests__/fixtures.js';
 import type { Frame } from '../lib/frames.js';
 const run=promisify(execFile);
 const root=resolve(fileURLToPath(import.meta.url),'../../..');
 const tsc=resolve(dirname(createRequire(import.meta.url).resolve('typescript')),'../bin/tsc');
-describe('the bundled bin (W-02)',()=>{
+// The bundle is exercised through a symlinked node_modules (beforeAll), so the whole block needs symlinks.
+describe.skipIf(!SYMLINKS_SUPPORTED)('the bundled bin (W-02)',()=>{
   let out='',bin='',tree='',home='';let env:Record<string,string>={};
   beforeAll(async()=>{
     out=await realpath(await mkdtemp(join(tmpdir(),'w02-bundle-')));home=join(out,'home');await mkdir(home);

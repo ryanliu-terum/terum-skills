@@ -1,5 +1,6 @@
 import { NPX_PREFIX } from '../invocation.js';
 import { access, mkdtemp, mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -11,6 +12,27 @@ import { cloneLockPath } from '../teamRepo.js';
 
 /** Every temp dir created through `temporaryDirectory` — removed by setup.ts after each test. */
 export const TEMP_DIRS: string[] = [];
+
+/**
+ * Whether this process may create symlinks. On Windows that needs Developer Mode or an elevated
+ * shell; without either every `fs.symlink` fails with EPERM before the code under test runs, so a
+ * test built on one would fail for the environment, not the product. Probed once per worker; a
+ * test that needs a link gates on it (`it.skipIf(!SYMLINKS_SUPPORTED)`), so a Windows contributor
+ * sees the gap as a skip rather than a failure, and a machine that can link runs the real
+ * assertion. Never used to soften what a test asserts, only whether it can be set up.
+ */
+export const SYMLINKS_SUPPORTED: boolean = (() => {
+  const dir = mkdtempSync(join(tmpdir(), 'terum-symlink-probe-'));
+  try {
+    writeFileSync(join(dir, 'target'), '');
+    symlinkSync(join(dir, 'target'), join(dir, 'link'));
+    return true;
+  } catch {
+    return false;
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+})();
 
 /** The one canonical /terum-skills skill (what `npm run build` bundles); from src/ the built copy does not exist, so tests point at this. */
 export const BUNDLED_SKILL_SOURCE = fileURLToPath(new URL('../../../.claude/skills/terum-skills/SKILL.md', import.meta.url));

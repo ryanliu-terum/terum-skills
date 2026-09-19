@@ -2,7 +2,7 @@ import { it, expect } from 'vitest';
 import { readdirSync, readFileSync } from 'node:fs';
 import { ESLint } from 'eslint';
 import ts from 'typescript';
-import { join, relative } from 'node:path';
+import { join, relative, sep } from 'node:path';
 function imports(text:string):string[]{
  const found:string[]=[];const source=ts.createSourceFile('source.tsx',text,ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX);
  function visit(node:ts.Node){
@@ -15,7 +15,8 @@ function imports(text:string):string[]{
 const builtins=/^(?:node:|fs$|fs\/promises$|path$|os$|child_process$|net$|http$|https$|worker_threads$)/;
 function files(dir:string):string[]{return readdirSync(dir,{withFileTypes:true}).flatMap(e=>e.isDirectory()?files(join(dir,e.name)):[join(dir,e.name)]);}
 it('keeps native I/O, mock imports and platform probes behind the seam',()=>{
- const source=files('src').filter(p=>/\.(tsx?|md)$/.test(p)).map(path=>({path:relative('.',path),text:readFileSync(path,'utf8')}));
+ // Forward slashes on every platform: the `src/backend/tauri/` allow-list below is spelled that way, and `relative` returns backslashes on Windows.
+ const source=files('src').filter(p=>/\.(tsx?|md)$/.test(p)).map(path=>({path:relative('.',path).split(sep).join('/'),text:readFileSync(path,'utf8')}));
  const native='@tauri'+'-apps';const probe='is'+'Tauri(';
  expect(source.filter(f=>!f.path.startsWith('src/backend/tauri/')&&f.text.includes(native)).map(f=>f.path)).toEqual([]);
  expect(source.filter(f=>!f.path.startsWith('src/backend/')&&!/\.test\./.test(f.path)&&imports(f.text).some(path=>/backend\/(?:mock|tauri)|fixtures\//.test(path)||path.startsWith(native))).map(f=>f.path)).toEqual([]);

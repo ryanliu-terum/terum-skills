@@ -20,9 +20,12 @@ describe('config store (§5.4)', () => {
     const root = join(await temporaryDirectory(), 'skills');
     const store = createConfigStore(root);
     await store.update((config) => { config.teams.t = { remote: 'github.com/a/t', handle: 'me' }; });
-    expect(((await stat(join(root, 'config.json'))).mode & 0o777).toString(8)).toBe('600');
-    expect(((await stat(root)).mode & 0o777).toString(8)).toBe('700');
-    expect(((await stat(join(root, 'teams'))).mode & 0o777).toString(8)).toBe('700');
+    // Windows has no POSIX mode bits (Node reports 666/777 for everything); the write path and its atomicity are still checked there.
+    if (process.platform !== 'win32') {
+      expect(((await stat(join(root, 'config.json'))).mode & 0o777).toString(8)).toBe('600');
+      expect(((await stat(root)).mode & 0o777).toString(8)).toBe('700');
+      expect(((await stat(join(root, 'teams'))).mode & 0o777).toString(8)).toBe('700');
+    }
     expect((await readdir(root)).filter((name) => name.includes('.tmp'))).toEqual([]);
     expect((await store.read()).teams.t?.handle).toBe('me');
   });

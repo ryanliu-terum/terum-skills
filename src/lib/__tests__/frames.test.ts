@@ -201,7 +201,8 @@ it('CP-19: every feature is named in the protocol features sentence', () => {
   for (const key of Object.keys(FRAME_FEATURES)) expect(sentence).toContain(`\`${key}\``);
 });
 it('B7: the documented complete hello verb list matches the running CLI', () => {
-  const doc = readFileSync(new URL('../../../docs/frame-protocol.md', import.meta.url), 'utf8');
+  // A checkout with autocrlf on (the Windows default) has CRLF line ends here; the document is read as LF either way.
+  const doc = readFileSync(new URL('../../../docs/frame-protocol.md', import.meta.url), 'utf8').replaceAll('\r\n', '\n');
   const versioning = doc.split('## Versioning\n')[1]!;
   const inventory = versioning.match(/```json\n([^]*?)\n```/);
   expect(inventory).not.toBeNull();

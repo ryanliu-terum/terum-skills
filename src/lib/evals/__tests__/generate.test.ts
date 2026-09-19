@@ -47,8 +47,12 @@ function agent(responses: (Record<string, unknown> | Error)[], prompts: string[]
 const at = (now = '2026-09-14T00:00:00Z') => ({ skill, files: ['SKILL.md'], catalog: '', model: 'sonnet', engineVersion: 'test', now: new Date(now), cases: true as const });
 const withCase = (extra: Record<string, unknown>) => ({ cases: [{ ...validCases.cases[0]!, ...extra }, validCases.cases[1], validCases.cases[2]] });
 
+// Generation dry-runs every case's setup under `/bin/sh` (SETUP_RULE); Windows has no `/bin/sh`, so the
+// dry-run refuses every case there before the code under test runs. See execution.test.ts for the same gate.
+const POSIX_SHELL = process.platform !== 'win32';
+
 describe('eval generation (IE5)', () => {
-  it('materializes, loads, and dry-runs a valid ground-truth suite with probes and a patch', async () => {
+  it.skipIf(!POSIX_SHELL)('materializes, loads, and dry-runs a valid ground-truth suite with probes and a patch', async () => {
     const result = await generate({ ...at(), agent: agent([validSuite]) });
     expect(result).toMatchObject({ ok: true });
     if (!result.ok) return;
@@ -79,7 +83,7 @@ describe('eval generation (IE5)', () => {
     expect(prompts[1]).toContain(message);
   });
 
-  it('re-asks when a probe passes after the patch', async () => {
+  it.skipIf(!POSIX_SHELL)('re-asks when a probe passes after the patch', async () => {
     const prompts: string[] = [];
     const disagree = { ...validSuite, suite: { ...validSuite.suite, probes: { alpha: 'true', beta: validSuite.suite.probes.beta } } };
     const result = await generate({ ...at(), agent: agent([disagree, validSuite], prompts) });
@@ -165,7 +169,7 @@ describe('eval generation (IE5)', () => {
     expect(prompts[2]).toContain('exactly 5 should_trigger');
   });
 
-  describe('runtime contract at generation time (eval-gen D1–D3, D6)', () => {
+  describe.skipIf(!POSIX_SHELL)('runtime contract at generation time (eval-gen D1–D3, D6)', () => {
     it('D1: the case prompt states that setup is executed shell, how to stub a tool, and that file keys are sandbox-relative', async () => {
       const prompts: string[] = [];
       expect(await generate({ ...at(), agent: agent([validCases], prompts) })).toMatchObject({ ok: true });
