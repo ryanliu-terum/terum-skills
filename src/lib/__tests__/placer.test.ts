@@ -1,9 +1,9 @@
 import { lstat, mkdir, readFile, readdir, rm, symlink, utimes, writeFile } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { dirname, isAbsolute, join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { fsForTests, inspect, lockTarget, place, remove, resolveTarget } from '../placer.js';
 import { skillTargetLockPath, TARGET_LOCK_STALE_MS } from '../placer/vendor/skillhub/skill-target-lock.js';
-import { bareTeam, cloneWithIdentity, git, temporaryDirectory } from './fixtures.js';
+import { bareTeam, cloneWithIdentity, git, SYMLINKS_SUPPORTED, temporaryDirectory } from './fixtures.js';
 import { diffSkillFiles, snapshotSkillDirectory } from '../placer/vendor/skillhub/skill-fingerprint.js';
 
 describe('native Placer (§7)', () => {
@@ -36,7 +36,8 @@ describe('native Placer (§7)', () => {
     await place(source, root, 'sample', { projectRoot: worktree });
     await release();
     const exclude = (await git(['rev-parse', '--git-path', 'info/exclude'], worktree)).trim();
-    const path = exclude.startsWith('/') ? exclude : join(worktree, exclude);
+    // Git reports an absolute path here (`C:/…` on Windows), which is what the placer itself checks for.
+    const path = isAbsolute(exclude) ? exclude : join(worktree, exclude);
     expect(await readFile(path, 'utf8')).toContain('.claude/skills/sample');
   });
 
@@ -113,7 +114,7 @@ describe('native Placer (§7)', () => {
     if (process.platform !== 'win32') expect((await lstat(dirname(lock))).mode & 0o077).toBe(0);
   });
 
-  it('quarantines edited placements but deletes identical ones, and refuses symlinked sources', async () => {
+  it.skipIf(!SYMLINKS_SUPPORTED)('quarantines edited placements but deletes identical ones, and refuses symlinked sources', async () => {
     const root = await temporaryDirectory(); const target = join(root, '.claude', 'skills'); const source = join(root, 'source');
     await mkdir(source); await writeFile(join(source, 'SKILL.md'), 'original');
     const first = await place(source, target, 'edited');

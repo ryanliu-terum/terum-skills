@@ -29,7 +29,8 @@ describe('release state identity and sources', () => {
     expect(describeUpdate(await f.state.read(), '0.1.0', NOW).candidate).toBeNull();
     await recordRunningAndRegistry({ ...f, running: '0.1.1', now: () => NOW + 1000 });
     expect((await stat(path)).mtimeMs).toBe(before.mtimeMs);
-    expect((await stat(path)).mode & 0o777).toBe(0o600);
+    // Windows has no POSIX mode bits (Node reports 666 for every file).
+    if (process.platform !== 'win32') expect((await stat(path)).mode & 0o777).toBe(0o600);
   });
   it.each(['0.2.0-rc.1', 'garbage', '1.0', '0.0.9', '0.1.0'])('does not compare %s as newer', async (version) => {
     const f = await fixture(); await stateFileAt(f.root, { ...record(), advertisement: ad(version) });

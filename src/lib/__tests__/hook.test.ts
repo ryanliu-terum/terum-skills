@@ -153,7 +153,8 @@ it.each(['2026-09-01T00:00:00.000Z', '2099-01-01T00:00:00.000Z'])('reads stamp m
   await utimes(path, new Date(iso), new Date(iso));
   expect(await stampedAt(root, 'acme')).toBe(iso);
 });
-it('stampedAt rethrows filesystem failures other than ENOENT', async () => {
+// Windows reports ENOENT, not ENOTDIR, for a file sitting where a directory is expected, so the "other than ENOENT" case cannot be staged there.
+it.skipIf(process.platform === 'win32')('stampedAt rethrows filesystem failures other than ENOENT', async () => {
   const { root } = await options();
   await writeFile(join(root, 'run'), 'not a directory');
   await expect(stampedAt(root, 'acme')).rejects.toMatchObject({ code: 'ENOTDIR' });

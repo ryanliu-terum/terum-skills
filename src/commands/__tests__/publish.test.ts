@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AgentRunError, systemAgent, type AgentApi } from '../../lib/evals/agent.js';
 import { run as validate } from '../validate.js';
 import { createConfigStore, type ConfigStore } from '../../lib/config.js';
-import { bareTeam, cloneWithIdentity, git, NonInteractivePrompter, originSha, person, pushFromSeed, ScriptedPrompter, TEAM_JSON } from '../../lib/__tests__/fixtures.js';
+import { bareTeam, cloneWithIdentity, git, NonInteractivePrompter, originSha, person, pushFromSeed, ScriptedPrompter, SYMLINKS_SUPPORTED, TEAM_JSON } from '../../lib/__tests__/fixtures.js';
 import { run } from '../publish.js';
 import { receiptSchema } from '../../lib/evals/receipt.js';
 import { DEFAULT_CATEGORY, skillContentDigest } from '../../lib/skills.js';
@@ -231,7 +231,7 @@ describe('publish (§5) — the only bridge between the two mirrors', () => {
     expect(await run({ ref: 'sample', home, config: store }, new ScriptedPrompter())).toMatchObject({ ok: true });
   });
 
-  it('still refuses hygiene failures, an unknown project, a missing folder, a symlink, and state-root content', async () => {
+  it.skipIf(!SYMLINKS_SUPPORTED)('still refuses hygiene failures, an unknown project, a missing folder, a symlink, and state-root content', async () => {
     const { store, home } = await prepared();
     await librarySkill(home, 'hostile', `---\nname: hostile\ndescription: has a credential\n---\n\nAWS_SECRET_ACCESS_KEY=AKIAIOSFODNN7EXAMPLEKEYX\n`);
     expect(await run({ ref: 'hostile', home, config: store }, new ScriptedPrompter())).toMatchObject({ ok: false, error: expect.stringContaining('HYG3') });

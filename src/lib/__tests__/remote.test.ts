@@ -35,6 +35,40 @@ describe('normalizeRemote (§5.1)', () => {
     }
   });
 
+  it('accepts a Windows drive path in either separator as one local remote, and hands git the forward-slash spelling', () => {
+    // Normalized: `file:` + uppercase drive + forward slashes; only trailing separators go, case and `.git` stay.
+    expect(normalizeRemote('C:\\Users\\Me\\teams\\team.git')).toBe('file:C:/Users/Me/teams/team.git');
+    expect(normalizeRemote('C:/Users/Me/teams/team.git')).toBe('file:C:/Users/Me/teams/team.git');
+    expect(normalizeRemote('c:\\users\\me\\teams\\team.git\\')).toBe('file:C:/users/me/teams/team.git');
+    expect(normalizeRemote('D:\\team\\.git')).toBe('file:D:/team/.git');
+    expect(normalizeRemote('file:///C:/Users/Me/team.git')).toBe('file:C:/Users/Me/team.git');
+    expect(normalizeRemote('file://C:/Users/Me/team.git')).toBe('file:C:/Users/Me/team.git');
+    expect(normalizeRemote('file:C:\\Users\\Me\\team.git')).toBe('file:C:/Users/Me/team.git');
+    // Identity: the same directory typed with either separator or drive-letter case is one remote; a sibling is not.
+    expect(sameRemote('C:\\Users\\Me\\team.git', 'c:/Users/Me/team.git/')).toBe(true);
+    expect(sameRemote('C:\\Users\\Me\\team.git', 'file:C:/Users/Me/team.git')).toBe(true);
+    expect(sameRemote('C:\\Users\\Me\\team.git', 'C:\\Users\\Me\\team')).toBe(false);
+    expect(sameRemote('C:\\Users\\Me\\team.git', 'D:\\Users\\Me\\team.git')).toBe(false);
+    expect(sameRemote('C:\\Users\\Me\\team.git', '/Users/Me/team.git')).toBe(false);
+    // What git gets: forward slashes, which git for Windows reads, and which `git remote get-url` echoes back unchanged.
+    expect(remoteToGitUrl('C:\\Users\\Me\\team.git')).toBe('C:/Users/Me/team.git');
+    expect(remoteToGitUrl('file:C:/Users/Me/team.git')).toBe('C:/Users/Me/team.git');
+    expect(remoteToGitUrl('file:///C:/Users/Me/team.git')).toBe('C:/Users/Me/team.git');
+    for (const input of ['C:/x/team.git', 'C:/x/team/.git', 'C:/x/team']) expect(remoteToGitUrl(normalizeRemote(input)), input).toBe(input);
+    expect(remoteName('C:\\Users\\Me\\Team-Skills.git')).toBe('Team-Skills');
+    expect(remoteName('file:C:/Users/Me/team/.git')).toBe('team');
+    expect(remoteName('C:\\team.git')).toBe('team');
+    expect(isGitHubRemote('C:\\Users\\Me\\team.git')).toBe(false);
+    expect(hostOperationAllowed('C:\\Users\\Me\\team.git')).toMatchObject({ ok: false, error: expect.stringContaining('managed on the host') });
+    expect(repositoryUrl('C:\\Users\\Me\\team.git')).toBe('C:\\Users\\Me\\team.git');
+    expect(hasEmbeddedCredentials('C:\\Users\\Me\\team.git')).toBe(false);
+    // A drive with no directory, a drive-relative path, and a UNC-ish or option-shaped drive path are still refused.
+    for (const bad of ['C:', 'C:\\', 'C:/', 'c:', 'file:///C:/', 'file://C:\\', 'file:C:/', 'C:repos\\team', 'C:repos/team', '-C:\\x', 'C::\\x', '1:\\x', 'file://relative/x']) {
+      expect(() => normalizeRemote(bad), bad).toThrow('Unsupported remote');
+      expect(() => remoteToGitUrl(bad), bad).toThrow('Unsupported remote');
+    }
+  });
+
   it('keeps the scp spelling for a single-label host, so an ssh alias round-trips and `org/repo` is never mistaken for one', () => {
     expect(normalizeRemote('myhost:Org/Repo.git')).toBe('myhost:Org/Repo');
     expect(normalizeRemote('git@localhost:org/repo.git')).toBe('localhost:org/repo');
@@ -49,7 +83,7 @@ describe('normalizeRemote (§5.1)', () => {
   });
 
   it('is idempotent on its own output, in every form, and the output is usable everywhere', () => {
-    for (const input of ['https://github.com/Org/Repo.git', 'https://gitlab.com/Org/Repo.git', 'git@example.org:Org/Repo.git', 'myhost:Org/Repo.git', 'ssh://git@myhost/org/repo.git', 'git@localhost:org/repo.git', '/tmp/x/team.git', 'file:///tmp/x/team.git', '/tmp/x/team/.git', '/tmp/x/team.git/', '/tmp/x/team']) {
+    for (const input of ['https://github.com/Org/Repo.git', 'https://gitlab.com/Org/Repo.git', 'git@example.org:Org/Repo.git', 'myhost:Org/Repo.git', 'ssh://git@myhost/org/repo.git', 'git@localhost:org/repo.git', '/tmp/x/team.git', 'file:///tmp/x/team.git', '/tmp/x/team/.git', '/tmp/x/team.git/', '/tmp/x/team', 'C:\\x\\team.git', 'c:/x/team/.git', 'file:///C:/x/team.git/', 'file:C:/x/team']) {
       const once = normalizeRemote(input);
       expect(normalizeRemote(once), input).toBe(once);
       expect(() => remoteToGitUrl(once), input).not.toThrow();
@@ -62,7 +96,7 @@ describe('normalizeRemote (§5.1)', () => {
     expect(sameRemote('https://github.com/Org/Repo.git', 'https://github.com/Org/Repo-extra.git')).toBe(false);
     expect(sameRemote('https://github.com/Org/Repo', 'https://github.com/org/repo')).toBe(true);
     expect(sameRemote('https://gitlab.com/Org/Repo', 'https://gitlab.com/org/repo')).toBe(false);
-    for (const bad of ['', '   ', 'not a remote', 'repo', 'C:\\repos\\team', 'C:/repos/team', 'github.com/', './team.git', 'https://github.com', 'https://github.com/', 'https://github.com/.git', 'github.com/.git']) {
+    for (const bad of ['', '   ', 'not a remote', 'repo', 'C:repos\\team', 'C:repos/team', 'github.com/', './team.git', 'https://github.com', 'https://github.com/', 'https://github.com/.git', 'github.com/.git']) {
       expect(() => normalizeRemote(bad), bad).toThrow('Unsupported remote');
       expect(() => remoteToGitUrl(bad), bad).toThrow('Unsupported remote');
     }

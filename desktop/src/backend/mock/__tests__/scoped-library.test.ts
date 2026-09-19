@@ -5,6 +5,12 @@ import { parseDesign } from '../../../fixtures/schema';
 import { overviewCopy } from '../../../lib/overview-copy';
 
 afterEach(()=>{location.hash='';});
+it('resolves its canonical team reference and rejects a different team with the same skill name',async()=>{
+ const backend=createMockBackend(),detail=await backend.skill({ref:'deploy-check'});
+ if(!detail.ok)throw new Error(detail.error);
+ expect(await backend.skill({ref:detail.value.skillRef})).toEqual(detail);
+ expect(await backend.skill({ref:'another/team/deploy-check'})).toMatchObject({ok:false});
+});
 it.each(['Global','Terum','SSM','MRF'] as const)('serves the exact %s title and overview',async scope=>{
  const result=await createMockBackend().library({scope:scope==='Global'?{kind:'global'}:{kind:'checkout',root:'/Users/you/code/'+scope.toLowerCase()}});
  expect(result.ok).toBe(true);

@@ -10,7 +10,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createConfigStore } from '../lib/config.js';
 import { systemRunner } from '../lib/runner.js';
 import { installPushGuard } from '../lib/teamRepo.js';
-import { bareTeam, cloneWithIdentity, exists, git, pushFromSeed } from '../lib/__tests__/fixtures.js';
+import { bareTeam, cloneWithIdentity, exists, git, pushFromSeed, SYMLINKS_SUPPORTED } from '../lib/__tests__/fixtures.js';
 
 const run = promisify(execFile);
 const MINE = '11111111-1111-4111-8111-111111111111';
@@ -21,7 +21,8 @@ const root = resolve(fileURLToPath(import.meta.url), '..', '..', '..');
 const tsc = resolve(dirname(createRequire(import.meta.url).resolve('typescript')), '..', 'bin', 'tsc');
 
 /** The shipped artifact: what `npx terum-skills` actually runs. Built once into a scratch directory so the suite never touches the repo's own dist/. */
-describe('the built bin (dist/index.js)', () => {
+// The build output is exercised through a symlinked node_modules (beforeAll), so the whole block needs symlinks.
+describe.skipIf(!SYMLINKS_SUPPORTED)('the built bin (dist/index.js)', () => {
   // Its own scratch directory, not temporaryDirectory(): that one is removed after EACH test, and the build serves both.
   let out = '';
   let bin = '';

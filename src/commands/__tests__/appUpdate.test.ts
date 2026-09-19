@@ -134,7 +134,7 @@ describe('app-update', () => {
     expect(h.runner.calls[0]!.args).toEqual(['release','download',`v${V}`,'--repo',APP_REPOSITORY,'--pattern',ASSET,'--pattern',ASSET+'.sha256','--dir',dir]);
     expect(h.calls).toEqual([{ command: 'tar', args: ['-xzf',join(dir,ASSET),'-C',dir], options: undefined }]);
     expect(JSON.parse(await fs.readFile(join(h.root,'app',V,'staged.json'),'utf8'))).toMatchObject({ bundle: `${APP_PRODUCT}.app`, installer: null });
-    expect(await fs.readdir(join(h.root,'app'))).toEqual([V]); expect(await fs.readdir(join(h.root,'app',V))).toEqual([`${APP_PRODUCT}.app`,'staged.json']);
+    expect(await fs.readdir(join(h.root,'app'))).toEqual([V]); expect((await fs.readdir(join(h.root,'app',V))).sort()).toEqual([`${APP_PRODUCT}.app`,'staged.json']);
   });
   it('--stage twice is a no-op with zero gh calls the second time', async () => {
     const h = await stageFixture(); h.runner.calls.length = 0;

@@ -1,6 +1,6 @@
 import { mkdir, readFile, realpath, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { temporaryDirectory } from './fixtures.js';
+import { SYMLINKS_SUPPORTED, temporaryDirectory } from './fixtures.js';
 import { describe, expect, it } from 'vitest';
 import { describeLaunch, Launch, packageRemovalLines } from '../launch.js';
 
@@ -17,17 +17,18 @@ describe('launch classification', () => {
     ['/repo/src/index.ts', { name: 'terum-skills' }, { kind: 'unknown' }],
     ['', null, { kind: 'unknown' }],
   ])('classifies canonical entry %s from manifest evidence', async (entry, manifest, expected) => {
-    expect(await describeLaunch({ entry, realpath: async (p) => p, readJson: async () => manifest })).toEqual({ ...expected, path: entry });
+    // These entries are POSIX literals, so the separator is injected rather than taken from the host.
+    expect(await describeLaunch({ entry, realpath: async (p) => p, readJson: async () => manifest, sep: '/' })).toEqual({ ...expected, path: entry });
   });
 
   it.each(['terum-skills@latest', 'terum-skills@0.1.0', 'terum-skills', null])('npx evidence wins and preserves request %s', async (request) => {
     const entry = '/Users/me/.npm/_npx/hash/node_modules/terum-skills/dist/index.js';
     const seen: string[] = [];
-    expect(await describeLaunch({ entry, realpath: async (p) => p, readJson: async (p) => { seen.push(p); return request ? { _npx: { packages: [request] }, dependencies: { 'terum-skills': '*' } } : null; } })).toEqual({ kind: 'npx', path: entry, cacheDir: '/Users/me/.npm/_npx/hash', request });
+    expect(await describeLaunch({ entry, realpath: async (p) => p, readJson: async (p) => { seen.push(p); return request ? { _npx: { packages: [request] }, dependencies: { 'terum-skills': '*' } } : null; }, sep: '/' })).toEqual({ kind: 'npx', path: entry, cacheDir: '/Users/me/.npm/_npx/hash', request });
     expect(seen).toEqual(['/Users/me/.npm/_npx/hash/package.json']);
   });
 
-  it('realpaths a symlinked .bin entry before inspecting its manifest', async () => {
+  it.skipIf(!SYMLINKS_SUPPORTED)('realpaths a symlinked .bin entry before inspecting its manifest', async () => {
     const root = await temporaryDirectory();
     const entry = join(root, 'node_modules/terum-skills/dist/index.js');
     await mkdir(join(entry, '..'), { recursive: true }); await writeFile(entry, '');
@@ -65,5 +66,5 @@ describe('launch classification', () => {
 
 it('preserves the one npx request naming this package even in a mixed cache entry', async () => {
   const entry = '/cache/_npx/hash/node_modules/terum-skills/dist/index.js';
-  expect(await describeLaunch({ entry, realpath: async (p) => p, readJson: async () => ({ _npx: { packages: ['other-package', 'terum-skills@latest'] } }) })).toEqual({ kind: 'npx', path: entry, cacheDir: '/cache/_npx/hash', request: 'terum-skills@latest' });
+  expect(await describeLaunch({ entry, realpath: async (p) => p, readJson: async () => ({ _npx: { packages: ['other-package', 'terum-skills@latest'] } }), sep: '/' })).toEqual({ kind: 'npx', path: entry, cacheDir: '/cache/_npx/hash', request: 'terum-skills@latest' });
 });

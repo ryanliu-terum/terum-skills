@@ -6,7 +6,8 @@ import { expect, it } from 'vitest';
 import { pushGuardHook } from '../teamRepo.js';
 import { temporaryDirectory } from './fixtures.js';
 
-it('keeps both push guard warnings fixed npx and executes the missing-launcher recovery with exit zero', async () => {
+// The generated pre-push hook is a `/bin/sh` script and is executed by it here; Windows has no `/bin/sh`.
+it.skipIf(process.platform === 'win32')('keeps both push guard warnings fixed npx and executes the missing-launcher recovery with exit zero', async () => {
   const root = await temporaryDirectory(); const entry = join(root, 'launcher/index.js');
   await mkdir(join(root, 'launcher')); await writeFile(entry, 'throw new Error("must not execute")');
   const launcher = { node: process.execPath, entry };

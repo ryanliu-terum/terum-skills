@@ -55,7 +55,8 @@ describe('machine uninstall', () => {
     for (const path of [...placements, store.teamClone('team'), store.teamClone('other'), ...['config.json', 'run', 'cache', 'teams'].map((x) => join(store.root, x))]) await gone(path);
     await gone(wrapperDir);
     expect(JSON.parse(await readFile(result.value.record, 'utf8'))).toEqual(before);
-    expect((await stat(result.value.record)).mode & 0o777).toBe(0o600);
+    // Windows has no POSIX mode bits (Node reports 666 for every file).
+    if (process.platform !== 'win32') expect((await stat(result.value.record)).mode & 0o777).toBe(0o600);
     expect((await readdir(hook.backupDir)).filter((name) => name.startsWith('settings.'))).toHaveLength(1);
     expect(JSON.parse(await readFile(hook.settingsFile, 'utf8'))).toEqual({ hooks: { SessionStart: [unrelated] } });
     await expect(access(store.root)).resolves.toBeUndefined();
