@@ -7,6 +7,8 @@
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 [![Discord](https://img.shields.io/badge/Discord-join%20us-5865F2?logo=discord&logoColor=white)](https://discord.gg/SVVzejCf9)
 
+[Docs](docs/README.md) · [Roadmap](docs/roadmap.md)
+
 <!-- HERO VIDEO: drag the .mp4 into a GitHub issue or PR comment, copy the
      github.com/user-attachments/assets/... URL it produces, and paste that URL
      on its own line here in place of the image below. GitHub renders it as an
@@ -21,7 +23,7 @@ npx -y terum-skills@latest setup
 
 Requires Node 22.12+ and `git`. Creating a team on GitHub, inviting people, and downloading the desktop app also need the GitHub CLI logged in (`gh auth login`); joining a team does not. On macOS and Windows, setup installs and opens the desktop app first and the rest continues there. On Linux and WSL there is no app yet, so setup runs in the terminal. `npx -y` runs the latest CLI release every time.
 
-To join an existing team, a repository admin invites you from the app's Share page (or with `invite <github-login>`) using your GitHub username. GitHub emails you the invitation, and the app gives them the one-line join command to send you: `npx -y terum-skills@latest setup <org>/<repo>`.
+To join an existing team, a repository admin invites you from the app's Members page (or with `invite <github-login>`) using your GitHub username. GitHub emails you the invitation, and the app gives them the one-line join command to send you: `npx -y terum-skills@latest setup <org>/<repo>`.
 
 ## Why I built this
 
@@ -59,7 +61,7 @@ We're interested in collaborators, and just as much in feedback and the things y
 
 **Share: your team is a private git repo.** GitHub by default, any git host if you prefer. Invite by GitHub handle. Members, skills, versions, and eval receipts are plain files in git; nothing runs on a server of ours.
 
-![The Members page: teammates, roles and pending invitations](docs/images/members.png)
+![The Members page: teammates and their roles](docs/images/members.png)
 
 Two more things worth knowing:
 
@@ -97,8 +99,7 @@ The question is never "what score did the skill get?" It's the only question tha
 - **Verdicts** come from the deterministic checks. Only a tie goes to a judge, which compares the two transcripts twice with the order reversed and must agree with itself, or the row stays a tie.
 - **Receipts** record who ran it, the engine and Claude Code versions, the models requested, `k`, and the cases. A card shows one receipt's own result with that provenance beside it; scores are never averaged across receipts.
 
-<!-- TODO(docs): link the full method (hygiene checks, case and trigger file
-     formats, run phases, judge escalation, receipts) once docs/ is written. -->
+The full method, the case and trigger file formats, the run phases, the judge rules and the receipt are in [Evaluating skills](docs/evaluating/overview.md).
 
 ## FAQ
 
@@ -141,7 +142,7 @@ Every verb runs as `npx -y terum-skills@latest <verb>`. The ones you'll type by 
 
 </details>
 
-`npx -y terum-skills@latest --help` lists the verbs, and `<verb> --help` their options. Programs drive the CLI with `--frames`, one JSON object per line; see [docs/frame-protocol.md](docs/frame-protocol.md).
+`npx -y terum-skills@latest --help` lists the verbs, and `<verb> --help` their options; the full reference is [docs/reference/cli.md](docs/reference/cli.md). Programs drive the CLI with `--frames`, one JSON object per line; see [docs/frame-protocol.md](docs/frame-protocol.md).
 
 ## Updating and uninstalling
 
