@@ -43,10 +43,10 @@ export async function run(args: UpdateArgs, io: Prompter): Promise<Result<Update
 
 export function advice(launch: Launch): string[] {
   switch (launch.kind) {
-    case 'global': return ['If installed globally with npm, run:', '  npm install -g terum-skills@latest', 'Otherwise, update it with the tool that installed this copy.'];
+    case 'global': return ['If installed globally with npm, run:', '  npm install -g terum-skills@latest', 'Otherwise, update it with the tool that installed this copy.', 'Then run terum-skills setup once if the session hook or /terum-skills skill names a version: it re-points them at this copy.'];
     case 'local': return [`If managed with npm, run in ${launch.root}:`, `  npm install ${launch.dependencyKind === 'devDependencies' ? '--save-dev ' : ''}terum-skills@latest`];
-    case 'npx': return [`Cache request recorded as: ${launch.request ?? 'unknown'}`, "To request the registry's latest release, run:", '  npx -y terum-skills@latest <command>', 'This does not update other local or global installations.'];
+    case 'npx': return [`Cache request recorded as: ${launch.request ?? 'unknown'}`, "To request the registry's latest release, run:", '  npx -y terum-skills@latest <command>', 'This does not update other local or global installations.', 'The session hook and /terum-skills skill keep the version that set them up until you re-run:', '  npx -y terum-skills@latest setup'];
     case 'source': return ['Running from a source checkout.', 'Update the checkout through its normal git workflow, then run:', '  npm run build', "The checkout's version does not establish npm publication."];
-    default: return ['Installation method could not be established.', 'Update this copy with the tool that installed it.', "To run the registry's latest release:", '  npx -y terum-skills@latest <command>'];
+    default: return ['Installation method could not be established.', 'Update this copy with the tool that installed it.', "To run the registry's latest release:", '  npx -y terum-skills@latest <command>', 'The session hook and /terum-skills skill keep the version that set them up until you re-run:', '  npx -y terum-skills@latest setup'];
   }
 }

@@ -12,7 +12,10 @@ skill only decides *whether* to run it here and *how* to show the result.
 This file ships inside the `terum-skills` npm package and is placed at
 `~/.claude/skills/terum-skills/` by `terum-skills setup`. The `metadata.managed-by` marker identifies
 Terum's copy. Setup can refresh it; `sync --hook` also refreshes an outdated managed copy and
-announces `Updated your /terum-skills manual for this CLI.` A foreign copy is left alone.
+announces `Updated your /terum-skills manual for this CLI.` A foreign copy is left alone. The placed
+copy is written in this machine's command spelling — the bare binary of a global install, or npx
+pinned to the version that placed it — so a session runs the copy the user installed, never the
+registry's newest release.
 
 Setup also offers a Write/Edit hook, separately and with its own y/N. Where the user accepted it, a
 note beginning *"You edited <name>, a skill in this machine's terum-skills Library"* appears after an
@@ -38,8 +41,8 @@ The user's terminal answers the CLI's questions; the skill answers none of them.
 
 ## Invocation
 
-- Always `npx -y terum-skills@latest <verb> …` for a runnable command.
-  Never a bare binary, checkout entry, or `node dist/index.js`.
+- Always `npx -y terum-skills@latest <verb> …`, exactly that spelling, for a runnable command.
+  Never another spelling, a checkout entry, or `node dist/index.js`.
 - Run through Bash from the current working directory. Do not `cd`. Use absolute path arguments.
   The Library reads Global and explicitly added project roots; cwd does not add a project.
 - Do not use the skill-file `` !`command` `` injection: a non-zero exit aborts the whole skill.

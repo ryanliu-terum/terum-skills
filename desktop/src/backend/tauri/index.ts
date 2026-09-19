@@ -1,3 +1,5 @@
+import { canShareImage, shareImage } from '../image-sharing';
+import { saveNativeImage } from './image-sharing';
 import { registerEvalQueue } from '../eval-queue';
 import { createEvalQueue } from './eval-queue';
 import { evalPrefFlags } from './eval-flags';
@@ -342,6 +344,17 @@ function detailVersionFields(repo: string | null, name: string, version: string 
  *  truncates the Install-to list. `at` names the root a scoped read was anchored to: non-null means
  *  the answer describes exactly that root, so the two root-blind fallbacks (the unfiltered status
  *  ledger and this user's people file) are not consulted — neither records WHICH root. */
+/** Resolve tracked people by full author email (or the authored-ID join without email), never an email prefix. */
+function inventoryAuthor(row:InventorySkill,inventory:Inventory,team:InventoryTeam):SkillDetail['author'] {
+  const name=row.author.replace(/\s*<[^>]*>$/, '').trim();
+  const email=row.author.match(/<([^<>]+)>$/)?.[1]?.trim().toLowerCase();
+  const people=inventory.people?.filter(person=>email?person.email.trim().toLowerCase()===email:person.authored.includes(row.id)&&person.display_name===name)??[];
+  const authored=inventory.people?.filter(person=>person.authored.includes(row.id)&&person.display_name===name)??[];
+  const member=people.length===1?people[0]:people.length===0&&authored.length===1?authored[0]:undefined;
+  const legacy=team.members?.filter(person=>person.displayName===name)??[];
+  const handle=member?.handle??(inventory.people===undefined&&legacy.length===1?legacy[0]!.handle:'');
+  return {name,handle,role:member?.role??'',initials:initials(name)};
+}
 function inventoryDetail(row: InventorySkill, local: Inventory, team: InventoryTeam, placements: LedgerPlacements, validation: Result<ValidateResult>, inventory: Inventory, features: Pick<Features, 'localIdentity'>, home: string, scopes: Inventory = local, at: {id:string;label:string} | null = null): SkillDetail {
   const card = inventoryCard(row, local, team.team, features, home, at ? '' : team.handle, at ? [] : placements), rows = onDisk(local, team.team, row.id, features);
   // Global first by rule, not by the CLI's emission order: a read that names no root answers with
@@ -349,12 +362,9 @@ function inventoryDetail(row: InventorySkill, local: Inventory, team: InventoryT
   const ordered = [...rows].sort((a, b) => Number(b.scope === 'global') - Number(a.scope === 'global'));
   const placed = ordered.find(r => r.placement?.id === row.id && r.placement.team === team.team);
   const path = placed?.path ?? ordered[0]?.path ?? null;
-  const name = row.author.replace(/\s*<[^>]*>$/, '');
   const installers = row.installedBy;
   const repo = repoSlug(team.repository);
   const version = placed?.placement?.version ?? (row.latest === '—' ? null : row.latest || null);
-  const emailHandle = row.author.match(/<([^@<>]+)@[^>]+>$/)?.[1];
-  const handle = team.members?.find(member => member.displayName === name)?.handle ?? team.members?.find(member => member.handle === emailHandle)?.handle ?? '';
   const projects = (scopes.local ?? []).filter(section => section.scope === 'project' && section.rootState !== 'absent' && section.label);
   const installScopes: [string, string][] = [['Global', 'every session · ~/.claude/skills'], ...projects.map((section): [string, string] => [section.label!, `project · ${abbreviateHome(section.repoRoot ?? section.root, home)}`])];
   // Captions stay display-only; removal needs the original absolute destination.
@@ -362,7 +372,7 @@ function inventoryDetail(row: InventorySkill, local: Inventory, team: InventoryT
   return { ...card, team: team.team, installScopes, installScopePaths, projectNames: inventory.projects?.map(project => project.name) ?? null, favorites: null, lines: typeof row.body === 'string' ? row.body.replace(/\n$/, '').split('\n').length : null, skillRef: `${team.team}/${row.name}`, root: 'Global', owningRoot: at, desc_long: cardSummary(row.body, row.description), files: null, size_bytes: '—', ...detailVersionFields(repo, row.name, version), scope: placed?.scope === 'global' ? 'Global' : placed?.label ?? placed?.scope ?? null, installs_n: row.installs, installed: card.installed,
     unidentifiedLocal: card.installed === 'placed' ? null : unidentifiedLocal(local, row.name, features, home), viewerHandle: team.handle,
     used_by: [...new Map(installers.map(person => [person.handle, initials(person.displayName)])).values()], users: installers.map(person => [person.handle, initials(person.displayName), `${person.scope.kind === 'global' ? 'Global' : person.scope.project}${person.since ? ` · since ${person.since.slice(0, 10)}` : ''}`]),
-    author: { name, handle, role: '', initials: initials(name) }, repo, repoPath: `skills/${row.name}`, path, pathLabel: path === null ? '—' : abbreviateHome(path, home), grants_approved: '', versions:null,latestState:'none',invalidReceiptFile:null,localRuns:[],evalReportError:null, receipt: null, history: [], activity: [], hygiene: [], hygieneCaption: null, hygieneStatus: validation.value === undefined ? null : validation.ok && validation.value.findings === 0 ? 'pass' : 'fail', hygieneWhen: null,
+    author: inventoryAuthor(row,inventory,team), repo, repoPath: `skills/${row.name}`, path, pathLabel: path === null ? '—' : abbreviateHome(path, home), grants_approved: '', versions:null,latestState:'none',invalidReceiptFile:null,localRuns:[],evalReportError:null, receipt: null, history: [], activity: [], hygiene: [], hygieneCaption: null, hygieneStatus: validation.value === undefined ? null : validation.ok && validation.value.findings === 0 ? 'pass' : 'fail', hygieneWhen: null,
     skillMd: { frontmatter: row.frontmatter ?? '', body: [], markdown: row.body ?? null }, evalEstimate: null, evalEstimateText: '', evalEstimateTip: '', evalCommand: `npx -y terum-skills@latest eval ${row.name}`, incumbentLift: null, reportNumbers: null, scoreFractions: { routesExpected: null, roi: null },
   };
 }
@@ -843,6 +853,16 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
         if(!row&&!entry)continue;
         const card=row?localCard(row,section,directory):notOfferedCard(entry!,section,directory);
         const detail=localDetail(card,section,row?.path??entry!.path,directory);
+        // Library folders retain their own content and receipt. Only attribution is joined by the recorded skill ID.
+        const id=row?.placement?.id??(row?.knownToTeam?row.skillId:null);
+        if(id){
+          const selected=await inventoryTeam(row?.placement?.team,options);
+          if(!selected.ok)return fail(selected.error);
+          const inventory=await cached(['ls','--team',selected.value.team],cliLs,options);
+          if(!inventory.ok)return fail(inventory.error);
+          const published=inventory.value.skills.find(skill=>skill.id===id);
+          if(published)detail.author=inventoryAuthor(published,inventory.value,selected.value);
+        }
         const shown=row?libraryEval(row).receipt:null,own=row?.localEval??null,team=row?.teamEval??null;
         // §3.3: the same receipt the card shows. A team receipt is committed testimony (latest, 'ok'); an own run is an uncommitted local run.
         const report=shown?mapEvalReport({versions:{placed:row?.placement?.version??null,teamCurrent:null,evaluated:shown.version},
@@ -1035,6 +1055,7 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
     async pickFolder() { try { const chosen = await openDialog({ directory: true, multiple: false, title: 'Choose a project folder' }); return { ok: true, value: typeof chosen === 'string' ? chosen : null }; } catch (error) { return fail(error instanceof Error ? error.message : String(error)); } },
     async openInEditor(path) { try { await openPath(await localPath(path)); return { ok: true, value: undefined }; } catch (error) { return fail(error instanceof Error ? error.message : String(error)); } },
     async copyToClipboard(text) { try { await writeText(text); return { ok: true, value: undefined }; } catch (error) { return fail(error instanceof Error ? error.message : String(error)); } },
+    canShareImage, shareImage, saveImage:saveNativeImage,
     async copyImage(png) { try { await writeImage(await Image.fromBytes(new Uint8Array(await png.arrayBuffer()))); return { ok: true, value: undefined }; } catch (error) { return fail(error instanceof Error ? error.message : String(error)); } },
     prefs,
     subscribe(listener): Subscription { listeners.add(listener); return () => { listeners.delete(listener); }; },

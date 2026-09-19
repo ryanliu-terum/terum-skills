@@ -167,7 +167,7 @@ export function noticeLine(candidate: ReleaseCandidate, running: string, launch?
   const prefix = `Newer terum-skills release ${candidate.source === 'git-tags' ? 'advertised' : 'observed'}: ${candidate.version} (running ${running}). `;
   if (launch?.kind === 'local') return `${prefix}If installed locally with npm, run npm install ${launch.dependencyKind === 'devDependencies' ? '--save-dev ' : ''}terum-skills@latest in ${launch.root}.`;
   if (launch?.kind === 'global') return `${prefix}If installed globally with npm, run npm install -g terum-skills@latest.`;
-  return `${prefix}This copy: ${launch?.path ?? 'unknown'}. Run the latest release with npx -y terum-skills@latest <command>.`;
+  return `${prefix}This copy: ${launch?.path ?? 'unknown'}. Run the latest release with npx -y terum-skills@latest <command>; re-run setup with it to move the session hook and /terum-skills skill.`;
 }
 export async function updateNotice(args: ObservationArgs & { stderr(line: string): void }): Promise<void> {
   try {

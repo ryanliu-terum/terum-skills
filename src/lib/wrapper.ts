@@ -5,6 +5,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import YAML from 'yaml';
+import { NPX_PREFIX, pinnedPrefix, type InvocationForm } from './invocation.js';
 import { AGENT_PATHS } from './placer/agent-paths.js';
 import { Prompter } from './prompt.js';
 import { FRONTMATTER } from './schema.js';
@@ -24,11 +25,23 @@ export const MANAGED_BY = 'terum-skills';
 /** Where `npm run build` puts the bundled copy, resolved from the package root for dist/lib, a bundled entry, and a checkout. */
 export const BUNDLED_WRAPPER = join(packageRoot() ?? fileURLToPath(new URL('../../', import.meta.url)), 'dist', 'claude', 'skills', 'terum-skills', 'SKILL.md');
 
-export interface WrapperOptions { skillsRoot?: string; source?: string; }
-
-export function defaultWrapperOptions(home = homedir()): Required<WrapperOptions> {
-  return { skillsRoot: AGENT_PATHS['claude-code'].global(home), source: BUNDLED_WRAPPER };
+export interface WrapperOptions {
+  skillsRoot?: string;
+  source?: string;
+  /** The command spelling the placed copy teaches (lib/invocation.ts pinnedPrefix); the bundled copy says `npx -y terum-skills@latest`. */
+  prefix?: string;
 }
+
+export function defaultWrapperOptions(home = homedir(), form?: InvocationForm): Required<WrapperOptions> {
+  return { skillsRoot: AGENT_PATHS['claude-code'].global(home), source: BUNDLED_WRAPPER, prefix: pinnedPrefix(form) };
+}
+
+/**
+ * The bundled manual with every `npx -y terum-skills@latest` replaced by this machine's spelling. The
+ * bundle stays canonical (this repository's own harness loads it); what a session runs is the copy
+ * the user installed, so the placed manual names that copy, never the registry's latest.
+ */
+export function renderWrapper(bundled: string, prefix: string): string { return bundled.split(NPX_PREFIX).join(prefix); }
 
 export function wrapperDestination(skillsRoot: string): string { return join(skillsRoot, WRAPPER_NAME); }
 
@@ -85,7 +98,7 @@ export async function wrapperState(options: Required<WrapperOptions>): Promise<W
   const presence = await inspectWrapper(options.skillsRoot);
   if (presence.kind === 'absent') return 'absent';
   if (presence.kind === 'foreign') return 'foreign';
-  return presence.raw === bundled ? 'current' : 'outdated';
+  return presence.raw === renderWrapper(bundled, options.prefix) ? 'current' : 'outdated';
 }
 
 /** Write the bundled copy atomically (temp file beside the target, fsync, rename). Refuses a foreign destination. */
@@ -100,7 +113,7 @@ export async function installWrapper(options: Required<WrapperOptions>): Promise
   const temporary = join(directory, `.SKILL.md.${randomUUID()}.tmp`);
   try {
     const handle = await open(temporary, 'w');
-    try { await handle.writeFile(bundled, 'utf8'); await handle.sync(); }
+    try { await handle.writeFile(renderWrapper(bundled, options.prefix), 'utf8'); await handle.sync(); }
     finally { await handle.close(); }
     await rename(temporary, target);
   } catch (error) { await rm(temporary, { force: true }); throw error; }

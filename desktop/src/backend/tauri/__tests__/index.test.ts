@@ -808,10 +808,10 @@ it('quits through the native bridge exactly once', async () => {
  const f=replay(undefined);await createTauriBackend(f.bridge).quit();
  expect(f.quit).toHaveBeenCalledExactlyOnceWith();expect(f.spawns).toEqual([]);
 });
-it('joins local detail by the on-disk path with validation and eval-report in order',async()=>{
+it('joins local content by path and reads tracked team attribution',async()=>{
  const f=inventoryBridge(),backend=createTauriBackend(f.bridge);
  expect(await backend.localSkill({path:'/home/.claude/skills/a/'})).toMatchObject({ok:true,value:{name:'a',path:'/home/.claude/skills/a',placed:true,team:null,skillMd:{markdown:null},hygieneCaption:null,hygieneStatus:null,repoPath:'/home/.claude/skills/a',files:null}});
- expect(f.spawns.map(s=>s.args)).toEqual([['ls','--local']]);
+ expect(f.spawns.map(s=>s.args)).toEqual([['ls','--local'],['status','--team','acme'],['ls','--team','acme']]);
 });
 it('returns an empty Global only for an empty scan, even with a team inventory',async()=>{
  const f=inventoryBridge({local:{roster:[],skills:[],problems:[],local:[{root:'/home/.claude/skills',scope:'global',rows:[],problems:[]}]}});

@@ -99,7 +99,11 @@ describe('the built bin (dist/index.js)', () => {
     const home = resolve(out, 'bundle-home');
     expect(await wrapper.wrapperState(wrapper.defaultWrapperOptions(home))).toBe('absent');
     expect(await wrapper.installWrapper(wrapper.defaultWrapperOptions(home))).toBe('installed');
-    expect(await readFile(resolve(home, '.claude', 'skills', 'terum-skills', 'SKILL.md'), 'utf8')).toBe(await readFile(bundled, 'utf8'));
+    // Placed in this machine's spelling: the built package pins the manual to its own version, never @latest.
+    const placed = await readFile(resolve(home, '.claude', 'skills', 'terum-skills', 'SKILL.md'), 'utf8');
+    expect(placed).toBe(wrapper.renderWrapper(await readFile(bundled, 'utf8'), `npx -y terum-skills@${JSON.parse(await readFile(resolve(root, 'package.json'), 'utf8')).version}`));
+    expect(placed).not.toContain('@latest');
+    expect(wrapper.isManagedWrapper(placed)).toBe(true);
 
     // The edit hook ships on the same contract, from assets/ rather than .claude/ (it is run, not loaded).
     expect(await readFile(bundledHook, 'utf8')).toBe(await readFile(resolve(root, 'assets', 'claude', 'hooks', 'terum-skills-edit.mjs'), 'utf8'));
@@ -216,7 +220,7 @@ describe('the built bin (dist/index.js)', () => {
       const childEnv = { ...env, HOME: resolve(out, 'notice-home'), USERPROFILE: resolve(out, 'notice-home'), ...(gate !== 'enabled' && gate !== 'piped' ? { [gate]: '1' } : {}) };
       const result = await run(process.execPath, gate === 'piped' ? [bin, 'ls'] : [bootstrap], { cwd: root, env: childEnv }).catch((error: { stdout: string; stderr: string }) => error);
       expect(result.stdout).not.toContain('Newer terum-skills');
-      if (gate === 'enabled') expect(result.stderr.trim().split('\n').at(-1)).toBe(`Newer terum-skills release advertised: 9.9.9 (running ${manifest.version}). This copy: ${bin}. Run the latest release with npx -y terum-skills@latest <command>.`);
+      if (gate === 'enabled') expect(result.stderr.trim().split('\n').at(-1)).toBe(`Newer terum-skills release advertised: 9.9.9 (running ${manifest.version}). This copy: ${bin}. Run the latest release with npx -y terum-skills@latest <command>; re-run setup with it to move the session hook and /terum-skills skill.`);
       else expect(result.stderr).not.toContain('Newer terum-skills');
     }
   });

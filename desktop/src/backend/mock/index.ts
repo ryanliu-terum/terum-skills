@@ -1,3 +1,4 @@
+import { canShareImage, shareImage, saveBrowserImage } from '../image-sharing';
 import { isUnderRoot, normalizeSeparators } from '../../lib/skill-path';
 import { z } from 'zod';
 import { browserPrefs } from '../prefs';
@@ -377,6 +378,7 @@ export function createMockBackend(opts:{latencyMs?:number}={}):Backend & {readon
   diagnostics:()=>long('status',async ctx=>{for(const line of statusLines(design))ctx.print(line);return ok(undefined);}),
   async openInEditor(path){return (path==='~'||path.startsWith('~/')||path.startsWith('/'))?ok(undefined):fail('An editor path is required.');},
   async copyToClipboard(text){try{if(!navigator.clipboard?.writeText)return fail('Clipboard unavailable.');await navigator.clipboard.writeText(text);return ok(undefined);}catch(error){return fail(error instanceof Error?error.message:'Clipboard unavailable.');}},
+  canShareImage, shareImage, saveImage:saveBrowserImage,
   async copyImage(png){try{if(png.type!=='image/png')return fail('Expected a PNG image.');if(!navigator.clipboard?.write||typeof ClipboardItem==='undefined')return fail('Clipboard unavailable.');await navigator.clipboard.write([new ClipboardItem({'image/png':png})]);return ok(undefined);}catch(error){return fail(error instanceof Error?error.message:'Clipboard unavailable.');}},
   prefs:browserPrefs(),
   subscribe:listener=>{listeners.add(listener);return ()=>{listeners.delete(listener);};}

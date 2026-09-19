@@ -93,16 +93,18 @@ for(const {query,hidden,button,rows} of [
  });
 }
 
-// §7.4 (B5): the Library no longer claims a team-derived install count — the third statistic is the neutral '—'.
+// The third tile now reports Unpublished: Global has one known unpublished folder,
+// while every Terum checkout folder has an unknown publish state (overview-counts.ts).
 for(const {route,title,values,note} of [
  {route:'#/library/checkout?root=%2FUsers%2Fyou%2Fcode%2Fterum',title:'8 skills',values:['8','7 of 8','—','5'],note:'6 also on Global'},
- {route:'#/library/global',title:'15 skills',values:['15','13 of 15','—','6'],note:'7 endorsed to Global'},
+ {route:'#/library/global',title:'15 skills',values:['15','13 of 15','1','6'],note:'7 endorsed to Global'},
 ]){
  test(`${route} shows only its scoped statistics`,async({page})=>{
   const errors=await openLibrary(page,route);
   await expect(page.locator('.board-view-header').getByText(title,{exact:true})).toBeVisible();
   await expect(page.getByPlaceholder('Search '+title)).toBeVisible();
   await expect(page.locator('.analytics-row .stat-value')).toHaveText(values);
+  await expect(page.locator('.analytics-row .stat-label')).toHaveText(['Skills','Evaluated','Unpublished','Needs attention']);
   await expect(page.locator('.analytics-row').getByText(note,{exact:true})).toBeVisible();
   expect(errors).toEqual([]);
  });

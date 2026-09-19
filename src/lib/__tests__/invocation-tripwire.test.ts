@@ -29,7 +29,7 @@ it('allows source and documentation command literals only at explicitly catalogu
   const names = (command: Command): string[] => command.commands.flatMap(child => [child.name(), ...names(child)]);
   const verbs = [...new Set(names(buildProgram(async () => {})))].sort((a, b) => b.length - a.length).join('|');
   const command = new RegExp('(?:`|^)(?:' + verbs + ')(?=[ `])');
-  const documents = ['.claude/skills/terum-skills/SKILL.md', 'README.md',
+  const documents = ['.claude/skills/terum-skills/SKILL.md', 'README.md', 'SECURITY.md',
     ...(await readdir(resolve(root, 'docs'), { recursive: true })).filter(path => path.endsWith('.md')).map(path => `docs/${path}`)];
   for (const file of documents) {
     for (const line of (await readFile(resolve(root, file), 'utf8')).split('\n')) {

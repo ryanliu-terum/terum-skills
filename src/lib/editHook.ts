@@ -4,7 +4,7 @@ import { lstat, mkdir, open, readFile, rename, rm, rmdir } from 'node:fs/promise
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { editHookEntry, installEventHook, removeEventHook, eventHookInstalled, type HookOptions } from './hook.js';
+import { editHookEntry, installEventHook, removeEventHook, eventHookInstalled, type HookTarget } from './hook.js';
 import { Prompter } from './prompt.js';
 
 /**
@@ -109,7 +109,7 @@ export async function removeEditHookScript(options: Pick<ResolvedEditHookOptions
   return 'removed';
 }
 
-function hookOptions(options: ResolvedEditHookOptions): Required<HookOptions> {
+function hookOptions(options: ResolvedEditHookOptions): HookTarget {
   return { settingsFile: options.settingsFile, backupDir: options.backupDir };
 }
 

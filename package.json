@@ -28,7 +28,8 @@
     "dist",
     "LICENSE",
     "NOTICE",
-    "README.md"
+    "README.md",
+    "SECURITY.md"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json && node scripts/bundle-cli.mjs && node scripts/bundle-skill.mjs",
