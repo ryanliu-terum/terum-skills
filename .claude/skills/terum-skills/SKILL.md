@@ -1,6 +1,6 @@
 ---
 name: terum-skills
-description: "Drive the terum-skills CLI from a Claude Code or Codex session: run any verb with --format md and show its board — inspect the Library or the team Marketplace, search, fetch with sync, validate or fix a local skill, install the latest version into Global or an added project, manage the eval queue — and prepare the verbs that belong in a terminal (publish, project setup, skill move/copy/rename/delete, prune, reconcile, machine uninstall, team administration). Use when the user wants to manage, evaluate, publish or install skills and no narrower terum-skills skill fits."
+description: "Drive the terum-skills CLI from a Claude Code or Codex session: run any verb with --format md and show its board — inspect the Library or the team Marketplace, search, fetch with sync, validate or fix a local skill, install the latest version into Global or an added project, publish a local skill as an immutable version, manage the eval queue — and prepare the verbs that belong in a terminal (project setup, skill move/copy/rename/delete, prune, reconcile, machine uninstall, team administration). Use when the user wants to manage, evaluate, publish or install skills and no narrower terum-skills skill fits."
 metadata:
   managed-by: terum-skills
   short-description: "Run any terum-skills verb from a session"
