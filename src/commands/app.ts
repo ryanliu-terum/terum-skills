@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { mkdtemp, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { explainGhFailure } from '../lib/auth.js';
@@ -12,17 +12,24 @@ import { assetSuffix, detectPlatform, type AppPlatform, type PlatformEvidence } 
 import type { Prompter } from '../lib/prompt.js';
 import { failure, success, type Result } from '../lib/result.js';
 import { execCommand, systemRunner, type Exec, type Runner } from '../lib/runner.js';
+import { compare } from '../lib/update.js';
 
 /**
  * `terum-skills app` (decision walk 2026-09-08, D1 D3 D7 D8): make sure this version's desktop app is on the
  * machine, record where this CLI is so the app can drive it, and open it. The app is downloaded from this
  * repository's GitHub Release for the CLI's own version (release.yml builds it there before npm publish, D2),
  * through `gh release download` so no HTTP client enters the CLI. Files written by gh carry no macOS quarantine
- * flag, so the app opens without a Gatekeeper dialog.
+ * flag, so the app opens without a Gatekeeper dialog. On macOS the bundle lives at `~/Applications/Terum Skills.app`
+ * (2026-09-15, revising the 2026-09-08 "unpack into ~/.terum/app" clause): a visible, Spotlight-indexed path that
+ * stays the same across updates so a Dock pin survives them. `~/.terum/skills/app/<version>/` keeps only the
+ * download records, the way Windows keeps them beside the per-user install under %LOCALAPPDATA%.
  */
 export const APP_REPOSITORY = 'ryanliu-terum/terum-skills';
 export const APP_SLUG = 'terum-skills-desktop';
 export const APP_PRODUCT = 'Terum Skills';
+/** The macOS bundle's fixed home is `<Applications>/Terum Skills.app`; `Applications` defaults to the per-user folder (no admin rights, mirrors the Windows per-user install). */
+export const APP_BUNDLE = `${APP_PRODUCT}.app`;
+export const applicationsDirectory = (override?: string): string => override ?? join(homedir(), 'Applications');
 /** The opt-in wording setup shows first (decision walk D4, Ryan's words, 2026-09-08). */
 export const APP_OFFER = ["Terum Skills also has a desktop app. It is a wrapper around these same commands with a visual view of your team's skills. Everything works from the terminal without it."];
 export const APP_QUESTION = 'Download and open the app?';
@@ -47,6 +54,8 @@ export interface AppArgs extends WithForm {
   open?: boolean;
   /** Test knob: where the Windows per-user install lands. */
   localAppData?: string;
+  /** Test knob: the folder the macOS bundle is placed in (default `~/Applications`). */
+  applicationsDir?: string;
   /** Test knobs: the clock for the leftover-download sweep, and the wait between Windows retries. */
   now?: () => number;
   sleep?: (milliseconds: number) => Promise<void>;
@@ -98,6 +107,7 @@ export async function run(args: AppArgs, io: Prompter): Promise<Result<AppResult
   const root = store.root;
   const appRoot = join(root, 'app');
   const versionDir = join(appRoot, version);
+  const applications = applicationsDirectory(args.applicationsDir);
   const asset = `${APP_SLUG}_${version}_${suffix}`;
   const retry: TransientRetry = { windows: platform.startsWith('win32'), ...(args.sleep === undefined ? {} : { sleep: args.sleep }) };
   let installedNow = false;
@@ -105,7 +115,7 @@ export async function run(args: AppArgs, io: Prompter): Promise<Result<AppResult
   try {
     await store.ensureRoot();
     await mkdirPrivate(appRoot);
-    if (!(await exists(join(versionDir, 'installed.json')))) {
+    if (await needsInstall(platform, version, versionDir, args.localAppData, applications)) {
       await sweepStaleDownloads(appRoot, args.now ?? Date.now);
       const staging = await mkdtemp(join(appRoot, '.download-'));
       try {
@@ -116,10 +126,9 @@ export async function run(args: AppArgs, io: Prompter): Promise<Result<AppResult
         if (download.code !== 0) return failure(await explainDownloadFailure(download.stderr || download.stdout, version, asset, runner, args.form));
         const file = join(staging, asset);
         if (!(await exists(file)) || !(await exists(`${file}.sha256`))) return failure(`No desktop app is published for terum-skills ${version} (looked for ${asset} on release v${version} of ${APP_REPOSITORY}). ${tail(args.form)}`);
-        const expected = (await readFile(`${file}.sha256`, 'utf8')).trim().split(/\s+/)[0]?.toLowerCase();
-        const actual = createHash('sha256').update(await readFile(file)).digest('hex');
-        if (!expected || expected !== actual) return failure(`The downloaded desktop app did not match its published checksum, so it was discarded (expected ${expected ?? 'nothing readable'}, got ${actual}). ${tail(args.form)}`);
-        // Unpack or install into the staging directory, then move it into place in one rename so <version>/ only ever exists complete.
+        const problem = await verifyDownloadedAsset(file, runner, args.form);
+        if (problem !== null) return failure(problem);
+        // Unpack (macOS: and place the bundle) or install from the staging directory, then move the record into place in one rename so <version>/ only ever exists complete.
         let bundle: string | null = null;
         if (platform.startsWith('darwin')) {
           const unpack = await exec('tar', ['-xzf', file, '-C', staging]);
@@ -127,6 +136,7 @@ export async function run(args: AppArgs, io: Prompter): Promise<Result<AppResult
           await rm(file, { force: true }); await rm(`${file}.sha256`, { force: true });
           bundle = (await readdir(staging)).find((name) => name.endsWith('.app')) ?? null;
           if (!bundle) return failure(`The downloaded archive did not contain an application bundle. ${tail(args.form)}`);
+          await placeBundle(join(staging, bundle), applications, retry);
         } else {
           // Windows (x64 and ARM64): the asset is a per-user NSIS installer; /S installs silently under %LOCALAPPDATA% with no elevation (D8).
           const install = await exec(file, ['/S']);
@@ -152,8 +162,8 @@ export async function run(args: AppArgs, io: Prompter): Promise<Result<AppResult
       }
     }
 
-    const appPath = await locateApp(platform, versionDir, args.localAppData);
-    if (!appPath) return failure(`The desktop app ${version} is installed but its executable was not found where it should be (${platform.startsWith('win32') ? join(args.localAppData ?? process.env['LOCALAPPDATA'] ?? '%LOCALAPPDATA%', APP_PRODUCT) : versionDir}). ${tail(args.form)}`);
+    const appPath = await locateApp(platform, args.localAppData, applications);
+    if (!appPath) return failure(`The desktop app ${version} is installed but its executable was not found where it should be (${platform.startsWith('win32') ? join(args.localAppData ?? process.env['LOCALAPPDATA'] ?? '%LOCALAPPDATA%', APP_PRODUCT) : join(applications, APP_BUNDLE)}). ${tail(args.form)}`);
 
     // D1: the app finds Node and this CLI through this file, on every launch, so a relaunch from the Dock a week later still works.
     const statePath = join(root, 'run', 'app.json');
@@ -200,10 +210,47 @@ export async function removeStaging(staging: string, retry: TransientRetry, io: 
   catch (error) { io.print(`Could not remove the download folder ${staging} (${message(error)}); it is removed on a later update check.`); }
 }
 
-export async function locateApp(platform: AppPlatform, versionDir: string, localAppData: string | undefined): Promise<string | null> {
+/**
+ * Install when this version has no record or its executable is gone (the bundle dragged to the Trash, the Windows
+ * app removed from Settings): a record alone cannot vouch for the app. A macOS bundle at the fixed path that is
+ * already this version or newer (the app updated itself) is kept as it is; `app` never downgrades it.
+ */
+export async function needsInstall(platform: AppPlatform, version: string, versionDir: string, localAppData: string | undefined, applications: string): Promise<boolean> {
   if (platform.startsWith('darwin')) {
-    const bundle = (await readdir(versionDir).catch(() => [] as string[])).find((name) => name.endsWith('.app'));
-    return bundle ? join(versionDir, bundle) : null;
+    const current = await bundleVersion(join(applications, APP_BUNDLE));
+    if (current !== null) return (compare(current, version) ?? -1) < 0;
+  }
+  return !(await exists(join(versionDir, 'installed.json'))) || (await locateApp(platform, localAppData, applications)) === null;
+}
+
+/** CFBundleShortVersionString from the bundle's Info.plist (Tauri writes the plain XML form); null without a readable one. */
+export async function bundleVersion(bundlePath: string): Promise<string | null> {
+  try { return /<key>CFBundleShortVersionString<\/key>\s*<string>([^<]+)<\/string>/.exec(await readFile(join(bundlePath, 'Contents', 'Info.plist'), 'utf8'))?.[1]?.trim() ?? null; }
+  catch { return null; }
+}
+
+/**
+ * Moves an unpacked bundle onto its fixed path. The bundle already there is renamed aside first and removed last,
+ * so a failure in the middle puts it back and the machine never ends up with no app. Installs (`app`) and updates
+ * (`app-update --apply-now`) both go through here; `open` then gets the fixed path, which is also what a Dock pin holds.
+ */
+export async function placeBundle(from: string, applications: string, retry: TransientRetry): Promise<string> {
+  const target = join(applications, APP_BUNDLE), aside = join(applications, `.${APP_BUNDLE}.previous`);
+  await mkdir(applications, { recursive: true });
+  // A leftover aside from an interrupted earlier swap: best effort, because if it stays the rename below fails with the bundle in place still untouched.
+  await removeRetrying(aside, retry).catch(() => undefined);
+  const replacing = await exists(target);
+  if (replacing) await moveRetrying(target, aside, retry);
+  try { await moveRetrying(from, target, retry); }
+  catch (error) { if (replacing) await moveRetrying(aside, target, retry).catch(() => undefined); throw error; }
+  await removeRetrying(aside, retry).catch(() => undefined);
+  return target;
+}
+
+export async function locateApp(platform: AppPlatform, localAppData: string | undefined, applications: string): Promise<string | null> {
+  if (platform.startsWith('darwin')) {
+    const bundle = join(applications, APP_BUNDLE);
+    return (await exists(bundle)) ? bundle : null;
   }
   const base = localAppData ?? process.env['LOCALAPPDATA'];
   if (!base) return null;
@@ -222,6 +269,25 @@ async function readProcVersion(): Promise<string | null> {
 export const RELEASE_ASSETS_MISSING = /release not found|Not Found \(HTTP 404\)|no assets match/i;
 
 /** D7: one sentence per cause, and always the same two next steps. */
+/**
+ * Two independent checks on a downloaded asset, both required. The `.sha256` beside it catches a
+ * damaged download; it ships in the same Release as the asset, so it cannot catch an asset swapped
+ * there together with its checksum. `gh attestation verify` checks the build provenance GitHub
+ * recorded when release.yml built the asset (actions/attest-build-provenance in the desktop job):
+ * the bytes must be the ones that workflow produced in this repository, or the asset is discarded.
+ * Returns the failure line, or null when both checks pass.
+ */
+export async function verifyDownloadedAsset(file: string, runner: Runner, form: WithForm['form']): Promise<string | null> {
+  const expected = (await readFile(`${file}.sha256`, 'utf8')).trim().split(/\s+/)[0]?.toLowerCase();
+  const actual = createHash('sha256').update(await readFile(file)).digest('hex');
+  if (!expected || expected !== actual) return `The downloaded desktop app did not match its published checksum, so it was discarded (expected ${expected ?? 'nothing readable'}, got ${actual}). ${tail(form)}`;
+  const verify = await runner.run('gh', ['attestation', 'verify', file, '--repo', APP_REPOSITORY], { deadlineMs: 120_000 }).catch((error: unknown) => ({ code: 1, stdout: '', stderr: message(error) }));
+  if (verify.code === 0) return null;
+  const text = (verify.stderr || verify.stdout).trim();
+  if (/unknown command "?attestation"?/i.test(text)) return `This copy of gh cannot verify build attestations (gh 2.49 or newer is needed), so the downloaded desktop app was discarded. ${tail(form)}`;
+  return `The downloaded desktop app has no valid build attestation from ${APP_REPOSITORY}, so it was discarded: ${text || 'gh reported no detail'}. ${tail(form)}`;
+}
+
 export async function explainDownloadFailure(output: string, version: string, asset: string, runner: Runner, form: WithForm['form']): Promise<string> {
   const text = output.trim();
   const gh = await explainGhFailure(runner);

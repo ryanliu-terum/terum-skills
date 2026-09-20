@@ -24,13 +24,29 @@ const ok: CommandResult = { code: 0, stdout: '', stderr: '' };
 const V = '0.1.6';
 const ASSET = `terum-skills-desktop_${V}_aarch64.app.tar.gz`;
 const mac = { platform: 'darwin' as const, arch: 'arm64' };
+/** Every macOS run gets its own Applications folder: the default is the real ~/Applications, which may hold the app on the machine running these tests. */
+const applications = (root: string) => join(root, 'Applications');
+const placed = (root: string) => join(applications(root), 'Terum Skills.app');
+/** A bundle already in Applications, with the Info.plist Tauri writes and a marker file that tells the copies apart. */
+async function existingBundle(root: string, version: string, marker: string) {
+  await mkdir(join(placed(root), 'Contents'), { recursive: true });
+  await writeFile(join(placed(root), 'Contents', 'Info.plist'), `<?xml version="1.0" encoding="UTF-8"?>\n<plist version="1.0"><dict>\n\t<key>CFBundleShortVersionString</key>\n\t<string>${version}</string>\n\t<key>CFBundleVersion</key>\n\t<string>${version}</string>\n</dict></plist>\n`);
+  await writeFile(join(placed(root), 'Contents', 'marker'), marker);
+}
 
 /** gh that answers `--version`, `auth status`, and `release download` (writing the asset into --dir); everything else is unexpected. */
-function fakeGhRelease(options: { authenticated?: boolean; download?: 'ok' | 'corrupt' | 'missing' | 'offline' | 'no-release' | 'spawn-error' | 'timeout' } = {}) {
+function fakeGhRelease(options: { authenticated?: boolean; download?: 'ok' | 'corrupt' | 'missing' | 'offline' | 'no-release' | 'spawn-error' | 'timeout'; attestation?: 'ok' | 'invalid' | 'old-gh' } = {}) {
   const authenticated = options.authenticated ?? true;
   return ghOnlyRunner(async (args) => {
     const key = args.join(' ');
     if (args[0] === '--version') return { code: 0, stdout: 'gh version 2.0.0', stderr: '' };
+    if (args[0] === 'attestation' && args[1] === 'verify') {
+      if (options.attestation === 'old-gh') return { code: 1, stdout: '', stderr: 'unknown command "attestation" for "gh"' };
+      if (options.attestation === 'invalid') return { code: 1, stdout: '', stderr: '✗ No attestations found matching the given subject' };
+      expect(args).toEqual(['attestation', 'verify', args[2], '--repo', APP_REPOSITORY]);
+      expect(existsSync(args[2]!)).toBe(true);
+      return ok;
+    }
     if (key === 'auth status') return authenticated ? ok : { code: 1, stdout: '', stderr: 'not logged in' };
     if (args[0] === 'release' && args[1] === 'download') {
       if (!authenticated) return { code: 1, stdout: '', stderr: 'HTTP 401: Requires authentication' };
@@ -95,18 +111,21 @@ describe('terum-skills app (D1, D3, D7, D8)', () => {
     }
   });
 
-  it('macOS: downloads through gh for its own version, verifies the checksum, unpacks into <version>/, writes the state file and the opt-in, opens the app; a second run only opens', async () => {
+  it('macOS: downloads through gh for its own version, verifies the checksum, places the bundle in Applications with only the record under <version>/, writes the state file and the opt-in, opens the app; a second run only opens', async () => {
     const root = await temporaryDirectory();
     const store = createConfigStore(root);
     const runner = fakeGhRelease();
     const { exec, calls } = fakeExec();
     const io = new ScriptedPrompter();
-    const result = await run({ config: store, runner, exec, version: V, evidence: mac, node: '/opt/node/bin/node', entry: '/opt/lib/node_modules/terum-skills/dist/index.js' }, io);
-    expect(result).toMatchObject({ ok: true, value: { platform: 'darwin-arm64', version: V, action: 'installed-and-launched', appPath: join(root, 'app', V, 'Terum Skills.app'), statePath: join(root, 'run', 'app.json') } });
+    const result = await run({ config: store, runner, exec, version: V, evidence: mac, applicationsDir: applications(root), node: '/opt/node/bin/node', entry: '/opt/lib/node_modules/terum-skills/dist/index.js' }, io);
+    expect(result).toMatchObject({ ok: true, value: { platform: 'darwin-arm64', version: V, action: 'installed-and-launched', appPath: placed(root), statePath: join(root, 'run', 'app.json') } });
     const download = runner.calls.find((call) => call.args[0] === 'release')!;
     expect(download.args).toEqual(['release', 'download', `v${V}`, '--repo', APP_REPOSITORY, '--pattern', ASSET, '--pattern', `${ASSET}.sha256`, '--dir', expect.stringContaining(join(root, 'app', '.download-'))]);
     expect(calls.map((call) => call.command)).toEqual(['tar', 'open']);
-    expect(calls[1]!.args).toEqual([join(root, 'app', V, 'Terum Skills.app')]);
+    expect(calls[1]!.args).toEqual([placed(root)]);
+    expect(existsSync(join(placed(root), 'Contents', 'MacOS'))).toBe(true);
+    expect(await readdir(join(root, 'app', V))).toEqual(['installed.json']);  // the bundle itself lives in Applications
+    expect(await readdir(applications(root))).toEqual(['Terum Skills.app']);  // no aside copy left behind
     const state = JSON.parse(await readFile(join(root, 'run', 'app.json'), 'utf8'));
     expect(state).toMatchObject({ schema: 1, node: '/opt/node/bin/node', entry: '/opt/lib/node_modules/terum-skills/dist/index.js', path: process.env.PATH ?? null, version: V });
     expect(state).not.toHaveProperty('target');
@@ -115,13 +134,50 @@ describe('terum-skills app (D1, D3, D7, D8)', () => {
     expect(await readdir(join(root, 'app'))).toEqual([V]);  // no staging directory left behind
     expect(io.lines.at(-1)).toBe(`Installed and opened Terum Skills ${V}.`);
 
-    const again = await run({ config: store, runner: fakeGhRelease({ download: 'no-release' }), exec: fakeExec().exec, version: V, evidence: mac }, new ScriptedPrompter());
+    const again = await run({ config: store, runner: fakeGhRelease({ download: 'no-release' }), exec: fakeExec().exec, version: V, evidence: mac, applicationsDir: applications(root) }, new ScriptedPrompter());
     expect(again).toMatchObject({ ok: true, value: { action: 'launched' } });
+  });
+
+  it('macOS: a bundle deleted from Applications is downloaded again even though its record exists', async () => {
+    const root = await temporaryDirectory();
+    const args = { config: createConfigStore(root), version: V, evidence: mac, applicationsDir: applications(root) };
+    expect(await run({ ...args, runner: fakeGhRelease(), exec: fakeExec().exec }, new ScriptedPrompter())).toMatchObject({ ok: true, value: { action: 'installed-and-launched' } });
+    await rm(placed(root), { recursive: true });
+    const runner = fakeGhRelease();
+    expect(await run({ ...args, runner, exec: fakeExec().exec }, new ScriptedPrompter())).toMatchObject({ ok: true, value: { action: 'installed-and-launched', appPath: placed(root) } });
+    expect(runner.calls.some((call) => call.args[0] === 'release')).toBe(true);
+  });
+
+  it('macOS: replaces an older bundle in Applications, and never downgrades a newer one the app installed itself', async () => {
+    const root = await temporaryDirectory();
+    const args = { config: createConfigStore(root), version: V, evidence: mac, applicationsDir: applications(root) };
+    await existingBundle(root, '0.1.5', 'older');
+    expect(await run({ ...args, runner: fakeGhRelease(), exec: fakeExec().exec }, new ScriptedPrompter())).toMatchObject({ ok: true, value: { action: 'installed-and-launched', appPath: placed(root) } });
+    expect(existsSync(join(placed(root), 'Contents', 'marker'))).toBe(false);
+    expect(await readdir(applications(root))).toEqual(['Terum Skills.app']);
+    await rm(placed(root), { recursive: true }); await rm(join(root, 'app', V), { recursive: true });
+    await existingBundle(root, '0.2.0', 'newer');
+    const runner = fakeGhRelease(); const { exec, calls } = fakeExec();
+    expect(await run({ ...args, runner, exec }, new ScriptedPrompter())).toMatchObject({ ok: true, value: { action: 'launched', appPath: placed(root) } });
+    expect(runner.calls.some((call) => call.args[0] === 'release')).toBe(false);
+    expect(calls.map((call) => call.command)).toEqual(['open']);
+    expect(await readFile(join(placed(root), 'Contents', 'marker'), 'utf8')).toBe('newer');
+  });
+
+  it('macOS: when the new bundle cannot be moved into place the previous one is put back, so the machine is never left without an app', async () => {
+    const root = await temporaryDirectory();
+    await existingBundle(root, '0.1.5', 'older');
+    vi.mocked(rename).mockImplementation(async (from, to) => { if (String(from).includes('.download-') && String(to) === placed(root)) throw Object.assign(new Error('EACCES: permission denied, rename'), { code: 'EACCES' }); return real.rename(from, to); });
+    const result = await run({ config: createConfigStore(root), runner: fakeGhRelease(), exec: fakeExec().exec, version: V, evidence: mac, applicationsDir: applications(root) }, new ScriptedPrompter());
+    expect(result).toMatchObject({ ok: false, error: expect.stringContaining('EACCES: permission denied, rename') });
+    expect(await readFile(join(placed(root), 'Contents', 'marker'), 'utf8')).toBe('older');
+    expect(await readdir(applications(root))).toEqual(['Terum Skills.app']);
+    expect(await readdir(join(root, 'app'))).toEqual([]);
   });
 
   it('records a join target and verbatim PATH, then clears the target on a plain launch', async () => {
     const root = await temporaryDirectory();
-    const args = { config: createConfigStore(root), runner: fakeGhRelease(), exec: fakeExec().exec, version: V, evidence: mac, open: false };
+    const args = { config: createConfigStore(root), runner: fakeGhRelease(), exec: fakeExec().exec, version: V, evidence: mac, applicationsDir: applications(root), open: false };
     const path = 'C:\\Program Files\\node;C:\\git\\bin';
     expect((await run({ ...args, target: 'acme/team', intent: 'setup', path }, new ScriptedPrompter())).ok).toBe(true);
     expect(await readAppState(root)).toMatchObject({ target: 'acme/team', intent: 'setup', path });
@@ -144,15 +200,31 @@ describe('terum-skills app (D1, D3, D7, D8)', () => {
 
   it('a checksum mismatch discards the download, leaves no <version>/ directory, and says so with the two next steps', async () => {
     const root = await temporaryDirectory();
-    const result = await run({ config: createConfigStore(root), runner: fakeGhRelease({ download: 'corrupt' }), exec: fakeExec().exec, version: V, evidence: mac, form: 'bare' }, new ScriptedPrompter());
+    const result = await run({ config: createConfigStore(root), runner: fakeGhRelease({ download: 'corrupt' }), exec: fakeExec().exec, version: V, evidence: mac, applicationsDir: applications(root), form: 'bare' }, new ScriptedPrompter());
     expect(result).toMatchObject({ ok: false, error: expect.stringContaining('did not match its published checksum') });
     expect(result).toMatchObject({ ok: false, error: expect.stringContaining('Everything works from the terminal. Run `terum-skills app` later to try again.') });
     expect(await readdir(join(root, 'app'))).toEqual([]);
   });
 
+  it('an asset without a valid build attestation is discarded after the checksum passed, and so is one an old gh cannot verify', async () => {
+    const root = await temporaryDirectory();
+    const args = { config: createConfigStore(root), exec: fakeExec().exec, version: V, evidence: mac, applicationsDir: applications(root), form: 'bare' as const };
+    const invalid = fakeGhRelease({ attestation: 'invalid' });
+    expect(await run({ ...args, runner: invalid }, new ScriptedPrompter())).toMatchObject({ ok: false, error: `The downloaded desktop app has no valid build attestation from ${APP_REPOSITORY}, so it was discarded: ✗ No attestations found matching the given subject. Everything works from the terminal. Run \`terum-skills app\` later to try again.` });
+    expect(invalid.calls.map((call) => call.args.slice(0, 2))).toEqual([['release', 'download'], ['attestation', 'verify']]);
+    expect(await readdir(join(root, 'app'))).toEqual([]);
+    expect(existsSync(placed(root))).toBe(false);
+    expect(await run({ ...args, runner: fakeGhRelease({ attestation: 'old-gh' }) }, new ScriptedPrompter())).toMatchObject({ ok: false, error: expect.stringContaining('gh 2.49 or newer is needed') });
+    expect(await readdir(join(root, 'app'))).toEqual([]);
+    // A good asset is verified exactly once, after the checksum, before anything is unpacked.
+    const good = fakeGhRelease();
+    expect(await run({ ...args, runner: good }, new ScriptedPrompter())).toMatchObject({ ok: true, value: { action: 'installed-and-launched' } });
+    expect(good.calls.filter((call) => call.args[0] === 'attestation')).toHaveLength(1);
+  });
+
   it('per-cause wording (D7): no release for this version, offline, gh logged out, asset absent', async () => {
     const root = await temporaryDirectory();
-    const at = (runner: ReturnType<typeof fakeGhRelease>) => run({ config: createConfigStore(root), runner, exec: fakeExec().exec, version: V, evidence: mac }, new ScriptedPrompter());
+    const at = (runner: ReturnType<typeof fakeGhRelease>) => run({ config: createConfigStore(root), runner, exec: fakeExec().exec, version: V, evidence: mac, applicationsDir: applications(root) }, new ScriptedPrompter());
     expect(await at(fakeGhRelease({ download: 'no-release' }))).toMatchObject({ ok: false, error: expect.stringContaining(`No desktop app is published for terum-skills ${V}`) });
     expect(await at(fakeGhRelease({ download: 'offline' }))).toMatchObject({ ok: false, error: expect.stringContaining('offline or behind a proxy') });
     expect(await at(fakeGhRelease({ authenticated: false }))).toMatchObject({ ok: false, error: expect.stringContaining('gh auth login') });
@@ -173,7 +245,7 @@ describe('terum-skills app (D1, D3, D7, D8)', () => {
     const exec: Exec = async (command, args, options) => { calls.push({ command, args, options }); if (command.endsWith('-setup.exe')) await mkdir(join(localAppData, 'Terum Skills'), { recursive: true }).then(() => writeFile(join(localAppData, 'Terum Skills', 'terum-skills-desktop.exe'), '')); return ok; };
     const runner = ghOnlyRunner(async (args) => {
       if (args[0] === '--version') return { code: 0, stdout: 'gh version 2.0.0', stderr: '' };
-      if (args.join(' ') === 'auth status') return ok;
+      if (args.join(' ') === 'auth status' || args[0] === 'attestation') return ok;
       const dir = args[args.indexOf('--dir') + 1]!; const name = `terum-skills-desktop_${V}_${suffix}`; const bytes = Buffer.from('nsis');
       await writeFile(join(dir, name), bytes); await writeFile(join(dir, `${name}.sha256`), `${createHash('sha256').update(bytes).digest('hex')} *${name}\n`); return ok;
     });
@@ -193,7 +265,7 @@ describe('terum-skills app (D1, D3, D7, D8)', () => {
     const exec: Exec = async (command, args, options) => { calls.push({ command, args, options }); if (command.endsWith(suffix)) { await mkdir(join(localAppData, 'Terum Skills'), { recursive: true }); await writeFile(exe, ''); } return ok; };
     const runner = ghOnlyRunner(async (args) => {
       if (args[0] === '--version') return { code: 0, stdout: 'gh version 2.0.0', stderr: '' };
-      if (args.join(' ') === 'auth status') return ok;
+      if (args.join(' ') === 'auth status' || args[0] === 'attestation') return ok;
       const dir = args[args.indexOf('--dir') + 1]!; const name = `terum-skills-desktop_${V}_${suffix}`; const bytes = Buffer.from('nsis');
       await writeFile(join(dir, name), bytes); await writeFile(join(dir, `${name}.sha256`), `${createHash('sha256').update(bytes).digest('hex')} *${name}\n`); return ok;
     });
@@ -260,7 +332,7 @@ describe('the offer (setup asks through the verb, D4)', () => {
     const root = await temporaryDirectory();
     const store = createConfigStore(root);
     const no = new ScriptedPrompter([], [false]);
-    const declined = await run({ config: store, runner: fakeGhRelease(), exec: fakeExec().exec, version: V, evidence: mac, offer: true }, no);
+    const declined = await run({ config: store, runner: fakeGhRelease(), exec: fakeExec().exec, version: V, evidence: mac, applicationsDir: applications(root), offer: true }, no);
     expect(declined).toMatchObject({ ok: true, value: { action: 'declined', appPath: null, statePath: null } });
     expect(no.lines[0]).toBe("Terum Skills also has a desktop app. It is a wrapper around these same commands with a visual view of your team's skills. Everything works from the terminal without it.");
     expect(no.asked).toEqual(['Download and open the app?']);
@@ -268,7 +340,7 @@ describe('the offer (setup asks through the verb, D4)', () => {
     expect(await readdir(join(root, 'app')).catch(() => 'absent')).toBe('absent');
     const yes = new ScriptedPrompter([], [true]);
     const runner = fakeGhRelease();
-    expect(await run({ config: store, runner, exec: fakeExec().exec, version: V, evidence: mac, offer: true }, yes)).toMatchObject({ ok: true, value: { action: 'installed-and-launched' } });
+    expect(await run({ config: store, runner, exec: fakeExec().exec, version: V, evidence: mac, applicationsDir: applications(root), offer: true }, yes)).toMatchObject({ ok: true, value: { action: 'installed-and-launched' } });
     expect(runner.calls.some((call) => call.args[0] === 'release')).toBe(true);
     expect((await store.read()).app).toMatchObject({ choice: 'opted-in' });
   });
@@ -291,6 +363,7 @@ describe('app host architecture (p-arch)', () => {
     const suffix = arch === 'arm64' || emulation ? 'arm64-setup.exe' : 'x64-setup.exe';
     const asset = `terum-skills-desktop_${V}_${suffix}`;
     const runner = ghOnlyRunner(async args => {
+      if (args[0] === 'attestation') return ok;
       expect(args.slice(0, 2)).toEqual(['release', 'download']);
       expect(args).toContain(asset);
       const dir = args[args.indexOf('--dir') + 1]!;
@@ -322,7 +395,7 @@ describe('app host architecture (p-arch)', () => {
     const againIo = new ScriptedPrompter();
     expect(await run(args, againIo)).toMatchObject({ ok: true, value: { action: 'launched', emulation } });
     expect(againIo.lines.filter(line => line.includes('emulation'))).toEqual(emulation ? [warning] : []);
-    expect(runner.calls).toHaveLength(1);
+    expect(runner.calls.map(call => call.args[0])).toEqual(['release', 'attestation']); // the first run downloaded and verified; the second called gh for nothing
   });
 
   it('passes the live environment to detection while an injected evidence object wins unchanged', async () => {

@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { createConfigStore } from '../../lib/config.js';
 import { configSchema } from '../../lib/schema.js';
-import { bareTeam, cloneWithIdentity, pushFromSeed, ScriptedPrompter, temporaryDirectory } from '../../lib/__tests__/fixtures.js';
+import { bareTeam, cloneWithIdentity, pushFromSeed, ScriptedPrompter, SYMLINKS_SUPPORTED, temporaryDirectory } from '../../lib/__tests__/fixtures.js';
 import { run } from '../project.js';
 
 async function fixture() {
@@ -14,7 +14,7 @@ async function fixture() {
 }
 
 describe('project registry (§7.1)', () => {
-  it('asks for the nearest repository, stores a realpath, and adds idempotently without a team', async () => {
+  it.skipIf(!SYMLINKS_SUPPORTED)('asks for the nearest repository, stores a realpath, and adds idempotently without a team', async () => {
     const args = await fixture(); const io = new ScriptedPrompter(['']);
     expect(await run({ ...args, kind: 'add' }, io)).toMatchObject({ ok: true, value: { path: args.root, label: 'repo', added: true } });
     expect(io.asked).toEqual(['Which folder?']);
@@ -27,7 +27,7 @@ describe('project registry (§7.1)', () => {
     expect(stored).toMatchObject([{ root: args.root, label: 'repo' }]);
     expect(stored![0]!.added_at).toMatch(/^\d{4}-\d{2}-\d{2}$/);
   });
-  it('adds a non-git folder through an alias', async () => {
+  it.skipIf(!SYMLINKS_SUPPORTED)('adds a non-git folder through an alias', async () => {
     const args = await fixture(); const root = join(args.home, 'plain'); await mkdir(root);
     const alias = join(args.home, 'alias'); await symlink(root, alias);
     expect(await run({ ...args, kind: 'add', path: alias }, new ScriptedPrompter())).toMatchObject({ ok: true, value: { path: root } });
@@ -129,7 +129,7 @@ describe('project registry (§7.1)', () => {
   });
 });
 
-it('preserves unrelated formatting and counts missing placements by lexical registry evidence', async () => {
+it.skipIf(!SYMLINKS_SUPPORTED)('preserves unrelated formatting and counts missing placements by lexical registry evidence', async () => {
   const args = await fixture(); const alias = join(args.home, 'alias'); await symlink(args.root, alias);
   const target = join(alias, '.claude', 'skills', 'missing');
   await args.config.update(c => {

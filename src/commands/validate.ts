@@ -13,6 +13,7 @@ import { readTeam } from '../lib/skills.js';
 import { listVersions } from '../lib/teamRepo.js';
 import { parseVersionFolder } from '../lib/versions.js';
 import { planRepairs } from '../lib/skill-repair.js';
+import { dependencyPlan } from '../lib/evals/dependencies.js';
 
 export interface ValidateArgs extends WithForm { /** A path, a name, or absent: the skill folder above `workingDirectory` (§6.1 rung 0). */ target?: string; team?: string; /** The team checkout to read (the Action); unrelated to the working directory. */ cwd?: string; /** Where a bare validate looks for the skill folder; defaults to process.cwd(). */ workingDirectory?: string; config?: ConfigStore; }
 /** `repairs` lists, one plain sentence each, the changes `skill fix` would make to this folder, and `repairable`
@@ -118,8 +119,9 @@ export async function run(args: ValidateArgs, io: Prompter): Promise<Result<Vali
     const { directory, name } = resolvedTarget;
     await assertSkillDirectory(directory);
     const input = await sourceFiles(directory);
+    const dependencies = await dependencyPlan(directory);
     let assessment;
-    try { assessment = assessHygiene(name, input, policy.skill_license); }
+    try { assessment = assessHygiene(name, input, policy.skill_license, false, false, undefined, dependencies.staged.length + dependencies.skipped.length); }
     catch (error) { if (!(error instanceof HygieneRefused)) throw error; assessment = error.assessment; }
     reportHygieneWarnings((line) => io.print(line), assessment);
     const repairs = planRepairs({ name, ...input, policyLicense: policy.skill_license }).repaired, repairable = repairs.length;

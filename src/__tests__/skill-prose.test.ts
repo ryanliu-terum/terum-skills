@@ -24,7 +24,7 @@ const RULES = `## Rules
 /** The Codex sandbox rule (spec §9 item 5), verbatim; Task 10 of the plan verified --prefer-offline before this shipped. */
 const SANDBOX = `## Sandbox
 
-When \`CODEX_SANDBOX_NETWORK_DISABLED=1\` is set, add \`--prefer-offline\` after \`npx\` (\`npx --prefer-offline -y terum-skills@latest …\`) so a cached package resolves without the registry; if npx still reports a network error, ask the user to run the command in a terminal. In that sandbox the verbs that need the network — \`sync\`, \`install\`, \`publish\`, \`invite\`, \`eval\`, and \`update\`'s release probe — are handed to a terminal with the reason.
+When \`CODEX_SANDBOX_NETWORK_DISABLED=1\` is set and the command starts with \`npx\`, add \`--prefer-offline\` after \`npx\` so a cached package resolves without the registry; if npx still reports a network error, ask the user to run the command in a terminal. In that sandbox the verbs that need the network — \`sync\`, \`install\`, \`publish\`, \`invite\`, \`eval\`, and \`update\`'s release probe — are handed to a terminal with the reason.
 `;
 /** Host-specific tool names a one-file-both-hosts skill must never use (spec D13). */
 const HOST_TOOLS = /Bash\(|AskUserQuestion|request_user_input|run_in_background/;

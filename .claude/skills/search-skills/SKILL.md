@@ -33,4 +33,4 @@ Show the board verbatim. `No skills found.` is a result: say so and offer a broa
 
 ## Sandbox
 
-When `CODEX_SANDBOX_NETWORK_DISABLED=1` is set, add `--prefer-offline` after `npx` (`npx --prefer-offline -y terum-skills@latest …`) so a cached package resolves without the registry; if npx still reports a network error, ask the user to run the command in a terminal. In that sandbox the verbs that need the network — `sync`, `install`, `publish`, `invite`, `eval`, and `update`'s release probe — are handed to a terminal with the reason.
+When `CODEX_SANDBOX_NETWORK_DISABLED=1` is set and the command starts with `npx`, add `--prefer-offline` after `npx` so a cached package resolves without the registry; if npx still reports a network error, ask the user to run the command in a terminal. In that sandbox the verbs that need the network — `sync`, `install`, `publish`, `invite`, `eval`, and `update`'s release probe — are handed to a terminal with the reason.

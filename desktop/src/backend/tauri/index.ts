@@ -1,3 +1,5 @@
+import { canShareImage, shareImage } from '../image-sharing';
+import { saveNativeImage } from './image-sharing';
 import { registerEvalQueue } from '../eval-queue';
 import { createEvalQueue } from './eval-queue';
 import { evalPrefFlags } from './eval-flags';
@@ -21,6 +23,8 @@ import { cliRun } from './run';
 import { createReadSession } from './session.js';
 import { prepareRun } from './prepare-run';
 import { cliEvalReport, mapEvalReport, cliReceipt } from './eval-report';
+import { cliUsage, mapUsage } from './usage';
+import { cliMisses, mapMisses } from './misses';
 import { receiptSummary } from '../receipt-summary';
 import { relativeTime } from '../../lib/relative-time';
 import { personPlaceNote, plural } from '../../screens/marketplace/market-data';
@@ -106,7 +110,7 @@ export const cliProject = z.object({ name: z.string(), skills: z.array(z.string(
 // S7g: every `ls --local` row carries typed provenance and a read-only health; the prose `state` is never parsed.
 const cliLocalHealth = z.enum(['up-to-date', 'update-available', 'local-changed', 'both', 'gone-from-repo', 'untracked', 'unknown']);
 export const cliLocalRow = z.object({ body: z.string().nullish(), frontmatter: z.string().nullish(), name: z.string(), path: z.string(), state: z.string(), tracked: z.boolean(), placement: z.strictObject({ id: z.string(), team: z.string(), version: z.string().nullable() }).nullable(), health: cliLocalHealth, edited:z.boolean().optional(), localEval:cliReceipt.extend({mine:z.boolean().optional()}).nullable().optional(), localEvalStale:z.boolean().optional(), teamEval:cliReceipt.extend({team:z.string(),mine:z.boolean()}).nullable().optional(), matchedVersion:z.string().nullable().optional(), matchedName:z.string().nullable().optional(), matchedTeam:z.string().nullable().optional(), knownToTeam:z.boolean().optional(), category: z.string().nullish().transform(v=>v??null), description: z.string().nullish().transform(value => value ?? null), characters: z.number().nullish().transform(value => value ?? null), updated: z.string().nullish().transform(value => value ?? null), problem: z.string().optional(), skillId: z.string().nullable().optional(), placed: z.boolean().optional(), enabled: z.boolean().optional() }).strict();
-export const cliLocalSection = z.object({ root:z.string(), scope:z.enum(['global','project']), repoRoot:z.string().optional(), remote:z.object({url:z.string(),slug:z.string().nullable()}).nullish(), registered:z.boolean().optional(), rootState:z.enum(['scanned','absent','unreadable']).optional(), label:z.string().optional(), counts:z.object({skillFolders:z.number(),connectable:z.number()}).optional(), rows:z.array(cliLocalRow), notOffered:z.array(z.object({body:z.string().nullish(),frontmatter:z.string().nullish(),skillId:z.string().nullable().optional(),name:z.string(),path:z.string(),reason:z.string(),detail:z.string().optional(),category:z.string().nullish().transform(v=>v??null),description:z.string().nullish().transform(value=>value??null),characters:z.number().nullish().transform(value=>value??null)})).optional(), problems:z.array(z.object({path:z.string(),reason:z.string()})) });
+export const cliLocalSection = z.object({ root:z.string(), scope:z.enum(['global','project']), repoRoot:z.string().optional(), remote:z.object({url:z.string(),slug:z.string().nullable()}).nullish(), registered:z.boolean().optional(), rootState:z.enum(['scanned','absent','unreadable']).optional(), label:z.string().optional(), counts:z.object({skillFolders:z.number(),connectable:z.number()}).optional(), rows:z.array(cliLocalRow), notOffered:z.array(z.object({body:z.string().nullish(),frontmatter:z.string().nullish(),skillId:z.string().nullable().optional(),name:z.string(),path:z.string(),reason:z.string(),detail:z.string().optional(),category:z.string().nullish().transform(v=>v??null),description:z.string().nullish().transform(value=>value??null),characters:z.number().nullish().transform(value=>value??null),enabled:z.boolean().optional()})).optional(), problems:z.array(z.object({path:z.string(),reason:z.string()})) });
 export const cliSkillFile=z.object({kind:z.enum(['move','copy','rename','delete','fix','category']),path:z.string(),destination:z.string().nullable(),quarantined:z.string().nullable(),installed:z.boolean(),notices:z.array(z.string())});
 export const cliSkillToggle=z.object({kind:z.enum(['enable','disable']),path:z.string(),name:z.string(),enabled:z.boolean(),settingsFile:z.string(),changed:z.boolean(),notices:z.array(z.string())});
 const cliReconcileRow = z.object({path:z.string(),name:z.string(),team:z.string(),skillId:z.string().nullable()});
@@ -225,12 +229,12 @@ function localCard(row:LocalRow&{fixable?:boolean},section:LocalSection,home:str
  *  keeps the red flag, the path-and-reason body, and the attention count. */
 function notOfferedCard(entry:NotOffered,section:LocalSection,home:string):SkillCard {
   const bundled=entry.reason==='managed-wrapper';
-  const card=localCard({name:entry.name,path:entry.path,state:'',tracked:false,placement:null,health:'unknown',category:entry.category,description:entry.description,characters:entry.characters,updated:null,...(bundled?{}:{problem:entry.detail??entry.reason}),fixable:entry.reason==='invalid-yaml'||entry.reason==='name-mismatch'},section,home);
+  const card=localCard({name:entry.name,path:entry.path,state:'',tracked:false,placement:null,health:'unknown',category:entry.category,description:entry.description,characters:entry.characters,updated:null,...(bundled?{}:{problem:entry.detail??entry.reason}),fixable:entry.reason==='invalid-yaml'||entry.reason==='name-mismatch',...(entry.enabled===undefined?{}:{enabled:entry.enabled})},section,home);
   return bundled?{...card,flags:['bundled'],flagText:{bundled:BUNDLED_NOTE}}:card;
 }
 function localDetail(card:SkillCard,section:LocalSection,path:string,home:string):SkillDetail {
   const pathLabel=abbreviateHome(path,home);
-  return {...card,desc_long:card.desc,size_bytes:'—',team:null,skillRef:'local:'+path,root:'Global',owningRoot:owningRootOf(section),installScopes:[],projectNames:null,favorites:null,lines:null,hygieneCaption:null,hygieneStatus:null,hygieneWhen:null,path,pathLabel,repo:null,repoPath:pathLabel,version:'—',version_full:null,scope:section.scope==='global'?'Global':labelOf(section),installs_n:0,used_by:[],users:[],author:{name:'',handle:'',role:'',initials:''},files:null,grants_approved:'',receipt:null,history:[],activity:[],hygiene:[],skillMd:{frontmatter:(section.rows.find(row=>samePath(row.path,path))??section.notOffered?.find(row=>samePath(row.path,path)))?.frontmatter??'',body:[],markdown:(section.rows.find(row=>samePath(row.path,path))??section.notOffered?.find(row=>samePath(row.path,path)))?.body??null},evalEstimate:null,evalEstimateText:'',evalEstimateTip:'',evalCommand:'npx -y terum-skills@latest eval '+card.name,shareCommand:'npx -y terum-skills@latest publish '+card.name,incumbentLift:null,reportNumbers:null,scoreFractions:{routesExpected:null,roi:null},method:'',versions:null,latestState:'none',invalidReceiptFile:null,evalReportError:null,localRuns:[],unidentifiedLocal:null,viewerHandle:null};
+  return {...card,desc_long:card.desc,size_bytes:'—',team:null,skillRef:'local:'+path,root:'Global',owningRoot:owningRootOf(section),installScopes:[],projectNames:null,favorites:null,lines:null,hygieneCaption:null,hygieneStatus:null,hygieneWhen:null,path,pathLabel,repo:null,repoPath:pathLabel,version:'—',version_full:null,scope:section.scope==='global'?'Global':labelOf(section),installs_n:0,used_by:[],users:[],author:{name:'',handle:'',role:'',initials:''},files:null,grants_approved:'',receipt:null,history:[],activity:[],hygiene:[],skillMd:{frontmatter:(section.rows.find(row=>samePath(row.path,path))??section.notOffered?.find(row=>samePath(row.path,path)))?.frontmatter??'',body:[],markdown:(section.rows.find(row=>samePath(row.path,path))??section.notOffered?.find(row=>samePath(row.path,path)))?.body??null},evalEstimate:null,evalEstimateText:'',evalEstimateTip:'',evalCommand:'npx -y terum-skills@latest eval '+card.name,shareCommand:'npx -y terum-skills@latest publish '+card.name,incumbentLift:null,reportNumbers:null,scoreFractions:{routesExpected:null,roi:null},versions:null,latestState:'none',invalidReceiptFile:null,evalReportError:null,localRuns:[],unidentifiedLocal:null,viewerHandle:null};
 }
 /** A bare name that is not in the team may still name a folder on this machine — one nobody has
  *  shared, or one whose frontmatter the CLI could not parse. Deep links, bookmarks and hand-typed
@@ -292,7 +296,12 @@ function inventoryCard(row: InventorySkill, local: Inventory, team: string, feat
   // no receipt at its current version keeps summary null, which the card draws as '—'.
   const summary = receiptSummary(row.receipt);
   const provenance = row.receipt ? { model: row.receipt.provenance.model, k: row.receipt.provenance.k, ccVersion: row.receipt.provenance.cc_version, runner: row.receipt.provenance.runner_handle, when: row.receipt.provenance.timestamp.slice(0, 10) } : null;
-  const problem = placements.find(r => r.problem !== undefined || r.health === 'unknown' || r.health === 'gone-from-repo');
+  // `unknown` is NOT a problem: since the CLI narrowed its health vocabulary (src/commands/ls.ts
+  // `healthOf`), an unmodified placement whose fingerprint matches the ledger reports `unknown`, and
+  // an edited one reports `local-changed`. Flagging `unknown` marked every clean install broken and
+  // left the edited ones clean — exactly backwards. Only an explicit problem or a skill the team
+  // dropped is a problem.
+  const problem = placements.find(r => r.problem !== undefined || r.health === 'gone-from-repo');
   // Only ledger versions may annotate the catalogue. Multiple differing placements have no
   // single truthful version; keep the annotation null until a per-root display is specified.
   const recordedVersions = ledger.filter(p => p.id === row.id && p.team === team).map(p => p.version ?? null);
@@ -335,6 +344,17 @@ function detailVersionFields(repo: string | null, name: string, version: string 
  *  truncates the Install-to list. `at` names the root a scoped read was anchored to: non-null means
  *  the answer describes exactly that root, so the two root-blind fallbacks (the unfiltered status
  *  ledger and this user's people file) are not consulted — neither records WHICH root. */
+/** Resolve tracked people by full author email (or the authored-ID join without email), never an email prefix. */
+function inventoryAuthor(row:InventorySkill,inventory:Inventory,team:InventoryTeam):SkillDetail['author'] {
+  const name=row.author.replace(/\s*<[^>]*>$/, '').trim();
+  const email=row.author.match(/<([^<>]+)>$/)?.[1]?.trim().toLowerCase();
+  const people=inventory.people?.filter(person=>email?person.email.trim().toLowerCase()===email:person.authored.includes(row.id)&&person.display_name===name)??[];
+  const authored=inventory.people?.filter(person=>person.authored.includes(row.id)&&person.display_name===name)??[];
+  const member=people.length===1?people[0]:people.length===0&&authored.length===1?authored[0]:undefined;
+  const legacy=team.members?.filter(person=>person.displayName===name)??[];
+  const handle=member?.handle??(inventory.people===undefined&&legacy.length===1?legacy[0]!.handle:'');
+  return {name,handle,role:member?.role??'',initials:initials(name)};
+}
 function inventoryDetail(row: InventorySkill, local: Inventory, team: InventoryTeam, placements: LedgerPlacements, validation: Result<ValidateResult>, inventory: Inventory, features: Pick<Features, 'localIdentity'>, home: string, scopes: Inventory = local, at: {id:string;label:string} | null = null): SkillDetail {
   const card = inventoryCard(row, local, team.team, features, home, at ? '' : team.handle, at ? [] : placements), rows = onDisk(local, team.team, row.id, features);
   // Global first by rule, not by the CLI's emission order: a read that names no root answers with
@@ -342,12 +362,9 @@ function inventoryDetail(row: InventorySkill, local: Inventory, team: InventoryT
   const ordered = [...rows].sort((a, b) => Number(b.scope === 'global') - Number(a.scope === 'global'));
   const placed = ordered.find(r => r.placement?.id === row.id && r.placement.team === team.team);
   const path = placed?.path ?? ordered[0]?.path ?? null;
-  const name = row.author.replace(/\s*<[^>]*>$/, '');
   const installers = row.installedBy;
   const repo = repoSlug(team.repository);
   const version = placed?.placement?.version ?? (row.latest === '—' ? null : row.latest || null);
-  const emailHandle = row.author.match(/<([^@<>]+)@[^>]+>$/)?.[1];
-  const handle = team.members?.find(member => member.displayName === name)?.handle ?? team.members?.find(member => member.handle === emailHandle)?.handle ?? '';
   const projects = (scopes.local ?? []).filter(section => section.scope === 'project' && section.rootState !== 'absent' && section.label);
   const installScopes: [string, string][] = [['Global', 'every session · ~/.claude/skills'], ...projects.map((section): [string, string] => [section.label!, `project · ${abbreviateHome(section.repoRoot ?? section.root, home)}`])];
   // Captions stay display-only; removal needs the original absolute destination.
@@ -355,8 +372,8 @@ function inventoryDetail(row: InventorySkill, local: Inventory, team: InventoryT
   return { ...card, team: team.team, installScopes, installScopePaths, projectNames: inventory.projects?.map(project => project.name) ?? null, favorites: null, lines: typeof row.body === 'string' ? row.body.replace(/\n$/, '').split('\n').length : null, skillRef: `${team.team}/${row.name}`, root: 'Global', owningRoot: at, desc_long: cardSummary(row.body, row.description), files: null, size_bytes: '—', ...detailVersionFields(repo, row.name, version), scope: placed?.scope === 'global' ? 'Global' : placed?.label ?? placed?.scope ?? null, installs_n: row.installs, installed: card.installed,
     unidentifiedLocal: card.installed === 'placed' ? null : unidentifiedLocal(local, row.name, features, home), viewerHandle: team.handle,
     used_by: [...new Map(installers.map(person => [person.handle, initials(person.displayName)])).values()], users: installers.map(person => [person.handle, initials(person.displayName), `${person.scope.kind === 'global' ? 'Global' : person.scope.project}${person.since ? ` · since ${person.since.slice(0, 10)}` : ''}`]),
-    author: { name, handle, role: '', initials: initials(name) }, repo, repoPath: `skills/${row.name}`, path, pathLabel: path === null ? '—' : abbreviateHome(path, home), grants_approved: '', versions:null,latestState:'none',invalidReceiptFile:null,localRuns:[],evalReportError:null, receipt: null, history: [], activity: [], hygiene: [], hygieneCaption: null, hygieneStatus: validation.value === undefined ? null : validation.ok && validation.value.findings === 0 ? 'pass' : 'fail', hygieneWhen: null,
-    skillMd: { frontmatter: row.frontmatter ?? '', body: [], markdown: row.body ?? null }, evalEstimate: null, evalEstimateText: '', evalEstimateTip: '', evalCommand: `npx -y terum-skills@latest eval ${row.name}`, incumbentLift: null, reportNumbers: null, scoreFractions: { routesExpected: null, roi: null }, method: '',
+    author: inventoryAuthor(row,inventory,team), repo, repoPath: `skills/${row.name}`, path, pathLabel: path === null ? '—' : abbreviateHome(path, home), grants_approved: '', versions:null,latestState:'none',invalidReceiptFile:null,localRuns:[],evalReportError:null, receipt: null, history: [], activity: [], hygiene: [], hygieneCaption: null, hygieneStatus: validation.value === undefined ? null : validation.ok && validation.value.findings === 0 ? 'pass' : 'fail', hygieneWhen: null,
+    skillMd: { frontmatter: row.frontmatter ?? '', body: [], markdown: row.body ?? null }, evalEstimate: null, evalEstimateText: '', evalEstimateTip: '', evalCommand: `npx -y terum-skills@latest eval ${row.name}`, incumbentLift: null, reportNumbers: null, scoreFractions: { routesExpected: null, roi: null },
   };
 }
 
@@ -729,6 +746,11 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
     const inventory = await cached(['ls', '--team', team.team], cliLs, options);
     return inventory.ok ? { ok: true as const, value: { team, inventory: inventory.value, placements: status.value.ledger.placements } } : inventory;
   }
+  /** No ref: `usage <skill>` filters after the corpus scan, so a per-skill spawn costs a whole
+   *  rescan and `cached()` would key a separate entry per skill. One read serves every skill page. */
+  async function readUsage(options?:ReadOptions) {
+    return cached(['usage','--json'],cliUsage,options);
+  }
   async function readEvalReport(ref:string,team:string|undefined,options?:ReadOptions) {
     const lines:string[]=[];
     const report=await cached(['eval-report',...(team?['--team',team]:[]),'--',ref],cliEvalReport,options,lines);
@@ -831,6 +853,16 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
         if(!row&&!entry)continue;
         const card=row?localCard(row,section,directory):notOfferedCard(entry!,section,directory);
         const detail=localDetail(card,section,row?.path??entry!.path,directory);
+        // Library folders retain their own content and receipt. Only attribution is joined by the recorded skill ID.
+        const id=row?.placement?.id??(row?.knownToTeam?row.skillId:null);
+        if(id){
+          const selected=await inventoryTeam(row?.placement?.team,options);
+          if(!selected.ok)return fail(selected.error);
+          const inventory=await cached(['ls','--team',selected.value.team],cliLs,options);
+          if(!inventory.ok)return fail(inventory.error);
+          const published=inventory.value.skills.find(skill=>skill.id===id);
+          if(published)detail.author=inventoryAuthor(published,inventory.value,selected.value);
+        }
         const shown=row?libraryEval(row).receipt:null,own=row?.localEval??null,team=row?.teamEval??null;
         // §3.3: the same receipt the card shows. A team receipt is committed testimony (latest, 'ok'); an own run is an uncommitted local run.
         const report=shown?mapEvalReport({versions:{placed:row?.placement?.version??null,teamCurrent:null,evaluated:shown.version},
@@ -898,6 +930,17 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
     async evalReport({ref,team},options) {
       const {report,lines}=await readEvalReport(ref,team,options);
       return report.ok?{ok:true,value:mapEvalReport(report.value,lines)}:{ok:false,error:report.error};
+    },
+    async usage({ref},options) {
+      const report=await readUsage(options);
+      return report.ok?{ok:true as const,value:mapUsage(report.value,ref)}:{ok:false as const,error:report.error};
+    },
+    /** A one-shot spawn, NOT `cached()` and NOT the serve session. Both of those are read paths:
+     *  `cached` would hand a second click a stale answer for a run the user just paid for, and the
+     *  serve session is reads-only precisely so a long-lived process never owns agent children.
+     *  `touches` is empty -- screening changes no local state, so nothing needs invalidating. */
+    misses(q) {
+      return run(['misses','--json',...(q?.since?['--since',q.since]:[]),...(q?.limit===undefined?[]:['--limit',String(q.limit)])],cliMisses,mapMisses,[]);
     },
     async receipts({skillId,version},options) {
       const {report,lines}=await readEvalReport(skillId,undefined,options);
@@ -1012,6 +1055,7 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
     async pickFolder() { try { const chosen = await openDialog({ directory: true, multiple: false, title: 'Choose a project folder' }); return { ok: true, value: typeof chosen === 'string' ? chosen : null }; } catch (error) { return fail(error instanceof Error ? error.message : String(error)); } },
     async openInEditor(path) { try { await openPath(await localPath(path)); return { ok: true, value: undefined }; } catch (error) { return fail(error instanceof Error ? error.message : String(error)); } },
     async copyToClipboard(text) { try { await writeText(text); return { ok: true, value: undefined }; } catch (error) { return fail(error instanceof Error ? error.message : String(error)); } },
+    canShareImage, shareImage, saveImage:saveNativeImage,
     async copyImage(png) { try { await writeImage(await Image.fromBytes(new Uint8Array(await png.arrayBuffer()))); return { ok: true, value: undefined }; } catch (error) { return fail(error instanceof Error ? error.message : String(error)); } },
     prefs,
     subscribe(listener): Subscription { listeners.add(listener); return () => { listeners.delete(listener); }; },

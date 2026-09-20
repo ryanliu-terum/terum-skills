@@ -3800,7 +3800,6 @@
       "eye"
     ]
   ],
-  "METHOD": "Each case seeds an isolated sandbox per (arm × repetition); rounds are scored pairwise by deterministic checks first, with a rubric-anchored, position-counterbalanced LLM judge adjudicating ties only (agent model sonnet; judge sonnet with opus escalation).",
   "FILTER_DEFAULT": {
     "verdicts": [
       "PASS"

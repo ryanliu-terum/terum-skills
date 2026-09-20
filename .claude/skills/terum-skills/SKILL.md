@@ -20,6 +20,9 @@ This file ships inside the `terum-skills` npm package with those seven skills. S
 `metadata.managed-by` marker identifies Terum's copies. Setup refreshes them on a re-run, and
 `sync --hook` refreshes or adds them in a root that already holds one, announcing
 `Updated your terum-skills skills for this CLI.` A foreign folder at one of those names is left alone.
+Each placed copy is written in this machine's command spelling — the bare binary of a global install,
+or npx pinned to the version that placed it — so a session runs the copy the user installed, never the
+registry's newest release.
 
 Setup also offers a Write/Edit hook, separately and with its own y/N. Where the user accepted it, a
 note beginning *"You edited <name>, a skill in this machine's terum-skills Library"* appears after an
@@ -48,8 +51,8 @@ reporting the outcome. So:
 
 ## Invocation
 
-- Always `npx -y terum-skills@latest ls --format md`-shaped — a real verb, `--format md` last — for a runnable command.
-  Never a bare binary, a checkout entry, or the built entry point under `dist/`. `--format md` renders
+- Always `npx -y terum-skills@latest ls --format md`-shaped — exactly that spelling, a real verb, `--format md` last — for a runnable command.
+  Never another spelling, a checkout entry, or the built entry point under `dist/`. `--format md` renders
   the result as a Markdown board; verbs without a board show their printed lines in a fenced block,
   which you show as is.
 - Run from the current working directory; do not `cd`; use absolute path arguments. The Library
@@ -185,7 +188,7 @@ Whether your shell tool has a TTY is unverified; do not promise it. "A terminal"
 
 ## Sandbox
 
-When `CODEX_SANDBOX_NETWORK_DISABLED=1` is set, add `--prefer-offline` after `npx` (`npx --prefer-offline -y terum-skills@latest …`) so a cached package resolves without the registry; if npx still reports a network error, ask the user to run the command in a terminal. In that sandbox the verbs that need the network — `sync`, `install`, `publish`, `invite`, `eval`, and `update`'s release probe — are handed to a terminal with the reason.
+When `CODEX_SANDBOX_NETWORK_DISABLED=1` is set and the command starts with `npx`, add `--prefer-offline` after `npx` so a cached package resolves without the registry; if npx still reports a network error, ask the user to run the command in a terminal. In that sandbox the verbs that need the network — `sync`, `install`, `publish`, `invite`, `eval`, and `update`'s release probe — are handed to a terminal with the reason.
 
 ## What this skill never does
 

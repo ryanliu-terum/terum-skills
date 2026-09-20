@@ -35,7 +35,7 @@ export { SERVE_READ_VERBS } from './serve-verbs.js';
 /** Public verbs, as a shell may invoke them (hidden maintenance verbs and `share` are not listed).
  * B4 marketplace uses existing ls/status/install/publish entries; reinstall is install, not a verb. */
 export const FRAME_VERBS = [
-  'skill move', 'skill copy', 'skill rename', 'skill delete', 'skill fix', 'skill category', 'skill enable', 'skill disable', 'project add', 'project remove', 'project list', 'login', 'setup', 'team create', 'team join', 'team remove', 'team leave', 'team move', 'team workflow-update', 'team project create', 'team project delete', 'invite', 'ls', 'status', 'reconcile', 'publish', 'unpublish', 'validate', 'eval', 'eval-report', 'install', 'uninstall-skill', 'uninstall', 'sync', 'prune', 'search', 'update', 'app', 'profile', 'app-update', 'serve'] as const;
+  'skill move', 'skill copy', 'skill rename', 'skill delete', 'skill fix', 'skill category', 'skill enable', 'skill disable', 'project add', 'project remove', 'project list', 'login', 'setup', 'team create', 'team join', 'team remove', 'team leave', 'team move', 'team workflow-update', 'team project create', 'team project delete', 'invite', 'ls', 'status', 'reconcile', 'publish', 'unpublish', 'validate', 'eval', 'eval-report', 'usage', 'misses', 'install', 'uninstall-skill', 'uninstall', 'sync', 'prune', 'search', 'update', 'app', 'profile', 'app-update', 'serve'] as const;
 
 /**
  * What the CLI can honour today for the affordances the design draws (investigation doc §7). Every
@@ -58,7 +58,7 @@ export const FRAME_FEATURES: Readonly<Record<string, boolean>> = Object.freeze({
   favorites: false, follow: false, lastSeen: false, installScope: true, inviteScoping: false,
   disablePerMachine: true, projectMembers: false, liftOnCards: true, runEvalInApp: true, perCase: true, progress: true,
   refresh: true, appUpdate: true, reconcile: true,
-  serve: true,
+  serve: true, usage: true, misses: true,
 });
 
 export const COMMANDER_NON_ERRORS = new Set(['commander.help', 'commander.helpDisplayed', 'commander.version']);
@@ -192,8 +192,8 @@ export function frameChannel(streams: FrameStreams): FrameChannel {
     interactive: true,
     channel: 'frames',
     async confirm(question, options) {
-      const answer = await ask('confirm', question, options?.detail?.length ? { detail: options.detail } : {});
-      return typeof answer === 'boolean' ? answer : /^(y|yes|true)$/i.test(String(answer).trim());
+      const answer = await ask('confirm', question, { ...(options?.default === undefined ? {} : { default: String(options.default) }), ...(options?.detail?.length ? { detail: options.detail } : {}) });
+      return typeof answer === 'boolean' ? answer : String(answer).trim() ? /^(y|yes|true)$/i.test(String(answer).trim()) : Boolean(options?.default);
     },
     async text(question, defaultValue, options) {
       const answer = String(await ask(options?.path === true ? 'path' : 'text', question, { ...(defaultValue === undefined || defaultValue === '' ? {} : { default: defaultValue }), ...(options?.detail?.length ? { detail: options.detail } : {}) })).trim();

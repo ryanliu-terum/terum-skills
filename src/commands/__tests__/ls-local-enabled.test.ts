@@ -1,8 +1,8 @@
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { createConfigStore } from '../../lib/config.js';
-import { ScriptedPrompter, temporaryDirectory } from '../../lib/__tests__/fixtures.js';
+import { ScriptedPrompter, SYMLINKS_SUPPORTED, temporaryDirectory } from '../../lib/__tests__/fixtures.js';
 import { run } from '../ls.js';
 
 /**
@@ -62,5 +62,18 @@ describe('ls --local enabled', () => {
     const project = listed.sections.find((s) => s.scope === 'project')!;
     expect(project.problems).toContainEqual({ path: f.localSettings, reason: `Cannot read ${f.localSettings}: it is not valid JSON.` });
     expect(listed.sections.find((s) => s.scope === 'global')!.problems).toEqual([]);
+  });
+
+  it.skipIf(!SYMLINKS_SUPPORTED)('a folder the inventory does not offer (a symlink) still carries enabled, read from the same files', async () => {
+    const f = await fixture();
+    const target = join(f.home, 'elsewhere', 'linked');
+    await mkdir(target, { recursive: true });
+    await writeFile(join(target, 'SKILL.md'), skillMd('linked'));
+    await symlink(target, join(f.home, '.claude', 'skills', 'linked'), 'dir');
+    const notOffered = async () => (await f.list()).sections.find((s) => s.scope === 'global')!.notOffered.find((entry) => entry.name === 'linked');
+    expect(await notOffered()).toMatchObject({ reason: 'symlink', enabled: true });
+    await mkdir(join(f.home, '.claude'), { recursive: true });
+    await writeFile(f.userSettings, JSON.stringify({ skillOverrides: { linked: 'off' } }));
+    expect(await notOffered()).toMatchObject({ reason: 'symlink', enabled: false });
   });
 });

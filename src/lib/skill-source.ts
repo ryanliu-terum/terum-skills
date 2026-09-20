@@ -79,7 +79,10 @@ function inspect(raw: string, folderName?: string): { ok: true; description: str
 export async function sourceFiles(root: string): Promise<{ files: Map<string, Buffer>; executable: Set<string> }> {
   const files = new Map<string, Buffer>(); const executable = new Set<string>();
   async function walk(current: string, relative = ''): Promise<void> {
-    for (const entry of await readdir(current, { withFileTypes: true })) {
+    // Sorted like `canonicalDigest`'s walker: readdir order is the filesystem's (NTFS alphabetical,
+    // ext4 hashed), and hygiene findings are reported in walk order, so an unsorted walk would put
+    // the same folder's findings in a different order on every platform.
+    for (const entry of (await readdir(current, { withFileTypes: true })).sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0)) {
       const next = join(current, entry.name); const key = relative ? `${relative}/${entry.name}` : entry.name;
       // The same D2 predicate `canonicalDigest`'s walker uses: two walkers over one folder must not
       // produce two digests, or publish could never recognise a byte-identical republish (§3.3).
@@ -102,7 +105,8 @@ export async function scanSkillFolder(path: string): Promise<{ symlink?: string;
   if (!details.isDirectory()) throw new Error(`${path} is not a skill folder.`);
   const result: { symlink?: string; privileged: boolean } = { privileged: false };
   async function visit(current: string): Promise<void> {
-    for (const entry of await readdir(current, { withFileTypes: true })) {
+    // Sorted for the same reason as `sourceFiles`: "the first nested link" must be the same link everywhere.
+    for (const entry of (await readdir(current, { withFileTypes: true })).sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0)) {
       const next = join(current, entry.name);
       if (entry.isSymbolicLink()) { result.symlink ??= resolve(next); continue; }
       if ((entry.isDirectory() || entry.isFile()) && (entry.name === '.claude-plugin' || /^hooks?$/i.test(entry.name))) result.privileged = true;

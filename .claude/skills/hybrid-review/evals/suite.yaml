@@ -1,0 +1,28 @@
+# Authored hybrid-review suite (eval spec §6.2, chunk 7). The fixture is a clean, dependency-free
+# Node ESM repository; `.plants.txt` at its root carries five defects and one distractor. `setup`
+# commits the base WITHOUT the diff file, applies the diff as uncommitted working-tree edits, and
+# deletes it, so `git diff` in the sandbox shows exactly the plants. This file lives in `evals/`,
+# which seedSandbox never stages, so the sub-case names below never reach the agent.
+# The task names the skill: on the first proof run (2026-09-16) a task that only said "review the diff"
+# was answered inline by the candidate without ever invoking /hybrid-review, so nothing about the skill
+# was measured. The baseline arm has no such skill and reviews however it likes — that is the comparison.
+task: Use the hybrid-review skill to review the uncommitted diff in this repository before I commit it. Report every defect you find with the file and identifier.
+fixture: fixtures/review-repo
+setup: |
+  git init -q && git add -A -- . ':!.plants.txt' && git -c user.name=t -c user.email=t@t commit -qm base
+  git apply .plants.txt && rm .plants.txt
+requires: [codex]
+timeout_minutes: 120
+cases:
+  - name: broken-contract-applydiscount
+    checks: [{ transcript_mentions: "applyDiscount" }]
+  - name: swapped-clamp-args-cart
+    checks: [{ transcript_mentions: "clamp" }]
+  - name: off-by-one-isoverdue
+    checks: [{ transcript_mentions: "isOverdue" }]
+  - name: unchecked-null-resolveterms
+    checks: [{ transcript_mentions: "resolveTerms" }]
+  - name: stale-percent-us-tx
+    checks: [{ transcript_mentions: "US-TX" }]
+  - name: distractor-roundhalfup
+    checks: [{ transcript_omits: "roundHalfUp" }]

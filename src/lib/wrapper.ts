@@ -4,6 +4,7 @@ import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import YAML from 'yaml';
+import { NPX_PREFIX, pinnedPrefix, type InvocationForm } from './invocation.js';
 import { packageRoot } from './package-root.js';
 import { AGENT_PATHS } from './placer/agent-paths.js';
 import type { Prompter } from './prompt.js';
@@ -17,6 +18,8 @@ export interface ManagedRoot { host: ManagedHost; root: string }
 export interface WrapperOptions {
   roots?: ManagedRoot[];
   bundle?: string;
+  /** The command spelling every placed copy teaches (lib/invocation.ts pinnedPrefix); the bundled copies say `npx -y terum-skills@latest`. */
+  prefix?: string;
 }
 
 export function managedSkillRoots(home = homedir(), env: NodeJS.ProcessEnv = process.env): ManagedRoot[] {
@@ -24,15 +27,22 @@ export function managedSkillRoots(home = homedir(), env: NodeJS.ProcessEnv = pro
   return [{ host: 'claude', root: AGENT_PATHS['claude-code'].global(home) }, { host: 'codex', root: join(codexHome, 'skills') }];
 }
 
-export function defaultWrapperOptions(home = homedir(), env: NodeJS.ProcessEnv = process.env): Required<WrapperOptions> {
+export function defaultWrapperOptions(home = homedir(), form?: InvocationForm, env: NodeJS.ProcessEnv = process.env): Required<WrapperOptions> {
   const roots = managedSkillRoots(home, env);
-  return { roots, bundle: BUNDLED_SKILLS };
+  return { roots, bundle: BUNDLED_SKILLS, prefix: pinnedPrefix(form) };
 }
 
 export function managedSkillDirectory(root: string, name: string): string { return join(root, name); }
 
 /** Test seam: a failing `open` simulates an interrupted install (the file system itself is not mocked). */
 export const fsForTests = { open };
+
+/**
+ * A bundled skill with every `npx -y terum-skills@latest` replaced by this machine's spelling. The
+ * bundle stays canonical (this repository's own harness loads it); what a session runs is the copy
+ * the user installed, so every placed copy names that copy, never the registry's latest.
+ */
+export function renderWrapper(bundled: string, prefix: string): string { return bundled.split(NPX_PREFIX).join(prefix); }
 
 export function isManagedFrontmatter(parsed: unknown): boolean {
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return false;
@@ -101,23 +111,25 @@ export async function readBundledSkills(bundle: string): Promise<Map<string, str
 export type SkillState = 'absent' | 'current' | 'outdated' | 'foreign';
 export interface ManagedSkillStatus { name: string; root: string; directory: string; state: SkillState; why?: string }
 export interface RootStatus { host: ManagedHost; root: string; eligible: boolean; skills: ManagedSkillStatus[] }
+/** `bundled` holds every skill already rendered in this machine's spelling (options.prefix): what a placed copy must equal to be current, and what an install writes. */
 export type ManagedStates = { kind: 'unavailable'; bundle: string } | { kind: 'ready'; bundled: Map<string, string>; roots: RootStatus[] };
 
 async function isDirectory(path: string): Promise<boolean> { try { return (await stat(path)).isDirectory(); } catch (error) { if (isMissing(error)) return false; throw error; } }
 async function eligible(root: ManagedRoot): Promise<boolean> { return root.host === 'claude' ? true : isDirectory(dirname(root.root)); }
 
 export async function managedSkillStates(options: Required<WrapperOptions>): Promise<ManagedStates> {
-  const bundled = await readBundledSkills(options.bundle);
-  if (bundled === null) return { kind: 'unavailable', bundle: options.bundle };
+  const canonical = await readBundledSkills(options.bundle);
+  if (canonical === null) return { kind: 'unavailable', bundle: options.bundle };
+  const bundled = new Map([...canonical].map(([name, raw]) => [name, renderWrapper(raw, options.prefix)] as const));
   const roots: RootStatus[] = [];
   for (const root of options.roots) {
     const skills: ManagedSkillStatus[] = [];
-    for (const [name, raw] of bundled) {
+    for (const [name, rendered] of bundled) {
       const directory = managedSkillDirectory(root.root, name);
       const presence = await inspectManagedSkill(root.root, name);
       if (presence.kind === 'absent') skills.push({ name, root: root.root, directory, state: 'absent' });
       else if (presence.kind === 'foreign') skills.push({ name, root: root.root, directory, state: 'foreign', why: presence.why });
-      else skills.push({ name, root: root.root, directory, state: presence.raw === raw ? 'current' : 'outdated' });
+      else skills.push({ name, root: root.root, directory, state: presence.raw === rendered ? 'current' : 'outdated' });
     }
     roots.push({ host: root.host, root: root.root, eligible: await eligible(root), skills });
   }

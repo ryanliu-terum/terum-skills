@@ -147,8 +147,8 @@ function unfinishedAtInvite(teamName: string, invited: readonly string[], form: 
   ];
 }
 
-function resolvedHook(store: ConfigStore, home: string | undefined, partial: HookOptions | undefined): Required<HookOptions> {
-  return { ...defaultHookOptions(store.root, home), ...partial };
+function resolvedHook(store: ConfigStore, home: string | undefined, partial: HookOptions | undefined, form: WithForm['form']): Required<HookOptions> {
+  return { ...defaultHookOptions(store.root, home, form), ...partial };
 }
 
 export async function run(args: SetupArgs, io: Prompter): Promise<Result<SetupResult>> {
@@ -503,7 +503,7 @@ export async function run(args: SetupArgs, io: Prompter): Promise<Result<SetupRe
     else { section('community'); io.print(`Feedback and requests: ${communityUrl}`); steps.community = 'printed'; }
 
     section('hook');
-    const hookOutcome = await verbs.offerHook(io, resolvedHook(store, args.home, args.hook));
+    const hookOutcome = await verbs.offerHook(io, resolvedHook(store, args.home, args.hook, args.form));
     steps.hook = hookOutcome === 'installed' || hookOutcome === 'replaced' ? 'done' : 'skipped';
 
     // The terum-skills skills ship inside this package, and setup is the one onboarding step
@@ -512,7 +512,7 @@ export async function run(args: SetupArgs, io: Prompter): Promise<Result<SetupRe
     // io, copies the tool recognises by their frontmatter marker (refreshed or added on a re-run without
     // asking, removed by machine uninstall), and anything else at a destination left alone (src/lib/wrapper.ts).
     section('wrapper');
-    const wrapperOutcome = await verbs.offerWrapper(io, { ...defaultWrapperOptions(args.home), ...args.wrapper });
+    const wrapperOutcome = await verbs.offerWrapper(io, { ...defaultWrapperOptions(args.home, args.form), ...args.wrapper });
     steps.wrapper = wrapperOutcome === 'installed' || wrapperOutcome === 'replaced' ? 'done' : 'skipped';
 
     // The edit hook gets its OWN y/N, deliberately, instead of riding the session hook's. That one

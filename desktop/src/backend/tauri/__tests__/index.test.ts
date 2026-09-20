@@ -367,6 +367,14 @@ it('resolves a name whose frontmatter the CLI could not parse',async()=>{
   const local=unsharedLocal([{root:'/work/ops/.claude/skills',repoRoot:'/work/ops',scope:'project',rows:[],notOffered:[{name:'codex-implement',path:'/work/ops/.claude/skills/codex-implement',reason:'invalid-yaml'}],problems:[]}]);
   expect(await createTauriBackend(inventoryBridge({local}).bridge).skill({ref:'codex-implement',team:'acme'})).toMatchObject({ok:true,value:{name:'codex-implement',team:null,project:'ops',teamed:false,path:'/work/ops/.claude/skills/codex-implement',flags:['broken'],flagText:{broken:'invalid-yaml'}}});
 });
+it('reads enabled on a folder the CLI does not offer, and defaults it on when an older CLI omits the key',async()=>{
+  const section=(enabled:boolean|undefined)=>unsharedLocal([{root:'/home/.claude/skills',scope:'global',rows:[],notOffered:[{name:'brandkit',path:'/home/.claude/skills/brandkit',reason:'symlink',detail:'symbolic link',...(enabled===undefined?{}:{enabled})}],problems:[]}]);
+  expect(await createTauriBackend(inventoryBridge({local:section(false)}).bridge).skill({ref:'brandkit',team:'acme'})).toMatchObject({ok:true,value:{name:'brandkit',enabled:false,installed:'placed',placed:false,onDiskOnly:true,path:'/home/.claude/skills/brandkit'}});
+  expect(await createTauriBackend(inventoryBridge({local:section(undefined)}).bridge).skill({ref:'brandkit',team:'acme'})).toMatchObject({ok:true,value:{name:'brandkit',enabled:true}});
+  const library=await createTauriBackend(inventoryBridge({local:section(false)}).bridge).library({scope:{kind:'global'}});
+  expect(library).toMatchObject({ok:true});if(!library.ok)throw new Error(library.error);
+  expect(library.value.skills.find(s=>s.name==='brandkit')).toMatchObject({enabled:false,installed:'placed',placed:false});
+});
 it('prefers Global over a checkout when a bare name carries no root',async()=>{
   const local=unsharedLocal([
     {root:'/work/ops/.claude/skills',repoRoot:'/work/ops',scope:'project',rows:[unsharedRow('shared-name','/work/ops/.claude/skills/shared-name')],notOffered:[],problems:[]},
@@ -607,6 +615,17 @@ it('keeps a null tracking version and a missing placement folder honest',async()
  const local={roster:[],skills:[],problems:[],local:[{root:'/skills',scope:'global',rows:[{name:'a',path:'/skills/a',state:'unrelated',tracked:true,placement:{id:'id-a',team:'acme',version:null},health:'unknown',problem:'symbolic link'}],notOffered:[],problems:[]}]};
  expect(await createTauriBackend(inventoryBridge({local}).bridge).skill({ref:'a'})).toMatchObject({ok:true,value:{installed:'placed',version:'Version 1',version_full:'v1'}});
 });
+// A clean install reports `unknown` health now: src/commands/ls.ts `healthOf` answers
+// 'local-changed' when the folder's fingerprint has drifted from the ledger's and 'unknown' for
+// everything else — intact copies included. Treating 'unknown' as a fault put "placed copy could
+// not be inspected" on every untouched install and left the genuinely edited ones clean.
+it.each([['unknown',[],{}],['gone-from-repo',['broken'],{broken:'placed copy could not be inspected'}]] as [string,string[],Record<string,string>][])('an intact placement reporting %s health carries the right flags',async(health,flags,flagText)=>{
+ const local={roster:[],skills:[],problems:[],local:[{root:'/home/.claude/skills',scope:'global',rows:[{name:'a',path:'/home/.claude/skills/a',state:'placement recorded from acme',tracked:true,placement:{id:'id-a',team:'acme',version:'v1'},health}],notOffered:[],problems:[]}]};
+ const card=(await createTauriBackend(inventoryBridge({local}).bridge).skill({ref:'a',team:'acme'})).value;
+ expect(card).toMatchObject({name:'a',installed:'placed'});
+ expect(card?.flags).toEqual(flags);
+ expect(card?.flagText).toEqual(flagText);
+});
 it('rejects undeclared local row keys and missing typed provenance',async()=>{
   for(const extra of [{sharedState:'in-sync'}, {placement:undefined}]) {
     const local={roster:[],skills:[],problems:[],local:[{root:'/skills',scope:'global',rows:[{name:'a',path:'/skills/a',state:'x',tracked:true,placement:null,health:'unknown',...extra}],notOffered:[],problems:[]}]};
@@ -789,10 +808,10 @@ it('quits through the native bridge exactly once', async () => {
  const f=replay(undefined);await createTauriBackend(f.bridge).quit();
  expect(f.quit).toHaveBeenCalledExactlyOnceWith();expect(f.spawns).toEqual([]);
 });
-it('joins local detail by the on-disk path with validation and eval-report in order',async()=>{
+it('joins local content by path and reads tracked team attribution',async()=>{
  const f=inventoryBridge(),backend=createTauriBackend(f.bridge);
  expect(await backend.localSkill({path:'/home/.claude/skills/a/'})).toMatchObject({ok:true,value:{name:'a',path:'/home/.claude/skills/a',placed:true,team:null,skillMd:{markdown:null},hygieneCaption:null,hygieneStatus:null,repoPath:'/home/.claude/skills/a',files:null}});
- expect(f.spawns.map(s=>s.args)).toEqual([['ls','--local']]);
+ expect(f.spawns.map(s=>s.args)).toEqual([['ls','--local'],['status','--team','acme'],['ls','--team','acme']]);
 });
 it('returns an empty Global only for an empty scan, even with a team inventory',async()=>{
  const f=inventoryBridge({local:{roster:[],skills:[],problems:[],local:[{root:'/home/.claude/skills',scope:'global',rows:[],problems:[]}]}});

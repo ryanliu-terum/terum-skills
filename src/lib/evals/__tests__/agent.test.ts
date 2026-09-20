@@ -13,6 +13,10 @@ afterEach(() => {
   else process.env['TERUM_SKILLS_AGENT_CMD'] = saved;
 });
 
+// The stub below is a `/bin/sh` script run by its shebang. Windows cannot launch one (spawn EFTYPE; the
+// resolver only launches .exe/.cmd/.bat/.com), so every test that spawns the stub is POSIX-only here.
+const POSIX = process.platform !== 'win32';
+
 /** §3: the binary name comes from TERUM_SKILLS_AGENT_CMD so tests never spawn the real `claude`. */
 async function stub(script: string): Promise<void> {
   const path = join(scratch, 'stub.sh');
@@ -32,6 +36,7 @@ describe('Transcript parsing (port of runner.py)', () => {
   it('collects text and tool_use blocks, bash commands, the result, efficiency, and the init skill list', () => {
     const transcript = Transcript.fromStream(STREAM);
     expect(transcript.bashCommands()).toEqual(['npm test']);
+    expect(transcript.toolUses()).toEqual(['Bash']);
     expect(transcript.allText()).toContain('hello');
     expect(transcript.allText()).toContain('done');
     expect(transcript.allText()).toContain('npm test'); // tool inputs are searchable text
@@ -46,7 +51,7 @@ describe('Transcript parsing (port of runner.py)', () => {
   });
 });
 
-describe('runAgent through a stub binary (§7.1)', () => {
+describe.skipIf(!POSIX)('runAgent through a stub binary (§7.1)', () => {
   it('parses the stream and persists the transcript', async () => {
     await stub(`cat <<'EOF'\n${STREAM}\nEOF`);
     const transcriptPath = join(scratch, 'out.jsonl');
@@ -67,7 +72,7 @@ describe('runAgent through a stub binary (§7.1)', () => {
   });
 });
 
-describe('askJson through a stub binary (§7.2 / §7.5)', () => {
+describe.skipIf(!POSIX)('askJson through a stub binary (§7.2 / §7.5)', () => {
   it('unwraps the outer result envelope and extracts the first JSON object', async () => {
     await stub(`printf '%s' '{"type":"result","result":"Sure: {\\"selected\\": [\\"deploy-preflight\\"]}"}'`);
     expect(await systemAgent.askJson('which skills?')).toEqual({ selected: ['deploy-preflight'] });
@@ -92,13 +97,13 @@ describe('preflight (§7.4, VE7-adjacent)', () => {
     if (!outcome.ok) expect(outcome.error).toContain('not runnable');
   });
 
-  it('records the CLI version and runs one smoke task', async () => {
+  it.skipIf(!POSIX)('records the CLI version and runs one smoke task', async () => {
     await stub(`case "$1" in --version) echo "2.34.0 (stub)";; *) printf '%s' '{"type":"result","result":"ok"}';; esac`);
     const outcome = await preflight();
     expect(outcome).toMatchObject({ ok: true, value: { ccVersion: '2.34.0 (stub)' } });
   });
 
-  it('reports a failing smoke task as a login/model problem, before paid work', async () => {
+  it.skipIf(!POSIX)('reports a failing smoke task as a login/model problem, before paid work', async () => {
     await stub(`case "$1" in --version) echo "2.34.0";; *) echo "Not logged in" >&2; exit 1;; esac`);
     const outcome = await preflight();
     expect(outcome.ok).toBe(false);
@@ -107,7 +112,7 @@ describe('preflight (§7.4, VE7-adjacent)', () => {
 });
 
 // B9: assert the actual spawn argv, including an explicit empty argument.
-it.each([undefined, '', 'user'])('askJson settingSources %j reaches the binary (default project)', async settingSources => {
+it.skipIf(!POSIX).each([undefined, '', 'user'])('askJson settingSources %j reaches the binary (default project)', async settingSources => {
   const captured = join(scratch, 'argv.txt');
   await stub(`printf '%s\\n' "$@" > '${captured}'; printf '%s' '{"category":"review"}'`);
   await systemAgent.askJson('classify', { settingSources });

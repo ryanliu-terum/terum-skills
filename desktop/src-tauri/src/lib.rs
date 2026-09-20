@@ -8,6 +8,7 @@
 #[cfg(target_os = "macos")]
 mod disclaim;
 mod app_update;
+mod share_image;
 use app_update::CloseUpdate;
 
 use std::collections::HashMap;
@@ -408,7 +409,7 @@ pub fn run() {
     .plugin(tauri_plugin_store::Builder::default().build())
     .plugin(tauri_plugin_clipboard_manager::init())
     .plugin(tauri_plugin_dialog::init())
-    .invoke_handler(tauri::generate_handler![cli_spawn, cli_write, cli_kill, read_app_state, host_platform, host_os_version, quit, app_update::app_update_on_close]);
+    .invoke_handler(tauri::generate_handler![share_image::save_share_image, cli_spawn, cli_write, cli_kill, read_app_state, host_platform, host_os_version, quit, app_update::app_update_on_close]);
 
   #[cfg(not(any(target_os = "android", target_os = "ios")))]
   let builder = builder.plugin(tauri_plugin_window_state::Builder::default().build());

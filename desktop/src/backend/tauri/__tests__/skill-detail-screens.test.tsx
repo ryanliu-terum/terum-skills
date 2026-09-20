@@ -44,13 +44,17 @@ it('renders the recorded detail in the board shapes with one heading and real pr
   expect(screen.queryByRole('menu')).toBeNull();
   expect(screen.queryByRole('button',{name:'Show files'})).toBeNull();
   expect(screen.getByText('Installed',{selector:'.detail-status span'})).toBeVisible();
-  // Quality and Activity are unshipped (QUALITY_ACTIVITY_SHIPPED in SkillScreen.tsx): each tab is its
-  // named region with the coming-soon panel, and the hygiene and activity assertions move to the
-  // skipped tests below, which come back with the tabs.
+  // Quality is still unshipped (QUALITY_SHIPPED in SkillScreen.tsx): its tab is the named region with
+  // the coming-soon panel, and its hygiene assertions stay in the skipped tests below, which come
+  // back with it. Activity shipped on 2026-09-15 (D6) and draws live firing counts.
   fireEvent.click(screen.getByRole('tab',{name:'Quality'}));
   expect(within(screen.getByRole('region',{name:'Quality'})).getByText('Coming soon')).toBeVisible();
   fireEvent.click(screen.getByRole('tab',{name:'Activity'}));
-  expect(within(screen.getByRole('region',{name:'Activity'})).getByText('Coming soon')).toBeVisible();
+  // This replay is a recorded CLI 0.14.0, whose `hello` frame predates `features.usage`. The tab
+  // therefore draws the degraded line rather than counts — which is the protocol contract working:
+  // an older CLI greys the control instead of erroring. Counts against a supporting CLI are covered
+  // in the mock-backed tests.
+  expect(await within(screen.getByRole('region',{name:'Activity'})).findByText(/cannot report skill firings/)).toBeVisible();
 });
 it('shows the global install destination and full team-version prefix for an unplaced skill',async()=>{
   open('#/skill/tdd?dialog=install');

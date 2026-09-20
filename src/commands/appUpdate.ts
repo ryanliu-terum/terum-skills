@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import { mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { createConfigStore, type ConfigStore } from '../lib/config.js';
@@ -11,7 +10,7 @@ import type { Prompter } from '../lib/prompt.js';
 import { failure, success, type Result } from '../lib/result.js';
 import { execCommand, systemRunner, type Exec, type Runner } from '../lib/runner.js';
 import { compare, createReleaseState, describeUpdate, maintainReleaseState, probePolicy, type ProbePolicy, type ReleaseStateStore } from '../lib/update.js';
-import { APP_PRODUCT, APP_REPOSITORY, APP_SLUG, RELEASE_ASSETS_MISSING, explainDownloadFailure, locateApp, moveRetrying, removeRetrying, removeStaging, sweepStaleDownloads } from './app.js';
+import { APP_BUNDLE, APP_PRODUCT, APP_REPOSITORY, APP_SLUG, RELEASE_ASSETS_MISSING, applicationsDirectory, bundleVersion, explainDownloadFailure, locateApp, moveRetrying, placeBundle, removeRetrying, removeStaging, sweepStaleDownloads, verifyDownloadedAsset } from './app.js';
 
 export interface AppUpdateArgs extends WithForm {
   check?: boolean; stage?: boolean; apply?: boolean; applyNow?: boolean;
@@ -20,7 +19,7 @@ export interface AppUpdateArgs extends WithForm {
   config?: ConfigStore; runner?: Runner; exec?: Exec; state?: ReleaseStateStore; probe?: ProbePolicy;
   launch?: Launch; evidence?: PlatformEvidence; now?: () => number;
   /** Test knobs; `sleep` is the wait between Windows retries of a move or removal. */
-  node?: string; entry?: string; localAppData?: string; waitMs?: number; pollMs?: number; sleep?: (milliseconds: number) => Promise<void>;
+  node?: string; entry?: string; localAppData?: string; applicationsDir?: string; waitMs?: number; pollMs?: number; sleep?: (milliseconds: number) => Promise<void>;
   /** Test knob: liveness probe for --apply-now (default process.kill(pid, 0)). */
   alive?: (pid: number) => boolean;
 }
@@ -55,6 +54,7 @@ export async function run(args: AppUpdateArgs, io: Prompter): Promise<Result<App
   const suffix = assetSuffix(platform); const supported = suffix !== null;
   const runner = args.runner ?? systemRunner, exec = args.exec ?? execCommand;
   const retry: TransientRetry = { windows: platform.startsWith('win32'), ...(args.sleep === undefined ? {} : { sleep: args.sleep }) };
+  const applications = applicationsDirectory(args.applicationsDir);
   if (!args.applyNow && !args.apply && !args.stage) {
     const cliVersion = packageVersion(), state = args.state ?? createReleaseState(root);
     let probe: AppUpdateCheck['probe'] = 'cached', probeError: string | null = null;
@@ -111,9 +111,8 @@ export async function run(args: AppUpdateArgs, io: Prompter): Promise<Result<App
         }
         const file = join(staging, asset);
         if (!(await exists(file)) || !(await exists(`${file}.sha256`))) return notPublished();
-        const expected = (await readFile(`${file}.sha256`, 'utf8')).trim().split(/\s+/)[0]?.toLowerCase();
-        const actual = createHash('sha256').update(await readFile(file)).digest('hex');
-        if (!expected || expected !== actual) return failure(`The downloaded desktop app did not match its published checksum, so it was discarded (expected ${expected ?? 'nothing readable'}, got ${actual}). ${tail(args.form)}`);
+        const problem = await verifyDownloadedAsset(file, runner, args.form);
+        if (problem !== null) return failure(problem);
         const bytes = (await stat(file)).size;
         let bundle: string | null = null;
         if (platform.startsWith('darwin')) {
@@ -160,13 +159,13 @@ export async function run(args: AppUpdateArgs, io: Prompter): Promise<Result<App
     const field = platform.startsWith('darwin') ? 'bundle' : 'installer';
     if (!staged || typeof staged !== 'object' || !(field in staged) || typeof (staged as Record<string, unknown>)[field] !== 'string' || !(staged as Record<string, unknown>)[field]) return await failed('The staged desktop app metadata is incomplete; download it again.');
     const target = (staged as Record<string, string>)[field]!;
-    const outcome = platform.startsWith('darwin') ? await exec('open', [join(versionDir, target)]) : await exec(join(versionDir, target), ['/S', '/UPDATE', '/R']);
+    const outcome = platform.startsWith('darwin') ? await exec('open', [await placeStaged(join(versionDir, target), version, versionDir, applications, retry)]) : await exec(join(versionDir, target), ['/S', '/UPDATE', '/R']);
     if (outcome.code !== 0) {
       const error = platform.startsWith('darwin') ? (outcome.stderr || outcome.stdout).trim() : `The desktop app installer exited with code ${outcome.code}. ${(outcome.stderr || outcome.stdout).trim()}`.trim();
       const result = await failed(error);
       if (platform.startsWith('win32')) {
         // Best-effort courtesy only: a failure here must not replace the installer's own message in the marker.
-        const existing = await locateApp(platform, versionDir, args.localAppData).catch(() => null);
+        const existing = await locateApp(platform, args.localAppData, applications).catch(() => null);
         if (existing) await exec(existing, [], { detach: true }).catch(() => undefined);
       }
       return result;
@@ -192,6 +191,19 @@ export async function run(args: AppUpdateArgs, io: Prompter): Promise<Result<App
   }
 }
 
+/**
+ * macOS: the staged bundle moves onto its fixed path (the running version's bundle, which has exited by now, is
+ * replaced), and that fixed path is what `open` gets. A staged bundle that is already gone was placed by an earlier
+ * apply whose `open` failed: when the bundle in place is this version, opening it is the whole remaining job;
+ * otherwise this stage is unusable and is removed so the next `--stage` downloads afresh instead of reporting it staged.
+ */
+async function placeStaged(source: string, version: string, versionDir: string, applications: string, retry: TransientRetry): Promise<string> {
+  if (await exists(source)) return placeBundle(source, applications, retry);
+  const placed = join(applications, APP_BUNDLE);
+  if (await bundleVersion(placed) === version) return placed;
+  await removeRetrying(versionDir, retry).catch(() => undefined);
+  throw new Error(`The staged desktop app ${version} is no longer on disk; download it again.`);
+}
 async function versionDirectories(root: string): Promise<string[]> {
   return (await readdir(root, { withFileTypes: true }).catch(() => [])).filter(entry => entry.isDirectory() && released.test(entry.name)).map(entry => entry.name);
 }

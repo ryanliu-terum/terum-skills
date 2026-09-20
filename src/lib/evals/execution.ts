@@ -19,10 +19,11 @@ import YAML from 'yaml';
 import type { CheckResult, CheckSpec } from './checks.js';
 import { emptyTranscript, fractionPassed, runChecks } from './checks.js';
 import type { AgentApi, Transcript } from './agent.js';
-import { AgentRunError, DEFAULT_MODEL } from './agent.js';
+import { AgentRunError, AgentTimeoutError, DEFAULT_MODEL } from './agent.js';
 import { DEFAULT_ESCALATION_MODEL, judgePair } from './judge.js';
 import type { Result } from '../result.js';
 import { failure, success } from '../result.js';
+import { stageDependencies, type DependencyPlan } from './dependencies.js';
 
 export const ARMS = ['baseline', 'candidate', 'incumbent'] as const;
 export type Arm = (typeof ARMS)[number];
@@ -40,13 +41,30 @@ export interface EvalCase {
   bucket?: (typeof BUCKETS)[number];
   /** Rev 8: host tools this case needs — `ffmpeg` (PATH probe) or `python3:openpyxl` (import probe). */
   requires: string[];
+  timeout_minutes?: number;
+  max_turns?: number;
+}
+
+/** One independently scored row from a suite's single shared agent session. */
+export interface SuiteCase {
+  name: string;
+  checks: CheckSpec[];
+}
+
+/** `evals/suite.yaml`: shared sandbox/session input plus independently checked rows. */
+export interface EvalSuite extends Omit<EvalCase, 'checks' | 'judge' | 'bucket'> {
+  cases: SuiteCase[];
 }
 
 /** Parse one `evals/cases/<case>.yaml` (§5.1); the stem is the case name. */
 export function loadCase(source: string, name: string): Result<EvalCase> {
   let raw: unknown;
   try { raw = YAML.parse(source); } catch (error) { return failure(`case '${name}': ${error instanceof Error ? error.message : String(error)}`); }
-  const record = (raw ?? {}) as Record<string, unknown>;
+  return parseCaseRecord((raw ?? {}) as Record<string, unknown>, name);
+}
+
+/** Shared loader for ordinary cases and a suite's common fields. */
+function parseCaseRecord(record: Record<string, unknown>, name: string): Result<EvalCase> {
   if (typeof record['task'] !== 'string' || !record['task'].trim()) return failure(`case '${name}' needs a 'task'`);
   const bucket = record['bucket'] === undefined ? undefined : String(record['bucket']);
   if (bucket !== undefined && !(BUCKETS as readonly string[]).includes(bucket)) return failure(`case '${name}': unknown bucket '${bucket}'`);
@@ -55,6 +73,12 @@ export function loadCase(source: string, name: string): Result<EvalCase> {
     if (record['files'] === null || typeof record['files'] !== 'object' || Array.isArray(record['files'])) return failure(`case '${name}': 'files' must be a map`);
     for (const [key, value] of Object.entries(record['files'] as Record<string, unknown>)) files[key] = String(value);
   }
+  const timeoutRaw = record['timeout_minutes'];
+  if (timeoutRaw !== undefined && (typeof timeoutRaw !== 'number' || !Number.isFinite(timeoutRaw) || timeoutRaw <= 0 || timeoutRaw > 120)) return failure(`case '${name}': 'timeout_minutes' must be a number greater than 0 and at most 120`);
+  const timeoutMinutes = timeoutRaw as number | undefined;
+  const maxTurnsRaw = record['max_turns'];
+  if (maxTurnsRaw !== undefined && (typeof maxTurnsRaw !== 'number' || !Number.isInteger(maxTurnsRaw) || maxTurnsRaw <= 0)) return failure(`case '${name}': 'max_turns' must be a positive integer`);
+  const maxTurns = maxTurnsRaw as number | undefined;
   return success({
     name,
     task: record['task'],
@@ -65,6 +89,43 @@ export function loadCase(source: string, name: string): Result<EvalCase> {
     judge: record['judge'] === undefined ? undefined : String(record['judge']),
     bucket: bucket as EvalCase['bucket'],
     requires: Array.isArray(record['requires']) ? record['requires'].map(String) : [],
+    ...(timeoutMinutes === undefined ? {} : { timeout_minutes: timeoutMinutes }),
+    ...(maxTurns === undefined ? {} : { max_turns: maxTurns }),
+  });
+}
+
+/** Parse `evals/suite.yaml`; the file stem is its one provenance/session name. */
+export function loadSuite(source: string, name: string): Result<EvalSuite> {
+  let raw: unknown;
+  try { raw = YAML.parse(source); } catch (error) { return failure(`suite '${name}': ${error instanceof Error ? error.message : String(error)}`); }
+  const record = (raw ?? {}) as Record<string, unknown>;
+  const shared = parseCaseRecord(record, name);
+  if (!shared.ok) return failure(shared.error);
+  if (!Array.isArray(record['cases']) || record['cases'].length === 0) return failure(`suite '${name}' needs a non-empty 'cases' list`);
+  const cases: SuiteCase[] = [];
+  const names = new Set<string>();
+  const prohibited = ['judge', 'task', 'files', 'fixture', 'setup', 'bucket'];
+  for (const item of record['cases']) {
+    if (item === null || typeof item !== 'object' || Array.isArray(item)) return failure(`suite '${name}': each sub-case must be a map`);
+    const sub = item as Record<string, unknown>;
+    for (const field of prohibited) {
+      if (sub[field] !== undefined) return failure(`suite '${name}': sub-case must not carry '${field}'`);
+    }
+    if (typeof sub['name'] !== 'string' || !sub['name'].trim()) return failure(`suite '${name}': sub-case needs a non-empty 'name'`);
+    if (names.has(sub['name'])) return failure(`suite '${name}': duplicate sub-case name '${sub['name']}'`);
+    if (!Array.isArray(sub['checks'])) return failure(`suite '${name}': sub-case '${sub['name']}' needs a 'checks' list`);
+    names.add(sub['name']);
+    // Checks deliberately retain loadCase's deferred behavior: unknown kinds fail when run.
+    cases.push({ name: sub['name'], checks: sub['checks'] as CheckSpec[] });
+  }
+  return success({
+    name: shared.value.name, task: shared.value.task, files: shared.value.files,
+    requires: shared.value.requires,
+    ...(shared.value.fixture === undefined ? {} : { fixture: shared.value.fixture }),
+    ...(shared.value.setup === undefined ? {} : { setup: shared.value.setup }),
+    ...(shared.value.timeout_minutes === undefined ? {} : { timeout_minutes: shared.value.timeout_minutes }),
+    ...(shared.value.max_turns === undefined ? {} : { max_turns: shared.value.max_turns }),
+    cases,
   });
 }
 
@@ -116,6 +177,8 @@ export interface SeedOptions {
   /** Full skill tree to stage, or null for the baseline arm. */
   skillDir: string | null;
   scratch: string;
+  /** Resolved once per eval run; baseline arms never apply it. */
+  dependencies?: DependencyPlan;
 }
 
 /**
@@ -152,6 +215,7 @@ export async function seedSandbox(evalCase: EvalCase, options: SeedOptions): Pro
         return top !== 'evals' && top !== 'fixtures';
       },
     });
+    if (options.dependencies !== undefined) await stageDependencies(options.dependencies, sandbox);
   }
   return sandbox;
 }
@@ -177,18 +241,64 @@ export async function dryRunCase(evalCase: EvalCase, scratch: string): Promise<s
   }
 }
 
+/**
+ * Eval-gen mode 2 uses the ordinary suite seeding path before it writes a generated asset.  This
+ * deliberately executes the composed setup rather than merely parsing it: probes must agree with
+ * the base and planted diff before an arm can be trusted with the fixture.
+ */
+export async function dryRunSuite(suite: EvalSuite, scratch: string): Promise<string | null> {
+  const root = await mkdtemp(join(scratch, 'dry-suite-'));
+  try {
+    await seedSandbox({ ...suite, checks: [] }, { caseDir: root, skillName: suite.name, skillDir: null, scratch: root });
+    return null;
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+}
+
+/**
+ * Generation-time patch gate.  Like setup hooks, this is intentionally owned by execution.ts so
+ * all engine shelling remains behind its subprocess seam.  `git apply` also works outside a repo,
+ * which is exactly the clean-files contract the generator promises.
+ */
+export async function patchApplies(files: Record<string, string>, patch: string, scratch: string): Promise<string | null> {
+  const root = await mkdtemp(join(scratch, 'patch-'));
+  try {
+    for (const [rel, content] of Object.entries(files)) {
+      const violation = casePathViolation(rel);
+      if (violation !== null) return violation;
+      const target = join(root, rel);
+      await mkdir(dirname(target), { recursive: true });
+      await writeFile(target, content, 'utf8');
+    }
+    const patchPath = join(root, '.plants.diff');
+    await writeFile(patchPath, patch, 'utf8');
+    return await runSubprocess('git', ['apply', '--check', '.plants.diff'], root, 'plants_diff does not apply');
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+}
+
 /** The one non-agent subprocess in the engine: the case's own setup hook, inside its sandbox. */
 function runSetup(evalCase: EvalCase, sandbox: string): Promise<void> {
-  return new Promise((resolvePromise, reject) => {
-    const child = spawn('/bin/sh', ['-ce', evalCase.setup!], { cwd: sandbox, stdio: ['ignore', 'ignore', 'pipe'] });
+  return runSubprocess('/bin/sh', ['-ce', evalCase.setup!], sandbox, `case '${evalCase.name}': setup failed`).then((error) => {
+    if (error !== null) throw new Error(error);
+  });
+}
+
+/** The sole captured-output subprocess seam for eval generation and setup hooks. */
+function runSubprocess(file: string, args: string[], cwd: string, label: string): Promise<string | null> {
+  return new Promise((resolvePromise) => {
+    const child = spawn(file, args, { cwd, stdio: ['ignore', 'ignore', 'pipe'] });
     const err: Buffer[] = [];
     const timer = setTimeout(() => child.kill('SIGKILL'), 60_000);
     child.stderr.on('data', (chunk: Buffer) => err.push(chunk));
-    child.on('error', (error) => { clearTimeout(timer); reject(error); });
+    child.on('error', (error) => { clearTimeout(timer); resolvePromise(`${label}: ${error.message}`); });
     child.on('close', (code) => {
       clearTimeout(timer);
-      if (code === 0) resolvePromise();
-      else reject(new Error(`case '${evalCase.name}': setup failed (rc=${code ?? 'killed'}): ${Buffer.concat(err).toString('utf8').slice(-500)}`));
+      resolvePromise(code === 0 ? null : `${label} (rc=${code ?? 'killed'}): ${Buffer.concat(err).toString('utf8').slice(-500)}`);
     });
   });
 }
@@ -228,6 +338,7 @@ export interface ArmSample {
   skill_list: string[] | null;
   /** Rev 7: resolved model snapshot from the init event — the request alias floats. */
   model_id: string | null;
+  spawns_agents?: boolean | null;
 }
 
 /**
@@ -256,6 +367,62 @@ export interface RunCaseOptions {
   scratch: string;
   /** Transcripts land here as `<case>.<arm>.<rep>.jsonl` (§4.2). */
   transcriptDir: string;
+  dependencies?: DependencyPlan;
+}
+
+type RunOutput = { rows: ComparisonRow[]; arms: ArmSample[]; skipped?: string[]; dropped?: DroppedCase };
+
+/**
+ * The one arm path for case and suite sessions: fresh seed, crash-only retry with preserved
+ * transcript, then the unchanged resolved-skill contamination assertion.
+ */
+async function runArm(
+  deps: RunCaseDeps, evalCase: Pick<EvalCase, 'name' | 'task' | 'timeout_minutes' | 'max_turns'>,
+  options: RunCaseOptions, arm: Arm, skillDir: string | null, rep: number, transcriptStem: string,
+): Promise<{ sandbox: string; transcript: Transcript | null; retried: boolean }> {
+  const log = deps.log ?? (() => undefined);
+  let sandbox = '';
+  let transcript: Transcript | null = null;
+  let retried = false;
+  const transcriptPath = join(options.transcriptDir, `${transcriptStem}.${arm}.${rep}.jsonl`);
+  for (let attempt = 0; attempt < 2 && transcript === null; attempt++) {
+    sandbox = await seedSandbox(evalCase as EvalCase, { caseDir: options.caseDir, skillName: options.skillName, skillDir, scratch: options.scratch, ...(options.dependencies === undefined ? {} : { dependencies: options.dependencies }) });
+    try {
+      transcript = await deps.agent.runAgent(evalCase.task, sandbox, {
+        transcriptPath, model: deps.model ?? DEFAULT_MODEL,
+        timeoutMs: (evalCase.timeout_minutes ?? 120) * 60_000,
+        maxTurns: evalCase.max_turns ?? 200,
+      });
+    } catch (error) {
+      if (!(error instanceof AgentRunError)) throw error;
+      if (error instanceof AgentTimeoutError) {
+        log(`  ${evalCase.name} rep${rep} ${arm}: timed out, not retried: ${error.message}`);
+        break;
+      }
+      if (attempt === 0) {
+        retried = true;
+        try { await rename(transcriptPath, join(options.transcriptDir, `${transcriptStem}.${arm}.${rep}.attempt-1.jsonl`)); }
+        catch (renameError) { if ((renameError as NodeJS.ErrnoException).code !== 'ENOENT') throw renameError; }
+      }
+      log(`  ${evalCase.name} rep${rep} ${arm}: agent run failed${attempt === 0 ? ', retrying once' : ' twice, scoring empty'}: ${error.message}`);
+    }
+  }
+  const skillList = transcript?.skillList() ?? null;
+  const staged = skillDir !== null;
+  if (transcript !== null && staged && skillList === null) {
+    throw new ContaminationError(`arm '${arm}' did not report its resolved skill list; refusing the run (§7.3)`);
+  }
+  if (skillList !== null && skillList.includes(options.skillName) !== staged) {
+    throw new ContaminationError(`arm '${arm}' resolved skills [${skillList.join(', ')}] — '${options.skillName}' ${staged ? 'is missing from an arm that staged it' : 'leaked into an arm without it staged'}; refusing the run (§7.3)`);
+  }
+  return { sandbox, transcript, retried };
+}
+
+function sampleFor(arm: Arm, caseName: string, rep: number, transcript: Transcript | null, retried: boolean, checks: CheckResult[]): ArmSample {
+  const efficiency = transcript?.efficiency() ?? { turns: null, duration_ms: null, cost_usd: null };
+  const spawnsAgents = transcript === null ? null : transcript.toolUses().some((name) => ['Task', 'Agent', 'Workflow'].includes(name))
+    || transcript.bashCommands().some((command) => /\bcodex\b|claude -p/.test(command));
+  return { kind: 'arm', case: caseName, rep, arm, failed: transcript === null, retried, fraction: fractionPassed(checks), ...efficiency, skill_list: transcript?.skillList() ?? null, model_id: transcript?.modelId() ?? null, spawns_agents: spawnsAgents };
 }
 
 /**
@@ -263,7 +430,7 @@ export interface RunCaseOptions {
  * samples; a case whose host requirements are missing runs nothing and returns `skipped` with
  * the missing entries (rev 8) — its absent rows grey the verdict as unscored holes.
  */
-export async function runCase(deps: RunCaseDeps, evalCase: EvalCase, options: RunCaseOptions): Promise<{ rows: ComparisonRow[]; arms: ArmSample[]; skipped?: string[]; dropped?: DroppedCase }> {
+export async function runCase(deps: RunCaseDeps, evalCase: EvalCase, options: RunCaseOptions): Promise<RunOutput> {
   const log = deps.log ?? (() => undefined);
   const missing = await missingRequirements(evalCase.requires);
   if (missing.length) {
@@ -280,49 +447,11 @@ export async function runCase(deps: RunCaseDeps, evalCase: EvalCase, options: Ru
     const transcripts = new Map<Arm, Transcript | null>();
     const checksByArm = new Map<Arm, CheckResult[]>();
     for (const [arm, skillDir] of armDirs) {
-      // Rev 7: one retry on AgentRunError, in a FRESH sandbox (a timed-out attempt leaves side
-      // effects) — an infra flake scored against the empty transcript is a spurious loss.
-      let sandbox = '';
-      let transcript: Transcript | null = null;
-      let retried = false;
-      const transcriptPath = join(options.transcriptDir, `${evalCase.name}.${arm}.${rep}.jsonl`);
-      for (let attempt = 0; attempt < 2 && transcript === null; attempt++) {
-        sandbox = await seedSandbox(evalCase, { caseDir: options.caseDir, skillName: options.skillName, skillDir, scratch: options.scratch });
-        try {
-          transcript = await deps.agent.runAgent(evalCase.task, sandbox, { transcriptPath, model: deps.model ?? DEFAULT_MODEL });
-        } catch (error) {
-          if (!(error instanceof AgentRunError)) throw error;
-          if (attempt === 0) {
-            retried = true;
-            // §17.3: the failed attempt's transcript survives under a distinct suffix; the retry
-            // takes the canonical §4.2 path (missing file = the run died before writing one).
-            try { await rename(transcriptPath, join(options.transcriptDir, `${evalCase.name}.${arm}.${rep}.attempt-1.jsonl`)); }
-            catch (renameError) { if ((renameError as NodeJS.ErrnoException).code !== 'ENOENT') throw renameError; }
-          }
-          log(`  ${evalCase.name} rep${rep} ${arm}: agent run failed${attempt === 0 ? ', retrying once' : ' twice, scoring empty'}: ${error.message}`);
-        }
-      }
-      const skillList = transcript?.skillList() ?? null;
-      // §7.3 (rev 6): the CLI's init event always lists its built-in skills, so the contamination
-      // signal is membership of the skill under eval, never list equality. Everything else in the
-      // list is CLI-provided; user/global skills are excluded by construction (--setting-sources
-      // project), measured on CC 2.1.236 (VE1).
-      const staged = skillDir !== null;
-      // §17.7 targets a transcript whose init event omits `skills`. A fully failed arm
-      // (transcript null) stays on the rev-7 scored-empty path and greys the verdict instead.
-      if (transcript !== null && staged && skillList === null) {
-        throw new ContaminationError(`arm '${arm}' did not report its resolved skill list; refusing the run (§7.3)`);
-      }
-      if (skillList !== null) {
-        if (skillList.includes(options.skillName) !== staged) {
-          throw new ContaminationError(`arm '${arm}' resolved skills [${skillList.join(', ')}] — '${options.skillName}' ${staged ? 'is missing from an arm that staged it' : 'leaked into an arm without it staged'}; refusing the run (§7.3)`);
-        }
-      }
-      const checks = runChecks(evalCase.checks, transcript ?? emptyTranscript, sandbox);
-      transcripts.set(arm, transcript);
+      const session = await runArm(deps, evalCase, options, arm, skillDir, rep, evalCase.name);
+      const checks = runChecks(evalCase.checks, session.transcript ?? emptyTranscript, session.sandbox);
+      transcripts.set(arm, session.transcript);
       checksByArm.set(arm, checks);
-      const efficiency = transcript?.efficiency() ?? { turns: null, duration_ms: null, cost_usd: null };
-      samples.push({ kind: 'arm', case: evalCase.name, rep, arm, failed: transcript === null, retried, fraction: fractionPassed(checks), ...efficiency, skill_list: skillList, model_id: transcript?.modelId() ?? null });
+      samples.push(sampleFor(arm, evalCase.name, rep, session.transcript, session.retried, checks));
     }
 
     for (const opponent of ['baseline', 'incumbent'] as const) {
@@ -352,6 +481,59 @@ export async function runCase(deps: RunCaseDeps, evalCase: EvalCase, options: Ru
   return { rows, arms: samples };
 }
 
+/**
+ * Run one shared session per arm and score every suite sub-case against that transcript. The
+ * session mechanics intentionally route through `runArm`, the same path ordinary cases use.
+ */
+export async function runSuite(deps: RunCaseDeps, suite: EvalSuite, options: RunCaseOptions): Promise<RunOutput> {
+  const log = deps.log ?? (() => undefined);
+  const missing = await missingRequirements(suite.requires);
+  if (missing.length) {
+    log(`  ${suite.name}: SKIPPED (environment) — missing ${missing.join(', ')}`);
+    return { rows: [], arms: [], skipped: missing };
+  }
+  const armDirs: Array<[Arm, string | null]> = [['baseline', null], ['candidate', options.arms.candidate]];
+  if (options.arms.incumbent !== undefined) armDirs.push(['incumbent', options.arms.incumbent]);
+  const rows: ComparisonRow[] = [];
+  const samples: ArmSample[] = [];
+  try {
+    for (let rep = 0; rep < options.k; rep++) {
+      const sessions = new Map<Arm, { sandbox: string; transcript: Transcript | null; retried: boolean }>();
+      for (const [arm, skillDir] of armDirs) sessions.set(arm, await runArm(deps, suite, options, arm, skillDir, rep, suite.name));
+      for (const subCase of suite.cases) {
+        const checksByArm = new Map<Arm, CheckResult[]>();
+        for (const [arm] of armDirs) {
+          const session = sessions.get(arm)!;
+          const checks = runChecks(subCase.checks, session.transcript ?? emptyTranscript, session.sandbox);
+          checksByArm.set(arm, checks);
+          // The session-level efficiency values are deliberately repeated for every defect row.
+          samples.push(sampleFor(arm, subCase.name, rep, session.transcript, session.retried, checks));
+        }
+        for (const opponent of ['baseline', 'incumbent'] as const) {
+          if (!armDirs.some(([arm]) => arm === opponent)) continue;
+          // Suites never have a rubric; an equal check result is therefore the no-judge tie.
+          const outcome = await decide(deps, { ...suite, name: subCase.name, checks: subCase.checks }, sessions.get('candidate')!.transcript, sessions.get(opponent)!.transcript, checksByArm.get('candidate') ?? [], checksByArm.get(opponent) ?? []);
+          rows.push({
+            skill: options.skillName, kind: 'execution', case: subCase.name, rep,
+            comparison: `candidate-vs-${opponent}`,
+            outcome: outcome.result, decided_by: outcome.decidedBy, reason: outcome.reason,
+            checks_candidate: checksByArm.get('candidate') ?? [], checks_opponent: checksByArm.get(opponent) ?? [],
+          });
+          log(`  ${subCase.name} rep${rep} candidate-vs-${opponent}: ${outcome.result} (${outcome.decidedBy})`);
+        }
+      }
+    }
+  } catch (error) {
+    const dropped = seedFailure(suite.name, error);
+    if (dropped !== null) {
+      log(`  ${suite.name}: ABORTED (${dropped.kind}) — ${dropped.detail}`);
+      return { rows: [], arms: [], dropped };
+    }
+    throw error;
+  }
+  return { rows, arms: samples };
+}
+
 /** Classify a `seedSandbox` throw for this case; anything else (contamination, an agent error) stays fatal. */
 function seedFailure(caseName: string, error: unknown): DroppedCase | null {
   if (!(error instanceof Error) || !error.message.startsWith(`case '${caseName}': `)) return null;
@@ -372,8 +554,8 @@ export async function decide(
   candidateChecks: CheckResult[], opponentChecks: CheckResult[],
 ): Promise<{ result: Outcome; decidedBy: string; reason: string; swapped?: boolean }> {
   if (candidate === null && opponent === null) return { result: 'tie', decidedBy: 'both-arms-failed', reason: '' };
-  if (candidate === null) return { result: 'loss', decidedBy: 'candidate-run-failed', reason: '' };
-  if (opponent === null) return { result: 'win', decidedBy: 'opponent-run-failed', reason: '' };
+  if (candidate === null) return { result: 'tie', decidedBy: 'candidate-run-failed', reason: '' };
+  if (opponent === null) return { result: 'tie', decidedBy: 'opponent-run-failed', reason: '' };
 
   const candidatePass = candidateChecks.every((check) => check.passed);
   const opponentPass = opponentChecks.every((check) => check.passed);

@@ -29,7 +29,8 @@ describe('release state identity and sources', () => {
     expect(describeUpdate(await f.state.read(), '0.1.0', NOW).candidate).toBeNull();
     await recordRunningAndRegistry({ ...f, running: '0.1.1', now: () => NOW + 1000 });
     expect((await stat(path)).mtimeMs).toBe(before.mtimeMs);
-    expect((await stat(path)).mode & 0o777).toBe(0o600);
+    // Windows has no POSIX mode bits (Node reports 666 for every file).
+    if (process.platform !== 'win32') expect((await stat(path)).mode & 0o777).toBe(0o600);
   });
   it.each(['0.2.0-rc.1', 'garbage', '1.0', '0.0.9', '0.1.0'])('does not compare %s as newer', async (version) => {
     const f = await fixture(); await stateFileAt(f.root, { ...record(), advertisement: ad(version) });
@@ -119,7 +120,7 @@ describe('locked state and acknowledgment merges', () => {
 describe('notice wording and cadence', () => {
   it.each(['global', 'local', 'source', 'unknown', 'npx'] as const)('uses exact advertised advice for %s', (kind) => {
     const launch = fakeLaunch(kind);
-    const advice = kind === 'local' ? 'If installed locally with npm, run npm install terum-skills@latest in /work/app.' : kind === 'global' ? 'If installed globally with npm, run npm install -g terum-skills@latest.' : `This copy: ${launch.path}. Run the latest release with npx -y terum-skills@latest <command>.`;
+    const advice = kind === 'local' ? 'If installed locally with npm, run npm install terum-skills@latest in /work/app.' : kind === 'global' ? 'If installed globally with npm, run npm install -g terum-skills@latest.' : `This copy: ${launch.path}. Run the latest release with npx -y terum-skills@latest <command>; re-run setup with it to move the session hook and /terum-skills skill.`;
     expect(noticeLine({ version: '0.1.1', at, source: 'git-tags' }, '0.1.0', launch)).toBe(`Newer terum-skills release advertised: 0.1.1 (running 0.1.0). ${advice}`);
   });
   it('preserves devDependency advice and labels registry evidence as observed', () => {

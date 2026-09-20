@@ -16,7 +16,7 @@ export interface Run<T>{readonly frames:AsyncIterable<Frame>;answer(id:string,va
 export interface Capabilities {appVersion:string;windowChrome:'mac-overlay'|'native'|'cosmetic';windowControlsEnd:number|null;disablePerMachine:boolean;inboxEventLog:boolean;offtargetKind:boolean;machineRegistry:boolean;perCaseEvalTables:boolean;openInEditor:boolean;clipboard:boolean}
 // §7.1: the local key is `libraryProjects`, not `projects` — `projects` is already the marketplace's
 // team-projects screen, and desktop/AGENTS.md invariant 2 forbids one flag meaning two things.
-export const FEATURE_KEYS = ['favorites','follow','roles','lastSeen','installScope','inviteScoping','disablePerMachine','projectMembers','liftOnCards','runEvalInApp','perCase','progress','memberRole','localIdentity','libraryProjects','projects','refresh','appUpdate','reconcile','serve'] as const;
+export const FEATURE_KEYS = ['favorites','follow','roles','lastSeen','installScope','inviteScoping','disablePerMachine','projectMembers','liftOnCards','runEvalInApp','perCase','progress','memberRole','localIdentity','libraryProjects','projects','refresh','appUpdate','reconcile','serve','usage','misses'] as const;
 export type FeatureKey = typeof FEATURE_KEYS[number];
 export type Features = Readonly<Record<FeatureKey, boolean>>;
 export interface Surfaces {libraryProjects:boolean;divergence:boolean;status:boolean;settings:boolean;onboarding:boolean;library:boolean;skill:boolean;receipts:boolean;inbox:boolean;catalog:boolean;roster:boolean;update:boolean;appUpdate:boolean}
@@ -54,7 +54,7 @@ export type Receipt=NonNullable<Design['DETAIL']['receipt']>;
 export interface SkillMdBlock {kind:'h2'|'p'|'ol'|'code';content:string|string[]}
 export interface ReportNumbers {holes:number;nRounds:number;triggerTotal:number;precisionObserved?:string}
 export interface EvalEstimate {cases:number;k:number;arms:number;runs:number;minutes:number;dollars:number;model:string}
-export type SkillDetail=Omit<Design['DETAIL'],keyof SkillCard|'root'|'history'|'lines'|'version_full'|'repo'|'path'|'files'> & SkillCard & {path:string|null;repoPath:string;files:string[]|null;pathLabel:string;repo:string|null;version_full:string|null;team:string|null;installScopes:[string,string][];installScopePaths?:Record<string,string>;projectNames:string[]|null;favorites:number|null;lines:number|null;hygieneCaption:string|null;hygieneStatus:'pass'|'fail'|null;hygieneWhen:string|null;skillRef:string;root:'Global'|'Marketplace';history:(Design['DETAIL']['history'][number]&{summary:ReceiptSummary|null;local?:true;runId?:string;report?:{receipt:Receipt;summary:ReceiptSummary;numbers:ReportNumbers;incumbentLift:[number,string]|null}})[];skillMd:{frontmatter:string;body:SkillMdBlock[];markdown?:string|null};evalEstimate:EvalEstimate|null;evalEstimateText:string;evalEstimateTip:string;evalCommand:string;shareCommand:string;incumbentLift:[number,string]|null;reportNumbers:ReportNumbers|null;scoreFractions:{routesExpected:number|null;roi:[number,number]|null};method:string;
+export type SkillDetail=Omit<Design['DETAIL'],keyof SkillCard|'root'|'history'|'lines'|'version_full'|'repo'|'path'|'files'> & SkillCard & {path:string|null;repoPath:string;files:string[]|null;pathLabel:string;repo:string|null;version_full:string|null;team:string|null;installScopes:[string,string][];installScopePaths?:Record<string,string>;projectNames:string[]|null;favorites:number|null;lines:number|null;hygieneCaption:string|null;hygieneStatus:'pass'|'fail'|null;hygieneWhen:string|null;skillRef:string;root:'Global'|'Marketplace';history:(Design['DETAIL']['history'][number]&{summary:ReceiptSummary|null;local?:true;runId?:string;report?:{receipt:Receipt;summary:ReceiptSummary;numbers:ReportNumbers;incumbentLift:[number,string]|null}})[];skillMd:{frontmatter:string;body:SkillMdBlock[];markdown?:string|null};evalEstimate:EvalEstimate|null;evalEstimateText:string;evalEstimateTip:string;evalCommand:string;shareCommand:string;incumbentLift:[number,string]|null;reportNumbers:ReportNumbers|null;scoreFractions:{routesExpected:number|null;roi:[number,number]|null};
  versions:{placed:string|null;teamCurrent:string|null;evaluated:string|null}|null;
  latestState:'ok'|'none'|'invalid';invalidReceiptFile:string|null;evalReportError:string|null;
  /** A same-named local folder the driving CLI is too old to identify: presence is unknown, so the
@@ -73,6 +73,20 @@ export type SkillDetail=Omit<Design['DETAIL'],keyof SkillCard|'root'|'history'|'
  viewerHandle:string|null;
  localRuns:{runId:string;runDir:string;executionStatus:'complete'|'partial'|'failed'|'unknown';committed:boolean;receipt:Receipt|null;summary:ReceiptSummary|null}[];
 };
+/** One skill's live firing counts (build spec §4.2), read from the CLI's `usage` verb.
+ *
+ *  `firings:null` means this machine has no PLACEMENT for the skill — it was never installed here,
+ *  so it was never in a position to be passed over. That is not the same as `{d1:0,d2:0}`, which
+ *  means it was installed and the model ignored it anyway. The second is the case this whole
+ *  feature exists to find; a panel that renders both as "no firings" throws it away. */
+export interface UsageModel{firings:{d1:number;d2:number;autonomy:number|null;availability:'full'|'partial'|'unknown';placed:boolean}|null;since:string;until:string;caveats:string[]}
+/** One skill's miss-screening result, from the CLI's `misses` verb.
+ *
+ *  A candidate is a (prompt, skill) PAIR the judge said applied and no firing was observed for --
+ *  NEVER a measured miss rate. The CLI refuses to compute one and this model must not invent one:
+ *  the judge sees a trimmed window, not the session. `truncated` means --limit dropped pairs;
+ *  `unjudged` means a model call failed, so those prompts were scored in neither direction. */
+export interface MissesModel{groups:{skill:string;candidates:{prompt:string;ts:string;noPriorContext:boolean}[]}[];screened:number;calls:number;truncated:boolean;unjudged:number;since:string;until:string;caveats:string[]}
 export type EvalReportModel=Pick<SkillDetail,'receipt'|'summary'|'incumbentLift'|'reportNumbers'|'history'|'versions'|'latestState'|'invalidReceiptFile'|'localRuns'|'evalEstimate'|'evalEstimateText'|'evalEstimateTip'|'scoreFractions'|'wlt'>;
 // D22: `update` (update-available) and `review` (PR review) are the two mechanisms this refactor
 // deletes, so they are no longer item kinds. design.json still records their canvas rows; the mock

@@ -1,4 +1,4 @@
-import { invocation, type InvocationForm } from './invocation.js';
+import { invocation, pinnedPrefix, type InvocationForm } from './invocation.js';
 import { randomUUID } from 'node:crypto';
 import { chmod, link, mkdir, open, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { homedir, hostname } from 'node:os';
@@ -9,8 +9,14 @@ import { Prompter } from './prompt.js';
 /** The one seam hook.test.ts needs to simulate a crash between the temp write and the rename. */
 export const fsForTests = { rename, rm };
 
-export const HOOK_COMMAND = 'npx -y terum-skills@latest sync --hook';
-export const HOOK_ENTRY = { matcher: 'startup', hooks: [{ type: 'command', command: HOOK_COMMAND, async: true, timeout: 60 }] } as const;
+export const HOOK_VERB = 'sync --hook';
+/** What the SessionStart entry runs: this copy, pinned (lib/invocation.ts pinnedPrefix), never the registry's latest. */
+export function hookCommand(form?: InvocationForm, version?: string | null): string { return `${pinnedPrefix(form, version)} ${HOOK_VERB}`; }
+export interface HookEntry { matcher: 'startup'; hooks: [{ type: 'command'; command: string; async: true; timeout: 60 }] }
+export function hookEntry(command: string): HookEntry { return { matcher: 'startup', hooks: [{ type: 'command', command, async: true, timeout: 60 }] }; }
+/** This copy's npx-pinned spelling: what a caller that resolved no invocation form writes. */
+export const HOOK_COMMAND = hookCommand();
+export const HOOK_ENTRY = hookEntry(HOOK_COMMAND);
 /**
  * The Claude Code hook events this tool may own an entry under. Everything below is written per
  * event: `SessionStart` carries the hourly fetch, `PostToolUse` the edit reminder (src/lib/editHook.ts).
@@ -22,10 +28,17 @@ export type ManagedEvent = (typeof MANAGED_EVENTS)[number];
 export const EDIT_HOOK_MATCHER = 'Write|Edit';
 /** Not `async`: the reminder has to reach the model's next turn, and the script's first act is a path test that costs nothing. */
 export const editHookEntry = (command: string) => ({ matcher: EDIT_HOOK_MATCHER, hooks: [{ type: 'command', command, timeout: 10 }] });
-export interface HookOptions { settingsFile?: string; backupDir?: string; }
+export interface HookOptions {
+  settingsFile?: string;
+  backupDir?: string;
+  /** The SessionStart command to write; defaults to this copy's npx-pinned spelling (HOOK_COMMAND). */
+  command?: string;
+}
+/** A settings file plus its backup folder, with the command optional: what every edit here takes. */
+export type HookTarget = Required<Pick<HookOptions, 'settingsFile' | 'backupDir'>> & Pick<HookOptions, 'command'>;
 
-export function defaultHookOptions(storeRoot: string, home = homedir()): Required<HookOptions> {
-  return { settingsFile: join(home, '.claude', 'settings.json'), backupDir: join(storeRoot, 'backups') };
+export function defaultHookOptions(storeRoot: string, home = homedir(), form?: InvocationForm): Required<HookOptions> {
+  return { settingsFile: join(home, '.claude', 'settings.json'), backupDir: join(storeRoot, 'backups'), command: hookCommand(form) };
 }
 
 export type Settings = Record<string, unknown>;
@@ -80,7 +93,7 @@ export async function readSettingsFile(path: string, action: SettingsAction = 'r
  * same parse and refusal, one backup before the first write, an atomic 0600 write. `mutate` returns
  * false to leave the file untouched (no backup, no write, no file created).
  */
-export async function editSettings(options: Required<HookOptions>, mutate: (value: Settings) => boolean): Promise<{ changed: boolean; created: boolean }> {
+export async function editSettings(options: HookTarget, mutate: (value: Settings) => boolean): Promise<{ changed: boolean; created: boolean }> {
   const { value, source } = await readSettings(options.settingsFile);
   if (!mutate(value)) return { changed: false, created: false };
   await backupOnce(options, source);
@@ -101,7 +114,7 @@ async function hasBackup(directory: string): Promise<boolean> {
   catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false; throw error; }
 }
 
-async function backupOnce(options: Required<HookOptions>, source: string | undefined): Promise<boolean> {
+async function backupOnce(options: HookTarget, source: string | undefined): Promise<boolean> {
   if (source === undefined || await hasBackup(options.backupDir)) return false;
   await mkdir(options.backupDir, { recursive: true, mode: 0o700 });
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
@@ -123,7 +136,7 @@ async function writeAtomically(path: string, value: Settings, existing: boolean)
 }
 
 /** One event's entry list, written by the rule below. `entry` is the canonical group this tool owns under that event. */
-export async function installEventHook(options: Required<HookOptions>, event: ManagedEvent, entry: { matcher: string; hooks: readonly unknown[] }): Promise<'installed' | 'replaced'> {
+export async function installEventHook(options: HookTarget, event: ManagedEvent, entry: { matcher: string; hooks: readonly unknown[] }): Promise<'installed' | 'replaced'> {
   const { value, source } = await readSettings(options.settingsFile);
   const hooks = (value.hooks ??= {}) as Settings;
   const list = (hooks[event] ??= []) as unknown[];
@@ -150,11 +163,42 @@ export async function installEventHook(options: Required<HookOptions>, event: Ma
   return outcome;
 }
 
-export async function installHook(options: Required<HookOptions>): Promise<'installed' | 'replaced'> {
-  return installEventHook(options, 'SessionStart', HOOK_ENTRY);
+export async function installHook(options: HookTarget): Promise<'installed' | 'replaced'> {
+  return installEventHook(options, 'SessionStart', hookEntry(options.command ?? HOOK_COMMAND));
 }
 
-export async function removeEventHook(options: Required<HookOptions>, event: ManagedEvent): Promise<'removed' | 'absent'> {
+/** The command our SessionStart entry runs today, or null when none of ours is installed. */
+export async function installedHookCommand(settingsFile: string): Promise<string | null> {
+  const { value, source } = await readSettings(settingsFile, 'read');
+  if (source === undefined) return null;
+  const list = (value.hooks as Settings | undefined)?.SessionStart;
+  if (!Array.isArray(list)) return null;
+  for (const group of list) {
+    if (!matchingEntry(group)) continue;
+    for (const hook of (group as Settings).hooks as unknown[]) {
+      const command = (hook as Record<string, unknown> | null)?.command;
+      if (typeof command === 'string' && command.includes('terum-skills')) return command;
+    }
+  }
+  return null;
+}
+
+/**
+ * Re-point an installed entry of ours at `options.command` when it says anything else: the
+ * `@latest` spelling every release before 0.21 wrote, or an older pin. Run by `sync --hook`, so the
+ * entry being corrected is the one the user said yes to, in the file it already lives in. Never
+ * installs where nothing of ours exists: `absent` is a declined offer, and an hourly hook must not
+ * install what a person said no to.
+ */
+export async function migrateHook(options: HookTarget): Promise<'migrated' | 'current' | 'absent'> {
+  const current = await installedHookCommand(options.settingsFile);
+  if (current === null) return 'absent';
+  if (current === (options.command ?? HOOK_COMMAND)) return 'current';
+  await installHook(options);
+  return 'migrated';
+}
+
+export async function removeEventHook(options: HookTarget, event: ManagedEvent): Promise<'removed' | 'absent'> {
   const { value, source } = await readSettings(options.settingsFile);
   if (source === undefined) return 'absent';
   const hooks = value.hooks as Settings | undefined;
@@ -168,11 +212,11 @@ export async function removeEventHook(options: Required<HookOptions>, event: Man
   return 'removed';
 }
 
-export async function removeHook(options: Required<HookOptions>): Promise<'removed' | 'absent'> {
+export async function removeHook(options: HookTarget): Promise<'removed' | 'absent'> {
   return removeEventHook(options, 'SessionStart');
 }
 
-export async function offerHook(io: Prompter, options: Required<HookOptions>): Promise<'installed' | 'replaced' | 'declined' | 'present'> {
+export async function offerHook(io: Prompter, options: HookTarget): Promise<'installed' | 'replaced' | 'declined' | 'present'> {
   if (await hookInstalled(options.settingsFile)) { io.print(`Session hook already installed in ${options.settingsFile}.`); return 'present'; }
   if (!(await io.confirm(`Install the Claude Code session-start hook so team skills sync automatically? (edits ${options.settingsFile})`))) {
     io.print('Skipped the session hook; re-run setup to install it later.');

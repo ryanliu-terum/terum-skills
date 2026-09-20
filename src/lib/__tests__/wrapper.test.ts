@@ -1,8 +1,10 @@
 import { mkdir, readFile, readdir, symlink, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { BUNDLED_SKILLS, defaultWrapperOptions, fsForTests, inspectManagedSkill, installManagedSkill, isManagedFrontmatter, isManagedSkill, listManagedSkills, managedSkillInventory, managedSkillRoots, managedSkillStates, offerWrapper, readBundledSkills, refreshManagedSkills, removeManagedSkill } from '../wrapper.js';
-import { BUNDLED_SKILL_SOURCE, CANONICAL_SKILLS, ScriptedPrompter, temporaryDirectory, wrapperFor } from './fixtures.js';
+import { BUNDLED_SKILLS, defaultWrapperOptions, fsForTests, inspectManagedSkill, installManagedSkill, isManagedFrontmatter, isManagedSkill, listManagedSkills, managedSkillInventory, managedSkillRoots, managedSkillStates, offerWrapper, readBundledSkills, refreshManagedSkills, removeManagedSkill, renderWrapper } from '../wrapper.js';
+import { NPX_PREFIX, pinnedPrefix } from '../invocation.js';
+import { packageVersion } from '../package.js';
+import { BUNDLED_SKILL_SOURCE, CANONICAL_SKILLS, ScriptedPrompter, SYMLINKS_SUPPORTED, temporaryDirectory, wrapperFor } from './fixtures.js';
 
 const OLD_COPY = '---\nname: terum-skills\ndescription: an older bundled copy\nmetadata:\n  managed-by: terum-skills\n---\nold body\n';
 const SOMEONE_ELSES = '---\nname: terum-skills\ndescription: someone else\'s skill under the same name\n---\n';
@@ -18,7 +20,7 @@ async function fresh(codex = true) {
     await mkdir(join(bundle, name), { recursive: true });
     const raw = name === 'terum-skills'
       ? await readFile(BUNDLED_SKILL_SOURCE, 'utf8')
-      : `---\nname: ${name}\ndescription: fixture ${name}\nmetadata:\n  managed-by: terum-skills\n---\n# ${name}\n`;
+      : `---\nname: ${name}\ndescription: fixture ${name}\nmetadata:\n  managed-by: terum-skills\n---\n# ${name}\n\nRun \`${NPX_PREFIX} ${name} --format md\`.\n`;
     await writeFile(join(bundle, name, 'SKILL.md'), raw);
   }
   const fixture = wrapperFor(home);
@@ -64,7 +66,10 @@ describe('the bundled terum-skills skills', () => {
     expect(managedSkillRoots('/h', {})).toEqual([{ host: 'claude', root: join('/h', '.claude', 'skills') }, { host: 'codex', root: join('/h', '.codex', 'skills') }]);
     expect(managedSkillRoots('/h', { CODEX_HOME: '/elsewhere/codex' })[1]).toEqual({ host: 'codex', root: join('/elsewhere/codex', 'skills') });
     expect(managedSkillRoots('/h', { CODEX_HOME: '' })[1]).toEqual({ host: 'codex', root: join('/h', '.codex', 'skills') });
-    expect(defaultWrapperOptions('/h', {})).toMatchObject({ roots: managedSkillRoots('/h', {}), bundle: BUNDLED_SKILLS });
+    expect(defaultWrapperOptions('/h', undefined, {})).toMatchObject({ roots: managedSkillRoots('/h', {}), bundle: BUNDLED_SKILLS });
+    expect(defaultWrapperOptions('/h').prefix).toBe(`npx -y terum-skills@${packageVersion()}`);
+    expect(defaultWrapperOptions('/h', 'bare').prefix).toBe('terum-skills');
+    expect(pinnedPrefix(undefined)).not.toContain('@latest');
     const { options, names } = await fresh(false);
     const states = await managedSkillStates(options);
     if (states.kind !== 'ready') throw new Error(states.kind);
@@ -107,7 +112,7 @@ describe('the bundled terum-skills skills', () => {
     expect(await readFile(join(claude, 'terum-skills', 'SKILL.md'), 'utf8')).toBe(raw);
   });
 
-  it('leaves foreign skills, symlinks, files, and non-file SKILL.md entries alone', async () => {
+  it.skipIf(!SYMLINKS_SUPPORTED)('leaves foreign skills, symlinks, files, and non-file SKILL.md entries alone', async () => {
     const other = await fresh();
     const theirs = join(other.claude, 'list-skills');
     await mkdir(theirs, { recursive: true });
@@ -127,6 +132,32 @@ describe('the bundled terum-skills skills', () => {
     expect(await inspectManagedSkill(file.claude, 'eval')).toEqual({ kind: 'foreign', why: 'it is not a directory' });
     await mkdir(join(file.claude, 'sync-skills', 'SKILL.md'), { recursive: true });
     expect(await inspectManagedSkill(file.claude, 'sync-skills')).toEqual({ kind: 'foreign', why: 'its SKILL.md is not a regular file' });
+  });
+
+  it("places every skill in this machine's spelling: the bundle says @latest, the placed copies name the bare binary or the pinned version, and a copy in another spelling is outdated", async () => {
+    const manual = await readFile(BUNDLED_SKILL_SOURCE, 'utf8');
+    expect(manual).toContain(NPX_PREFIX);
+    expect(renderWrapper(manual, 'terum-skills')).not.toContain('@latest');
+    expect(renderWrapper(manual, NPX_PREFIX)).toBe(manual);
+    const bare = await fresh(); const options = { ...bare.options, prefix: 'terum-skills' };
+    for (const raw of bare.bundled.values()) expect(raw).toContain(NPX_PREFIX);
+    expect(await offerWrapper(new ScriptedPrompter([], [true]), options)).toBe('installed');
+    for (const root of [bare.claude, bare.codexRoot]) for (const name of bare.names) {
+      const placed = await readFile(join(root, name, 'SKILL.md'), 'utf8');
+      expect(placed, name).toBe(renderWrapper(bare.bundled.get(name)!, 'terum-skills'));
+      expect(placed, name).not.toContain('@latest');
+      expect(isManagedSkill(placed), name).toBe(true);
+    }
+    const states = async (judge: typeof options) => { const s = await managedSkillStates(judge); if (s.kind !== 'ready') throw new Error(s.kind); return s.roots.map((root) => root.skills.map((skill) => skill.state)); };
+    const all = (state: string) => [bare.names.map(() => state), bare.names.map(() => state)];
+    expect(await states(options)).toEqual(all('current'));
+    // The same files judged by a copy pinned to a version: outdated, and a refresh rewrites them in that spelling.
+    const pinned = { ...bare.options, prefix: 'npx -y terum-skills@9.9.9' };
+    expect(await states(pinned)).toEqual(all('outdated'));
+    expect((await refreshManagedSkills(pinned)).sort()).toEqual([bare.claude, bare.codexRoot].flatMap((root) => bare.names.map((name) => join(root, name))).sort());
+    expect(await readFile(join(bare.claude, 'terum-skills', 'SKILL.md'), 'utf8')).toContain('npx -y terum-skills@9.9.9 ');
+    expect(await states(pinned)).toEqual(all('current'));
+    expect(await states(options)).toEqual(all('outdated'));
   });
 
   it('reports an unavailable bundle without prompting or writing', async () => {

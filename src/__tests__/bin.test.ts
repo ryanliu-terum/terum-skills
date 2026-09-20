@@ -11,7 +11,7 @@ import { createConfigStore } from '../lib/config.js';
 import { systemRunner } from '../lib/runner.js';
 import { installPushGuard } from '../lib/teamRepo.js';
 import { readBundledSkills } from '../lib/wrapper.js';
-import { bareTeam, CANONICAL_SKILLS, cloneWithIdentity, dashboardTeam, exists, git, pushFromSeed } from '../lib/__tests__/fixtures.js';
+import { bareTeam, CANONICAL_SKILLS, cloneWithIdentity, dashboardTeam, exists, git, pushFromSeed, SYMLINKS_SUPPORTED } from '../lib/__tests__/fixtures.js';
 
 const run = promisify(execFile);
 const MINE = '11111111-1111-4111-8111-111111111111';
@@ -22,7 +22,8 @@ const root = resolve(fileURLToPath(import.meta.url), '..', '..', '..');
 const tsc = resolve(dirname(createRequire(import.meta.url).resolve('typescript')), '..', 'bin', 'tsc');
 
 /** The shipped artifact: what `npx terum-skills` actually runs. Built once into a scratch directory so the suite never touches the repo's own dist/. */
-describe('the built bin (dist/index.js)', () => {
+// The build output is exercised through a symlinked node_modules (beforeAll), so the whole block needs symlinks.
+describe.skipIf(!SYMLINKS_SUPPORTED)('the built bin (dist/index.js)', () => {
   // Its own scratch directory, not temporaryDirectory(): that one is removed after EACH test, and the build serves both.
   let out = '';
   let bin = '';
@@ -176,11 +177,20 @@ describe('the built bin (dist/index.js)', () => {
     const fromDist = await wrapper.readBundledSkills(wrapper.BUNDLED_SKILLS);
     expect(fromDist && [...fromDist.keys()].sort()).toEqual(names);
     const home = resolve(out, 'bundle-home'); await mkdir(resolve(home, '.codex'), { recursive: true });
-    const options = wrapper.defaultWrapperOptions(home, {});
+    const options = wrapper.defaultWrapperOptions(home, undefined, {});
     expect(options.roots).toEqual([{ host: 'claude', root: resolve(home, '.claude', 'skills') }, { host: 'codex', root: resolve(home, '.codex', 'skills') }]);
+    // The built package pins every placed skill to its own version, never @latest.
+    const version = (JSON.parse(await readFile(resolve(root, 'package.json'), 'utf8')) as { version: string }).version;
+    expect(options.prefix).toBe(`npx -y terum-skills@${version}`);
     expect(await wrapper.refreshManagedSkills(options)).toEqual([]);
-    for (const name of names) expect(await wrapper.installManagedSkill(options.roots[0]!.root, name, fromDist!.get(name)!)).toBe('installed');
-    for (const name of names) expect(await readFile(resolve(home, '.claude', 'skills', name, 'SKILL.md'), 'utf8')).toBe(canonical.get(name));
+    const states = await wrapper.managedSkillStates(options);
+    if (states.kind !== 'ready') throw new Error(states.kind);
+    for (const name of names) expect(await wrapper.installManagedSkill(options.roots[0]!.root, name, states.bundled.get(name)!)).toBe('installed');
+    for (const name of names) {
+      const placed = await readFile(resolve(home, '.claude', 'skills', name, 'SKILL.md'), 'utf8');
+      expect(placed, name).toBe(wrapper.renderWrapper(canonical.get(name)!, options.prefix));
+      expect(placed, name).not.toContain('@latest');
+    }
     expect(await wrapper.refreshManagedSkills(options)).toEqual([]);
     expect((await wrapper.listManagedSkills(options.roots[1]!.root))).toEqual([]);
 
@@ -349,7 +359,7 @@ describe('the built bin (dist/index.js)', () => {
       const childEnv = { ...env, HOME: resolve(out, 'notice-home'), USERPROFILE: resolve(out, 'notice-home'), ...(gate !== 'enabled' && gate !== 'piped' ? { [gate]: '1' } : {}) };
       const result = await run(process.execPath, gate === 'piped' ? [bin, 'ls'] : [bootstrap], { cwd: root, env: childEnv }).catch((error: { stdout: string; stderr: string }) => error);
       expect(result.stdout).not.toContain('Newer terum-skills');
-      if (gate === 'enabled') expect(result.stderr.trim().split('\n').at(-1)).toBe(`Newer terum-skills release advertised: 9.9.9 (running ${manifest.version}). This copy: ${bin}. Run the latest release with npx -y terum-skills@latest <command>.`);
+      if (gate === 'enabled') expect(result.stderr.trim().split('\n').at(-1)).toBe(`Newer terum-skills release advertised: 9.9.9 (running ${manifest.version}). This copy: ${bin}. Run the latest release with npx -y terum-skills@latest <command>; re-run setup with it to move the session hook and /terum-skills skill.`);
       else expect(result.stderr).not.toContain('Newer terum-skills');
     }
   });

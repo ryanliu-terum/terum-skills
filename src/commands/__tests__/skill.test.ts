@@ -8,7 +8,7 @@ import { run as list } from '../ls.js';
 import { createConfigStore } from '../../lib/config.js';
 import { fsForTests, lockTarget } from '../../lib/placer.js';
 import { snapshotSkillDirectory } from '../../lib/placer/vendor/skillhub/skill-fingerprint.js';
-import { bareTeam, cloneWithIdentity, person, pushFromSeed, ScriptedPrompter, TEAM_JSON, temporaryDirectory } from '../../lib/__tests__/fixtures.js';
+import { bareTeam, cloneWithIdentity, person, pushFromSeed, ScriptedPrompter, SYMLINKS_SUPPORTED, TEAM_JSON, temporaryDirectory } from '../../lib/__tests__/fixtures.js';
 vi.mock('node:fs/promises', async original => ({ ...await original<typeof import('node:fs/promises')>() }));
 afterEach(()=>vi.restoreAllMocks());
 const id='11111111-1111-4111-8111-111111111111';
@@ -35,7 +35,8 @@ describe('skill fix',()=>{
   expect(await fix(f)).toMatchObject({ok:true,value:{notices:['alpha: nothing to fix; hygiene passes.']}});
   expect(await fs.readFile(join(f.path,'SKILL.md'),'utf8')).toBe(after);
  });
- it('applies every covered repair in one pass and lists what still needs the author',async()=>{
+ // The executable-bit repair needs a file that reports an executable mode; Windows has no such bit (Node never reports 0o111), so the "clears the mode" half cannot be staged there.
+ it.skipIf(process.platform==='win32')('applies every covered repair in one pass and lists what still needs the author',async()=>{
   const f=await fixture(false);
   await fs.writeFile(join(f.path,'SKILL.md'),`---\nname: other\ndescription: Ends in a triage: every finding\n---\nSee\u200B notes. token ghp_abcdefghijklmnopqrstuvwxyz0123456789\n`);
   await fs.writeFile(join(f.path,'notes.txt'),'plain');await fs.chmod(join(f.path,'notes.txt'),0o755);
@@ -58,7 +59,7 @@ describe('skill fix',()=>{
   expect(await fix(f)).toMatchObject({ok:true,value:{installed:true}});
   expect((await f.store.read()).placements[f.path]).toMatchObject({fingerprint:f.fingerprint});
  });
- it('fails without writing when nothing here is a fault it covers, and refuses a missing SKILL.md or a symlinked folder',async()=>{
+ it.skipIf(!SYMLINKS_SUPPORTED)('fails without writing when nothing here is a fault it covers, and refuses a missing SKILL.md or a symlinked folder',async()=>{
   const f=await fixture(false);
   await fs.writeFile(join(f.path,'SKILL.md'),'---\nname: [\ndescription: x\n---\n');
   expect(await fix(f)).toMatchObject({ok:false,error:expect.stringMatching(/^alpha: nothing here is a fault fix covers; \d+ findings? still needs? you \(listed above\)\.$/),value:{notices:expect.arrayContaining([expect.stringMatching(/^Still needs you \(\d+\):$/),expect.stringMatching(/not valid YAML/)])}});
@@ -114,7 +115,7 @@ describe('skill category',()=>{
   const f=await fixture(false);await team(f,['workflow'],{version:2,category:'workflow'});
   expect(await categorise(f,'workflow')).toMatchObject({ok:true,value:{notices:['Changed alpha from testing to workflow.','The team already shows workflow: Version 2 declares it too, so there is nothing to publish.']}});
  });
- it('refuses a missing SKILL.md, frontmatter YAML cannot read, and a symlinked folder',async()=>{
+ it.skipIf(!SYMLINKS_SUPPORTED)('refuses a missing SKILL.md, frontmatter YAML cannot read, and a symlinked folder',async()=>{
   const f=await fixture(false);
   await fs.writeFile(join(f.path,'SKILL.md'),'---\nname: [\ndescription: x\n---\n');
   expect(await categorise(f,'infra')).toMatchObject({ok:false,error:expect.stringMatching(/frontmatter is not readable YAML; run `npx -y terum-skills@latest skill fix /)});
@@ -217,7 +218,8 @@ describe('D6 Library file operations',()=>{
   if(point==='journal')vi.spyOn(privateFs,'writeJsonPrivate').mockImplementation(async(path,value)=>{await journalWrite(path,value);if((value as {done?:boolean}).done&&!fired){fired=true;throw new Error('interrupted after journal');}});
   const first=await f.invoke('delete');expect(first.ok).toBe(false);expect(fired).toBe(true);vi.restoreAllMocks();const second=await f.invoke('delete');expect(second).toMatchObject({ok:true,value:{installed:false,quarantined:expect.any(String)}});if(second.ok)expect(await fs.readFile(join(second.value.quarantined!,'SKILL.md'),'utf8')).toBe(raw());
  });
- it.each(['outside','nested','symlink','wrong-name'] as const)('refuses %s without changing the folder',async mode=>{
+ it.for(['outside','nested','symlink','wrong-name'] as const)('refuses %s without changing the folder',async(mode,{skip})=>{
+  if(mode==='symlink'&&!SYMLINKS_SUPPORTED)skip();
   const f=await fixture(false);let path=f.path;
   if(mode==='outside')path=join(f.home,'outside');if(mode==='nested')path=join(f.path,'nested');if(mode==='symlink'){path=join(f.root,'link');await fs.symlink(f.path,path);}
   expect(await run({kind:'delete',path,home:f.home,config:f.store},new ScriptedPrompter(['wrong']))).toMatchObject({ok:false});expect(await fs.readFile(join(f.path,'SKILL.md'),'utf8')).toBe(raw());
@@ -265,7 +267,7 @@ it('permits a case-only rename when both spellings address the same directory',a
  expect(await fs.readFile(join(f.path,'SKILL.md'),'utf8')).toContain('name: alpha');
 });
 
-it('accepts a registered project reached through a symlink as the move destination',async()=>{
+it.skipIf(!SYMLINKS_SUPPORTED)('accepts a registered project reached through a symlink as the move destination',async()=>{
  // hybrid review r1 (high): config.projects[].root is stored realpath'd while --to arrived verbatim, so
  // a project behind any symlink component was refused as unregistered.
  const f=await fixture(false),alias=join(await temporaryDirectory(),'proj');await fs.symlink(f.project,alias,'dir');
@@ -274,10 +276,49 @@ it('accepts a registered project reached through a symlink as the move destinati
  expect(await fs.readFile(join(dest,'SKILL.md'),'utf8')).toBe(raw());
 });
 
-it('rekeys ledger provenance when the registered root is reached through an alias',async()=>{
+it.skipIf(!SYMLINKS_SUPPORTED)('rekeys ledger provenance when the registered root is reached through an alias',async()=>{
  const f=await fixture(),alias=join(await temporaryDirectory(),'home');await fs.symlink(f.home,alias,'dir');
  const path=join(alias,'.claude','skills','alpha'),destination=join(alias,'.claude','skills','beta');
  expect(await run({kind:'rename',path,to:'beta',config:f.store,home:alias},new ScriptedPrompter())).toMatchObject({ok:true});
  expect((await f.store.read()).placements).toEqual({[destination]:expect.objectContaining({id,fingerprint:f.fingerprint})});
  expect(await run({kind:'rename',path,to:'beta',config:f.store,home:alias},new ScriptedPrompter())).toMatchObject({ok:true});
+});
+
+describe('skill overrides follow the folder',()=>{
+ // A self-authored folder is switchable (skill disable) since the switch stopped requiring a ledger placement, so
+ // the file verbs must keep Claude Code's skillOverrides truthful: delete drops our `off` the way uninstall does,
+ // and rename/move carry it to the new name or the new root's settings file. Copy leaves both files alone.
+ const overrides=async(file:string)=>{try{return (JSON.parse(await fs.readFile(file,'utf8')) as {skillOverrides?:Record<string,string>}).skillOverrides??{};}catch(error){if((error as NodeJS.ErrnoException).code==='ENOENT')return {};throw error;}};
+ async function switchedOff(f:Awaited<ReturnType<typeof fixture>>){const file=join(f.home,'.claude','settings.json');await fs.writeFile(file,JSON.stringify({skillOverrides:{alpha:'off',other:'off'}}));return file;}
+ it('delete clears the off entry for a folder no ledger placed',async()=>{
+  const f=await fixture(false),user=await switchedOff(f);
+  expect(await f.invoke('delete')).toMatchObject({ok:true,value:{kind:'delete',installed:false}});
+  expect(await overrides(user)).toEqual({other:'off'});
+ });
+ it('rename carries the off entry to the new name',async()=>{
+  const f=await fixture(false),user=await switchedOff(f);
+  expect(await f.invoke('rename','beta')).toMatchObject({ok:true,value:{destination:join(f.root,'beta')}});
+  expect(await overrides(user)).toEqual({other:'off',beta:'off'});
+ });
+ it('move carries the off entry into the destination root\'s settings file and clears the source root\'s',async()=>{
+  const f=await fixture(false),user=await switchedOff(f),local=join(f.project,'.claude','settings.local.json');
+  const runner={run:vi.fn(async()=>({code:0,stdout:'.git/info/exclude\n',stderr:''}))};
+  expect(await run({kind:'move',path:f.path,to:f.project,home:f.home,config:f.store,runner},new ScriptedPrompter())).toMatchObject({ok:true});
+  expect(await overrides(user)).toEqual({other:'off'});
+  expect(await overrides(local)).toEqual({alpha:'off'});
+ });
+ it('an enabled folder moves without touching either settings file',async()=>{
+  const f=await fixture(false),user=join(f.home,'.claude','settings.json'),local=join(f.project,'.claude','settings.local.json');
+  await fs.writeFile(user,JSON.stringify({skillOverrides:{other:'off'}}));
+  const runner={run:vi.fn(async()=>({code:0,stdout:'.git/info/exclude\n',stderr:''}))};
+  expect(await run({kind:'move',path:f.path,to:f.project,home:f.home,config:f.store,runner},new ScriptedPrompter())).toMatchObject({ok:true});
+  expect(await overrides(user)).toEqual({other:'off'});
+  await expect(fs.lstat(local)).rejects.toMatchObject({code:'ENOENT'});
+ });
+ it('copy leaves the source off and writes nothing for the copy',async()=>{
+  const f=await fixture(false),user=await switchedOff(f),local=join(f.project,'.claude','settings.local.json');
+  expect(await f.invoke('copy',f.project)).toMatchObject({ok:true});
+  expect(await overrides(user)).toEqual({alpha:'off',other:'off'});
+  await expect(fs.lstat(local)).rejects.toMatchObject({code:'ENOENT'});
+ });
 });

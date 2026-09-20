@@ -6,6 +6,8 @@ import { CancelledError } from './result.js';
 
 /** Lines the person needs in order to answer; a terminal prints them once, immediately before the question; frame mode carries them on the ask frame. */
 export interface AskOptions {
+  /** Default answer for a yes/no confirmation. */
+  default?: boolean;
   detail?: readonly string[];
   descriptions?: readonly string[];
   /** Internal terminal presentation; never changes frame question text. */
@@ -224,8 +226,9 @@ export function terminalPrompter(streams: TerminalStreams = {}): Prompter {
     channel: 'terminal',
     async confirm(question, options) {
       for (const line of options?.detail ?? []) output.write(`${options?.decorated && colorCapable() ? '  ' : ''}${line}\n`);
-      const answer = await ask(`${options?.decorated && colorCapable() ? '  ' : ''}${question} [y/N] `, Boolean(options?.decorated && colorCapable()));
-      return /^(y|yes)$/i.test(answer.trim());
+      const affirmative = options?.default === true;
+      const answer = await ask(`${options?.decorated && colorCapable() ? '  ' : ''}${question} ${affirmative ? '[Y/n]' : '[y/N]'} `, Boolean(options?.decorated && colorCapable()));
+      return answer.trim() ? /^(y|yes)$/i.test(answer.trim()) : affirmative;
     },
     async text(question, defaultValue, options) {
       for (const line of options?.detail ?? []) output.write(`${options?.decorated && colorCapable() ? '  ' : ''}${line}\n`);

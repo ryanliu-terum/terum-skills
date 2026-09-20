@@ -23,7 +23,7 @@ defaults:
     working-directory: desktop
 
 jobs:
-  gates:
+  desktop-gates:
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -43,6 +43,35 @@ jobs:
       - run: npm run build
       - run: npx playwright install --with-deps chromium
       - run: npm run e2e:routes
+      - name: Upload exported PNGs for Windows decoding
+        uses: actions/upload-artifact@v4
+        with:
+          name: skill-share-pngs
+          path: |
+            desktop/e2e/out/share/deploy-check-benchmark.png
+            desktop/e2e/out/share/deploy-check-benchmark-dark.png
+            desktop/e2e/out/share/deploy-check-benchmark-horizontal.png
+            desktop/e2e/out/share/deploy-check-benchmark-horizontal-dark.png
+            desktop/e2e/out/share/windows-pixels.json
+          if-no-files-found: error
+          retention-days: 7
+
+  windows-pngs:
+    needs: desktop-gates
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: skill-share-pngs
+          path: desktop/e2e/out/share
+      - name: Compare Windows decoded pixels with the browser exports
+        shell: powershell
+        run: ./e2e/helpers/check-windows-pngs.ps1 -ShareDirectory ./e2e/out/share
 
   rust:
     runs-on: ubuntu-latest

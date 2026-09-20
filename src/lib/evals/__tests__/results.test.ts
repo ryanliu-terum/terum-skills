@@ -5,8 +5,8 @@ import { describe, expect, it } from 'vitest';
 import type { ArmSample, ComparisonRow } from '../execution.js';
 import { aggregate, caseRunTally, perCaseRows, renderReport, runIdFrom, writeRunTree } from '../results.js';
 
-const row = (outcome: 'win' | 'loss' | 'tie', decidedBy = 'checks', comparison = 'candidate-vs-baseline'): ComparisonRow => ({
-  skill: 's', kind: 'execution', case: 'c', rep: 0, comparison, outcome, decided_by: decidedBy, reason: '', checks_candidate: [], checks_opponent: [],
+const row = (outcome: 'win' | 'loss' | 'tie', decidedBy = 'checks', comparison = 'candidate-vs-baseline', extra: Partial<ComparisonRow> = {}): ComparisonRow => ({
+  skill: 's', kind: 'execution', case: 'c', rep: 0, comparison, outcome, decided_by: decidedBy, reason: '', checks_candidate: [], checks_opponent: [], ...extra,
 });
 
 const sample = (arm: ArmSample['arm'], fraction: number | null, extra: Partial<ArmSample> = {}): ArmSample => ({
@@ -41,9 +41,33 @@ describe('aggregation (§5.3)', () => {
     expect(out.arm_scores['candidate']).toBeNull(); // judge-only cases excluded; null when no checks
   });
 
+  it('excludes either dead arm from all scored summaries and case-runs', () => {
+    const out = aggregate([row('win'), row('tie', 'candidate-run-failed', 'candidate-vs-baseline')], [sample('candidate', 1), sample('baseline', 0), sample('candidate', null, { case: 'dead', rep: 0, failed: true }), sample('baseline', 1, { case: 'dead', rep: 0 })], 2);
+    expect(out).toMatchObject({ execution_status: 'partial', scored_rows: 1, verdict: 'PASS' });
+    expect(out.comparisons['candidate-vs-baseline']).toMatchObject({ win: 1, loss: 0, tie: 0 });
+    expect(out.per_case.map((entry) => entry.case)).toEqual(['c']);
+    expect(out.case_runs).toEqual({ candidate: { passed: 0, total: 0 }, baseline: { passed: 0, total: 0 } });
+  });
+
+  it('a dead arm carries no score: its empty-transcript fraction never enters arm_scores', () => {
+    const out = aggregate(
+      [row('win'), row('tie', 'opponent-run-failed', 'candidate-vs-incumbent'), row('win', 'checks', 'candidate-vs-baseline', { case: 'd', rep: 0 })],
+      [sample('candidate', 1), sample('baseline', 0), sample('incumbent', 0, { failed: true }), sample('candidate', 1, { case: 'd', rep: 0 }), sample('baseline', 1, { case: 'd', rep: 0 })],
+      3,
+    );
+    expect(out.scored_rows).toBe(2);
+    expect(out.arm_scores).toEqual({ candidate: 1, baseline: 0.5 });
+    expect(out.efficiency['incumbent']).toBeUndefined();
+  });
+
   it('all failures → failed; no rows → NEUTRAL with no comparisons', () => {
     expect(aggregate([row('tie', 'both-arms-failed')], [], 1).execution_status).toBe('failed');
     expect(aggregate([], [], 0)).toMatchObject({ verdict: 'NEUTRAL', execution_status: 'complete', attribution: 'no execution comparisons ran' });
+  });
+
+  it('fixes sign p at 1.0 for any receipt containing suite rows because a session is not independent', () => {
+    expect(aggregate([row('win'), row('win')], [sample('candidate', 1), sample('baseline', 0)], 2).comparisons['candidate-vs-baseline']!.sign_p).not.toBe(1);
+    expect(aggregate([row('win'), row('win')], [sample('candidate', 1), sample('baseline', 0)], 2, {}, {}, true).comparisons['candidate-vs-baseline']!.sign_p).toBe(1);
   });
 
   it('environment skips grey the verdict and print in the report (§7.1 rev 8)', () => {

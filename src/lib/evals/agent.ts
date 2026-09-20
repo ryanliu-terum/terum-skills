@@ -15,8 +15,15 @@ import { onShutdown, runShutdownHooks } from '../shutdown.js';
 import { resolveAgentCommand, type AgentCommandEvidence } from './agent-command.js';
 
 export const DEFAULT_MODEL = 'sonnet'; // §16.9 [provisional]
-export const DEFAULT_TIMEOUT_MS = 600_000;
-const AGENT_TOOLS = 'Bash Read Write Edit Glob Grep';
+export const DEFAULT_TIMEOUT_MS = 7_200_000;
+/**
+ * Eval purpose suites §5 / §6.2: a heavy skill does its work through the subagent (`Task`) and
+ * `Workflow` tools. Without them on the allowlist the headless session's permission gate
+ * ("Review dynamic workflow before running") blocks the launch and the skill degrades to prose —
+ * measured 2026-09-16 on the hybrid-review suite: three blocked Workflow calls, no `codex exec`.
+ * Every arm gets the same list, so the comparison stays fair.
+ */
+const AGENT_TOOLS = 'Bash Read Write Edit Glob Grep Task Workflow';
 /**
  * Rev 7: appended to every arm run, identically, so the comparison stays fair. A headless agent
  * that stops to ask a question dies silently and scores as skill failure (measured: the dominant
@@ -34,6 +41,8 @@ const hostEvidence = (): AgentCommandEvidence => ({
 });
 
 export class AgentRunError extends Error {}
+/** A session cap is deterministic work exhaustion, not the transient crash retry is for. */
+export class AgentTimeoutError extends AgentRunError {}
 
 interface StreamEvent {
   type?: string;
@@ -77,6 +86,14 @@ export class Transcript {
     return this.blocks()
       .filter((block) => block['type'] === 'tool_use' && block['name'] === 'Bash')
       .map((block) => String((block['input'] as Record<string, unknown> | undefined)?.['command'] ?? ''));
+  }
+
+  /** Tool-use names in transcript order; used only by the local eval run record. */
+  toolUses(): string[] {
+    return this.blocks()
+      .filter((block) => block['type'] === 'tool_use')
+      .map((block) => String(block['name'] ?? ''))
+      .filter(Boolean);
   }
 
   allText(): string {
@@ -192,7 +209,7 @@ export interface AgentApi {
 async function runAgent(task: string, cwd: string, options: RunAgentOptions = {}): Promise<Transcript> {
   const outcome = await run(task, cwd, options);
   if (options.transcriptPath !== undefined) await writeFile(options.transcriptPath, outcome.stdout, 'utf8');
-  if (outcome.timedOut) throw new AgentRunError(`agent run timed out after ${options.timeoutMs ?? DEFAULT_TIMEOUT_MS}ms`);
+  if (outcome.timedOut) throw new AgentTimeoutError(`agent run timed out after ${options.timeoutMs ?? DEFAULT_TIMEOUT_MS}ms`);
   // Partial stream-json is still an unsuccessful agent run. Persist it first for
   // inspection, then let execution retry it in a fresh sandbox.
   if (outcome.code !== 0) throw new AgentRunError(`agent run failed (rc=${outcome.code}): ${outcome.stderr.slice(-2000)}`);
@@ -203,7 +220,7 @@ function run(task: string, cwd: string, options: RunAgentOptions): Promise<Spawn
   return spawnCollect([
     '-p', task,
     '--output-format', 'stream-json', '--verbose',
-    '--max-turns', String(options.maxTurns ?? 25),
+    '--max-turns', String(options.maxTurns ?? 200),
     '--permission-mode', 'acceptEdits',
     '--allowedTools', AGENT_TOOLS,
     // Also the only thing keeping an eval out of its own way: the user's ~/.claude/settings.json is

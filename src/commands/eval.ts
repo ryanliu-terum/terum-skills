@@ -10,9 +10,9 @@ import { ConfigStore, createConfigStore, selectTeam } from '../lib/config.js';
 import type { Config } from '../lib/schema.js';
 import { localReceiptsFor, newestReceiptAt } from '../lib/evals/receipt-store.js';
 import { type AgentApi, DEFAULT_MODEL, preflight as systemPreflight, systemAgent } from '../lib/evals/agent.js';
-import { type DroppedCase, type ArmSample, type ComparisonRow, loadCase, runCase } from '../lib/evals/execution.js';
+import { type DroppedCase, type ArmSample, type ComparisonRow, loadCase, loadSuite, runCase, runSuite } from '../lib/evals/execution.js';
 import { generate, type GeneratedAssets } from '../lib/evals/generate.js';
-import { assessHygiene, exemptAuthorEmail, formatHygieneFindings, HygieneRefused, inspectContent, reportHygieneWarnings } from '../lib/evals/hygiene.js';
+import { assessHygiene, exemptAuthorEmail, formatHygieneFindings, hygieneFrontmatter, HygieneRefused, inspectContent, reportHygieneWarnings } from '../lib/evals/hygiene.js';
 import { makeRng } from '../lib/evals/judge.js';
 import { receiptPath, buildReceipt, NO_TEAM_RUNNER_HANDLE } from '../lib/evals/receipt.js';
 import { aggregate, renderReport, runIdFrom, writeRunTree, type Aggregate } from '../lib/evals/results.js';
@@ -29,6 +29,7 @@ import { refIsPath, resolveLibrarySkill, unusableSkillFolder } from '../lib/loca
 import { resolveSkillRef } from '../lib/resolve-ref.js';
 import { parseVersionFolder, versionLabel, type SkillVersion } from '../lib/versions.js';
 import { openTeamRepo, refreshClone, lockWait, listVersions, skillVersions } from '../lib/teamRepo.js';
+import { dependencyPlan, scanHeavySkill } from '../lib/evals/dependencies.js';
 
 export interface EvalArgs extends WithForm {
   /** A name, a folder path, or absent: the skill folder above `cwd` (§6.1 rung 0). */
@@ -48,6 +49,8 @@ export interface EvalArgs extends WithForm {
   model?: string;
   judgeModel?: string;
   noGen?: boolean;
+  /** Force or decline the heavy one-session mode without a prompt. */
+  heavy?: boolean;
   /**
    * `false` keeps a finished receipt on this machine. Absent publishes it to the team when — and only
    * when — these exact bytes are already a published version (`shareReceipt`).
@@ -80,6 +83,16 @@ export interface EvalResult {
   receiptPath?: string;
   /** D11: what `renderReport` printed, as data — the normal run only; an already-evaluated answer carries none. */
   report?: { aggregate: Aggregate; triggers: TriggerSummary | null };
+}
+
+export function heavyNotice(cases: string): string {
+  return `This skill appears to call subagents, which can be expensive. Instead of
+running it once per case, this evaluation runs one session with the skill
+and one without, against a single fixture with many checks, to limit usage
+and wall-clock time. The verdict therefore rests on one session and will
+vary more between runs. To reduce variance, uncheck the box below; that
+runs the skill ${cases} times in sequence. If the run is interrupted or your
+usage runs out, it is marked unscored and must be run again.`;
 }
 
 /**
@@ -160,6 +173,14 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
     const inspected = inspectSkillSource(candidateFiles.files.get('SKILL.md')?.toString('utf8') ?? '');
     const skillId = (inspected.ok ? inspected.id : null) ?? record?.id ?? null;
     const description = (inspected.ok ? inspected.description : inspected.description) ?? record?.frontmatter.description ?? '';
+    const wantsCases = !args.triggersOnly;
+    const wantsTriggers = !args.executionOnly;
+    const authoredCasesDir = join(candidateDir, 'evals', 'cases');
+    const authoredCaseFiles = (await optionalDirectory(authoredCasesDir)).filter((name) => /\.ya?ml$/i.test(name)).sort();
+    // A suite is one authored execution asset even though it expands into multiple receipt rows.
+    const authoredSuite = await optionalText(join(candidateDir, 'evals', 'suite.yaml'));
+    const authoredTrigger = candidateFiles.files.has('evals/triggers.yaml');
+    const assets = { name: local.name, wantsCases, wantsTriggers, authoredCaseFiles, authoredSuite: authoredSuite !== undefined, authoredTrigger };
     if (args.skipReceipted || args.expectedVersion !== undefined) {
       // Both queue guards are re-keyed on the content hash (§6.6): the bytes, not an ordinal, are what
       // a queued item was queued against.
@@ -173,24 +194,29 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
         return success({ team: teamName, id: skillId, name: local.name, runDir: '', ccVersion: newest.receipt.provenance.cc_version, executionStatus: newest.receipt.execution_status, alreadyEvaluated: true });
       }
     }
+    const dependencies = await dependencyPlan(candidateDir);
+    const heavyScan = await scanHeavySkill(candidateDir, dependencies.staged[0]);
+    let heavy = args.heavy;
     try {
       // §6.3: the folder as it is on disk — eval never injects — so HYG1 treats `license` and the
       // three managed `metadata.*` fields as optional. Every other HYG1 clause and every HYG2–HYG6
       // predicate stay unchanged and fail-closed. With no team there is no policy license to conform
       // to, so HYG5 compares the frontmatter against the bundled LICENSE files alone.
-      reportHygieneWarnings((line) => io.print(line), assessHygiene(local.name, candidateFiles, team?.policy.skill_license ?? null, false, true));
+      reportHygieneWarnings((line) => io.print(line), assessHygiene(local.name, candidateFiles, team?.policy.skill_license ?? null, false, true, undefined, dependencies.staged.length + dependencies.skipped.length));
+      for (const path of dependencies.staged) io.print(`Staging dependency ${path}`);
+      for (const path of dependencies.missing) io.print(`SKILL.md references ${path}, which is not present here; the skill may not run`);
+      for (const skipped of dependencies.skipped) io.print(`${skipped.path} is ${(skipped.bytes / (1024 * 1024)).toFixed(1)} MB; staging it would exceed the 20 MB cap; not staged`);
+      if (heavy === undefined && heavyScan.heavy) {
+        io.print(heavyScan.evidence);
+        io.print(heavyNotice(authoredCaseFiles.length === 0 ? 'each' : String(authoredCaseFiles.length)));
+        heavy = await io.confirm('Use the one-session heavy evaluation mode?', { default: true });
+      }
+      heavy ??= heavyScan.heavy;
     } catch (error) {
       if (!(error instanceof HygieneRefused)) throw error;
       reportHygieneWarnings((line) => io.print(line), error.assessment);
       return failure(`Hygiene failed for ${local.name}:\n${error.message}`);
     }
-
-    const wantsCases = !args.triggersOnly;
-    const wantsTriggers = !args.executionOnly;
-    const authoredCasesDir = join(candidateDir, 'evals', 'cases');
-    const authoredCaseFiles = (await optionalDirectory(authoredCasesDir)).filter((name) => /\.ya?ml$/i.test(name)).sort();
-    const authoredTrigger = candidateFiles.files.has('evals/triggers.yaml');
-    const assets = { name: local.name, wantsCases, wantsTriggers, authoredCaseFiles, authoredTrigger };
 
     const model = args.model ?? DEFAULT_MODEL;
     const preflight = await (args.preflight ?? systemPreflight)(model);
@@ -206,6 +232,7 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
     let generated: GeneratedAssets = {};
     if (generateCases || generateTriggers) {
       const catalog = await endorsedCatalog(local.libraryRoot, { name: local.name, description });
+      const frontmatter = hygieneFrontmatter(candidateFiles.files.get('SKILL.md') ?? Buffer.alloc(0)) as { metadata?: { eval?: { shape?: unknown } } } | undefined;
       const built = await generate({
         agent: args.agent ?? systemAgent,
         skill: candidateFiles.files.get('SKILL.md')?.toString('utf8') ?? '',
@@ -216,6 +243,7 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
         now: runAt,
         cases: generateCases,
         triggers: generateTriggers,
+        shape: frontmatter?.metadata?.eval?.shape,
       });
       if (!built.ok) return failure(built.error);
       generated = built.value;
@@ -235,7 +263,8 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
       // prompt: nothing leaves the machine here, publish still asks before anything does, and
       // publish already writes into this same folder (§5.1 step 6b).
       const written = generatedAssetLabels(generated);
-      io.print(`Writing generated ${written.join(' and ')} into ${candidateDir} — they were missing, so this run made them. That changes the skill's content: the next publish mints a new version and the current local eval score blanks. To regenerate, delete evals/cases/ and run eval again.`);
+      const regenerationTarget = generated.suite === undefined ? 'evals/cases/' : 'evals/suite.yaml';
+      io.print(`Writing generated ${written.join(' and ')} into ${candidateDir} — they were missing, so this run made them. That changes the skill's content: the next publish mints a new version and the current local eval score blanks. To regenerate, delete ${regenerationTarget} and run eval again.`);
       const saved = await saveGeneratedAssets(candidateDir, generated);
       if (!saved.ok) return failure(saved.error);
     }
@@ -252,7 +281,7 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
     // was queued is what was on disk when it was queued, and re-checking `--skipReceipted` after
     // generation would mean paying for the model call before discovering the bytes were receipted.
     // The next run of an already-generated folder reads the written-back bytes and matches this one.
-    const regenerated = generated.cases !== undefined || generated.triggers !== undefined;
+    const regenerated = generated.cases !== undefined || generated.suite !== undefined || generated.triggers !== undefined;
     const evaluatedDigest = regenerated ? skillContentDigest((await sourceFiles(candidateDir)).files) : candidateDigest;
 
     // §6.2: content-keyed, so a skill belonging to NO team can be evaluated at all.
@@ -284,17 +313,32 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
     const caseNames: string[] = [];
     const rng = makeRng(0);
     let expectedRows = 0;
+    let suiteRan = false;
     if (wantsCases) {
       const caseFiles = generated.cases === undefined ? authoredCaseFiles : (await optionalDirectory(casesDir)).filter((name) => /\.ya?ml$/i.test(name)).sort();
       const selected = args.case === undefined ? caseFiles : caseFiles.filter((file) => file.replace(/\.ya?ml$/i, '') === args.case);
       if (args.case !== undefined && selected.length === 0) return failure(`No eval case named ${args.case} for ${local.name}.`);
-      caseNames.push(...selected.map((file) => file.replace(/\.ya?ml$/i, '')));
+      const selectedNames = selected.map((file) => file.replace(/\.ya?ml$/i, ''));
+      caseNames.push(...selectedNames);
+      // `--case <stem>` addresses authored case FILES only, so it must not pay for the suite's session
+      // (a suite session can run to `timeout_minutes: 120` per arm); a named-case run skips the suite
+      // and says so. Addressing a single sub-case is an open fork (harden r1 on this branch).
+      const suiteSource = generated.suite?.file ?? authoredSuite;
+      const suite = suiteSource === undefined || args.case !== undefined ? undefined : loadSuite(suiteSource, 'suite');
+      if (suiteSource !== undefined && args.case !== undefined) io.print(`Skipping evals/suite.yaml: --case ${args.case} names an authored case; the suite runs only in a full run.`);
+      if (suite !== undefined && !suite.ok) return failure(suite.error);
+      if (suite !== undefined) {
+        const authoredNames = authoredCaseFiles.map((file) => file.replace(/\.ya?ml$/i, ''));
+        const collision = suite.value.cases.find((subCase) => authoredNames.includes(subCase.name));
+        if (collision !== undefined) return failure(`suite 'suite': sub-case name '${collision.name}' collides with authored case name`);
+        caseNames.push(suite.value.name);
+      }
       // §6.5: no clone, no team, no id, no receipted version — every one of them means NO incumbent
       // and a single-arm run, exactly as eval-engine §7.1 already names it.
       const incumbent = clone === null || skillId === null ? undefined : await incumbentDir(clone, local.name, await listVersions(clone, local.name), skillId, evaluatedDigest);
       const opponents = incumbent === undefined ? 1 : 2;
       // Includes every selected authored case before requirement probes or setup failures.
-      expectedRows = selected.length * k * opponents;
+      expectedRows = (selected.length + (suite === undefined ? 0 : suite.value.cases.length)) * k * opponents;
       for (const file of selected) {
         const name = file.replace(/\.ya?ml$/i, '');
         const parsed = loadCase(await readFile(join(casesDir, file), 'utf8'), name);
@@ -302,20 +346,38 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
         const output = await runCase(
           { agent: args.agent ?? systemAgent, rng, model, judgeModel: args.judgeModel ?? model, log: (line) => io.print(line) },
           parsed.value,
-          { k, skillName: local.name, caseDir: casesDir, arms: { candidate: candidateDir, ...(incumbent === undefined ? {} : { incumbent }) }, scratch, transcriptDir },
+          { k, skillName: local.name, caseDir: casesDir, arms: { candidate: candidateDir, ...(incumbent === undefined ? {} : { incumbent }) }, scratch, transcriptDir, dependencies },
         );
         rows.push(...output.rows); arms.push(...output.arms);
         if (output.skipped) environmentSkips[name] = output.skipped;
         if (output.dropped) droppedCases[name] = output.dropped;
       }
+      if (suite !== undefined) {
+        const output = await runSuite(
+          { agent: args.agent ?? systemAgent, rng, model, judgeModel: args.judgeModel ?? model, log: (line) => io.print(line) },
+          suite.value,
+          { k, skillName: local.name, caseDir: generated.suite === undefined ? join(candidateDir, 'evals') : generatedRoot, arms: { candidate: candidateDir, ...(incumbent === undefined ? {} : { incumbent }) }, scratch, transcriptDir, dependencies },
+        );
+        // A skipped or seed-aborted suite has no shared session, so it cannot invalidate the
+        // independence of ordinary case rows. A dead agent still yields samples and did run.
+        suiteRan ||= output.arms.length > 0;
+        rows.push(...output.rows); arms.push(...output.arms);
+        if (output.skipped) environmentSkips[suite.value.name] = output.skipped;
+        if (output.dropped) droppedCases[suite.value.name] = output.dropped;
+      }
     }
-    const summary = aggregate(rows, arms, expectedRows, environmentSkips, droppedCases);
+    const summary = aggregate(rows, arms, expectedRows, environmentSkips, droppedCases, suiteRan);
     await writeRunTree(runDir, {
       team: teamName, skill_id: skillId, skill_name: local.name, run_id: runId,
       cc_version: preflight.value.ccVersion, model, judge_model: args.judgeModel ?? model,
       expected_rows: expectedRows,
+      heavy,
+      heavy_evidence: heavyScan.evidence,
+      staged_dependencies: dependencies.staged,
+      missing_dependencies: dependencies.missing,
+      spawns_agents: arms.some((arm) => arm.spawns_agents === true),
       arm_skill_lists: Object.fromEntries([...new Set(arms.map((arm) => arm.arm))].map((arm) => [arm, arms.find((sample) => sample.arm === arm)?.skill_list ?? null])),
-      ...(generated.cases !== undefined || generated.triggers !== undefined ? { generated_assets: { cases: generated.cases !== undefined, triggers: generated.triggers !== undefined } } : {}),
+      ...(generated.cases !== undefined || generated.suite !== undefined || generated.triggers !== undefined ? { generated_assets: { cases: generated.cases !== undefined, ...(generated.suite === undefined ? {} : { suite: true }), triggers: generated.triggers !== undefined } } : {}),
     }, [...rows, ...arms, ...(triggers === null ? [] : [triggers])]);
     const armSkillLists = Object.fromEntries([...new Set(arms.map((arm) => arm.arm))]
       .map((arm) => [arm, arms.find((sample) => sample.arm === arm)?.skill_list ?? null]));
@@ -360,7 +422,7 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
     if (!receipt.ok) return failure(receipt.error);
     const source = `${JSON.stringify(receipt.value, null, 2)}\n`;
     await writeFile(join(runDir, 'receipt.json'), source, 'utf8');
-    if (generated.cases !== undefined || generated.triggers !== undefined) announceGeneratedAssets(io, wantsCases, wantsTriggers, generated, join(runDir, 'generated'));
+    if (generated.cases !== undefined || generated.suite !== undefined || generated.triggers !== undefined) announceGeneratedAssets(io, wantsCases, wantsTriggers, generated, join(runDir, 'generated'));
     io.print(renderReport(summary, triggers));
 
     // Running the eval is the sharing step (Ajay, 2026-09-13). When these exact bytes are ALREADY a
@@ -394,14 +456,14 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
   } catch (error) { return fromError(error); }
 }
 
-interface PlannedAssets { name: string; wantsCases: boolean; wantsTriggers: boolean; authoredCaseFiles: string[]; authoredTrigger: boolean }
+interface PlannedAssets { name: string; wantsCases: boolean; wantsTriggers: boolean; authoredCaseFiles: string[]; authoredSuite: boolean; authoredTrigger: boolean }
 
 /** The one derivation of what this run would generate, shared by the run body and both pre-run builders. */
 function plannedGeneration(args: EvalArgs, assets: PlannedAssets): { generateCases: boolean; generateTriggers: boolean } {
   // D29: use the assets that are there, generate only the ones that are missing — per asset. With
   // `--gen` deleted nothing can ever overwrite an authored file, which is what makes §6.3's
   // write-back into the user's own skill folder safe.
-  const generateCases = assets.wantsCases && !args.noGen && assets.authoredCaseFiles.length === 0;
+  const generateCases = assets.wantsCases && !args.noGen && assets.authoredCaseFiles.length === 0 && !assets.authoredSuite;
   const generateTriggers = assets.wantsTriggers && !args.noGen && !assets.authoredTrigger;
   return { generateCases, generateTriggers };
 }
@@ -429,7 +491,7 @@ async function optionalDirectory(path: string): Promise<string[]> {
 
 function announceGeneratedAssets(io: Prompter, wantsCases: boolean, wantsTriggers: boolean, generated: GeneratedAssets, root: string): void {
   const sets = [
-    wantsCases ? `cases: ${generated.cases === undefined ? 'authored' : `generated (${generated.cases.names.length})`}` : null,
+    wantsCases ? `cases: ${generated.suite !== undefined ? 'generated suite' : generated.cases === undefined ? 'authored' : `generated (${generated.cases.names.length})`}` : null,
     wantsTriggers ? `triggers: ${generated.triggers === undefined ? 'authored' : 'generated'}` : null,
   ].filter((line): line is string => line !== null);
   io.print(`eval assets: ${sets.join(' · ')}`);
@@ -438,7 +500,7 @@ function announceGeneratedAssets(io: Prompter, wantsCases: boolean, wantsTrigger
 
 
 /**
- * One generated-asset layout under `root` — `triggers.yaml`, `cases/<name>.yaml`. Two callers: the run
+ * One generated-asset layout under `root` — `triggers.yaml`, `suite.yaml`, `cases/<name>.yaml`. Two callers: the run
  * tree's own copy (§6.0's team/store write invariant), and the staging folder `saveGeneratedAssets`
  * renames from, so the folder the user gets is byte-for-byte the folder the run recorded.
  */
@@ -452,11 +514,15 @@ async function writeGeneratedAssets(root: string, generated: GeneratedAssets): P
     await mkdir(cases, { recursive: true, mode: 0o700 });
     for (const [name, source] of Object.entries(generated.cases.files)) await writeFile(join(cases, name), source, 'utf8');
   }
+  if (generated.suite !== undefined) {
+    await mkdir(root, { recursive: true, mode: 0o700 });
+    await writeFile(join(root, 'suite.yaml'), generated.suite.file, 'utf8');
+  }
 }
 
 /** The folder-relative spellings of the assets a generation carries, in the order they are written back. */
 function generatedAssetLabels(generated: GeneratedAssets): string[] {
-  return [generated.cases === undefined ? null : 'evals/cases/', generated.triggers === undefined ? null : 'evals/triggers.yaml'].filter((entry): entry is string => entry !== null);
+  return [generated.cases === undefined ? null : 'evals/cases/', generated.suite === undefined ? null : 'evals/suite.yaml', generated.triggers === undefined ? null : 'evals/triggers.yaml'].filter((entry): entry is string => entry !== null);
 }
 
 /**
@@ -469,12 +535,14 @@ function generatedAssetLabels(generated: GeneratedAssets): string[] {
 function generatedFileMap(generated: GeneratedAssets): Map<string, Buffer> {
   const files = new Map<string, Buffer>();
   if (generated.triggers !== undefined) files.set('evals/triggers.yaml', Buffer.from(generated.triggers, 'utf8'));
+  if (generated.suite !== undefined) files.set('evals/suite.yaml', Buffer.from(generated.suite.file, 'utf8'));
   for (const [name, body] of Object.entries(generated.cases?.files ?? {})) files.set(`evals/cases/${name}`, Buffer.from(body, 'utf8'));
   return files;
 }
 
 export async function saveGeneratedAssets(source: string, generated: GeneratedAssets): Promise<Result> {
   const cases = join(source, 'evals', 'cases');
+  const suite = join(source, 'evals', 'suite.yaml');
   const triggers = join(source, 'evals', 'triggers.yaml');
   // Restored from the pre-refactor verb, which had both refusals. The write-back's claim that it
   // "only ever runs for an asset that was MISSING" holds only for the EXACT spelling: `authoredTrigger`
@@ -486,6 +554,7 @@ export async function saveGeneratedAssets(source: string, generated: GeneratedAs
   // The check asks the FILESYSTEM, so it is correct on both kinds of volume: on a case-sensitive one
   // the two names are different files and generation proceeds as it should.
   if (generated.cases !== undefined && await pathExists(cases)) return failure(`${cases} already exists, so the generated eval cases were not written — a generated asset never overwrites an authored one. Rename or delete it, then run eval again.`);
+  if (generated.suite !== undefined && await pathExists(suite)) return failure(`${suite} already exists, so the generated eval suite was not written — a generated asset never overwrites an authored one. Rename or delete it, then run eval again.`);
   if (generated.triggers !== undefined && await pathExists(triggers)) return failure(`${triggers} already exists, so the generated triggers were not written — a generated asset never overwrites an authored one. Rename or delete it, then run eval again.`);
   // D72: stage, then rename — the same shape as `place()` in placer.ts. This is the user's own skill
   // folder, and the file-by-file write it replaced had no rollback: an interruption after the first
@@ -525,6 +594,7 @@ export async function saveGeneratedAssets(source: string, generated: GeneratedAs
     staging = await mkdtemp(join(dirname(source), '.generated.terum-'));
     await writeGeneratedAssets(staging, generated);
     if (generated.cases !== undefined) { await rename(join(staging, 'cases'), cases); landed.push('evals/cases/'); }
+    if (generated.suite !== undefined) { await rename(join(staging, 'suite.yaml'), suite); landed.push('evals/suite.yaml'); }
     if (generated.triggers !== undefined) { await rename(join(staging, 'triggers.yaml'), triggers); landed.push('evals/triggers.yaml'); }
   } catch (error) {
     if (staging !== undefined) await rm(staging, { recursive: true, force: true }).catch(() => undefined);
@@ -954,6 +1024,7 @@ export async function runMany(args: EvalManyArgs, io: Prompter): Promise<Result<
           ...(teamName === null ? {} : { team: teamName }),
           ...(args.k === undefined ? {} : { k: args.k }), ...(args.model === undefined ? {} : { model: args.model }), ...(args.judgeModel === undefined ? {} : { judgeModel: args.judgeModel }),
           ...(args.noGen ? { noGen: true } : {}), ...(args.triggersOnly ? { triggersOnly: true } : {}), ...(args.executionOnly ? { executionOnly: true } : {}), ...(args.case === undefined ? {} : { case: args.case }),
+          ...(args.heavy === undefined ? {} : { heavy: args.heavy }),
           ...(args.agent === undefined ? {} : { agent: args.agent }), ...(args.now === undefined ? {} : { now: args.now }),
         }, captured),
       });

@@ -16,7 +16,8 @@ beforeAll(async () => {
 });
 
 describe('command_succeeds (§5.1 rev 9)', () => {
-  it('passes on exit 0 in the sandbox, fails with rc and stderr tail otherwise', () => {
+  // The check runs its command under `/bin/sh`, which Windows lacks (see execution.test.ts).
+  it.skipIf(process.platform === 'win32')('passes on exit 0 in the sandbox, fails with rc and stderr tail otherwise', () => {
     expect(runChecks([{ command_succeeds: 'test -f deployed.marker' }], emptyTranscript, sandbox)[0]).toMatchObject({ passed: true });
     const failed = runChecks([{ command_succeeds: 'echo boom >&2; exit 3' }], emptyTranscript, sandbox)[0];
     expect(failed).toMatchObject({ passed: false });
@@ -29,6 +30,11 @@ describe('the five check kinds (§5.1, verbatim port)', () => {
   it('transcript_mentions is case-insensitive substring', () => {
     expect(runChecks([{ transcript_mentions: 'stripe_key' }], transcript, sandbox)[0]).toMatchObject({ passed: true });
     expect(runChecks([{ transcript_mentions: 'ROLLBACK' }], transcript, sandbox)[0]).toMatchObject({ passed: false, detail: expect.stringContaining('never appeared') });
+  });
+
+  it('transcript_omits is the case-insensitive inverse', () => {
+    expect(runChecks([{ transcript_omits: 'rollback' }], transcript, sandbox)[0]).toMatchObject({ passed: true });
+    expect(runChecks([{ transcript_omits: 'stripe_KEY' }], transcript, sandbox)[0]).toMatchObject({ passed: false, detail: expect.stringContaining('appeared') });
   });
 
   it('command_matching / no_command_matching are regexes over Bash commands', () => {

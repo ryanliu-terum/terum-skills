@@ -9,7 +9,7 @@ import { installHook } from '../../lib/hook.js';
 import { placementHome, run } from '../install.js';
 import type { ProgressUpdate } from '../../lib/prompt.js';
 import { createConfigStore } from '../../lib/config.js';
-import { bareTeam, cloneWithIdentity, fakeGh, git, mappedRunner, person, pushFromSeed, ScriptedPrompter, NonInteractivePrompter, temporaryDirectory, wrapRunner, wrapperFor, editHookFor } from '../../lib/__tests__/fixtures.js';
+import { bareTeam, cloneWithIdentity, fakeGh, git, mappedRunner, person, pushFromSeed, ScriptedPrompter, NonInteractivePrompter, SYMLINKS_SUPPORTED, temporaryDirectory, wrapRunner, wrapperFor, editHookFor } from '../../lib/__tests__/fixtures.js';
 import { systemRunner } from '../../lib/runner.js';
 import { allowedTools } from '../../lib/schema.js';
 import { managedSkillRoots } from '../../lib/wrapper.js';
@@ -537,7 +537,7 @@ describe('Library install destinations', () => {
     expect((await f.store.read()).pending).toEqual([expect.objectContaining({ version: 'v2', destination: { kind: 'checkout', root: await realpath(f.checkout) } })]);
   });
 
-  it('recognizes owned placement through a symlinked parent and keeps one ledger key', async () => {
+  it.skipIf(!SYMLINKS_SUPPORTED)('recognizes owned placement through a symlinked parent and keeps one ledger key', async () => {
     const f = await destinationFixture();
     expect((await run({ ref: 'sample', config: f.store, into: f.checkout }, new ScriptedPrompter())).ok).toBe(true);
     const alias = join(f.root, 'alias'); await symlink(f.checkout, alias);

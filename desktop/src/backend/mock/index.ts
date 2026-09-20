@@ -1,3 +1,4 @@
+import { canShareImage, shareImage, saveBrowserImage } from '../image-sharing';
 import { isUnderRoot, normalizeSeparators } from '../../lib/skill-path';
 import { z } from 'zod';
 import { browserPrefs } from '../prefs';
@@ -225,6 +226,36 @@ export function createMockBackend(opts:{latencyMs?:number}={}):Backend & {readon
     result.value.skillMd={frontmatter:frontmatter[0].replace(/\r?\n$/,''),body:[],markdown:RAW_MD.slice(frontmatter[0].length)};
    }
    return result.ok?ok(scopedDetail(removalState(withInstall({...result.value,...(scenario==='not-installed'?{installed:'absent' as const,placed:false,onDiskOnly:false,root:'Marketplace' as const,flags:[]}:{}),...(scenario==='on-disk-only'&&ref==='deploy-check'?{installed:'placed' as const,placed:false,onDiskOnly:true,path:'~/.claude/skills/deploy-check',pathLabel:'~/.claude/skills/deploy-check',paths:[['~/.claude/skills/deploy-check','global']] as [string,string][]}:{}),enabled:scenario==='disabled'?false:backend.prefs.get('enabled:'+ref,result.value.enabled),favorite:backend.prefs.get('favorite:'+ref,result.value.favorite)})),at)):result;},ref),
+  /** Fixture firings. `deploy-check` is the case the feature exists for — reached for by hand, never
+   *  chosen by the model. `pr-review` is placed and silent. `incident-triage` fired but Terum never
+   *  placed it, the case that wrongly read "not installed" before. A skill in neither map has
+   *  nothing recorded, which is not a claim about whether it is installed. */
+  /** Screening is an ACTION that spends model calls, so the mock returns a `Run` like `eval` does,
+   *  not a resolved read. `deploy-check` is the interesting fixture: 0 autonomous / 4 explicit in
+   *  `usage`, so it is the skill a reader would actually screen. `pr-review` is the 0/0 row -- the
+   *  ambiguous one this whole feature exists to disambiguate -- and it comes back empty, which is a
+   *  real answer, not a failure. */
+  misses:()=>long('library',async()=>{
+   return ok({groups:[
+    {skill:'deploy-check',candidates:[
+     {prompt:'ship the new build to staging and make sure nothing is broken',ts:'2026-09-12T09:14:00.000Z',noPriorContext:false},
+     {prompt:'ok do that before we cut the release',ts:'2026-09-10T16:02:00.000Z',noPriorContext:true},
+    ]},
+    {skill:'incident-triage',candidates:[{prompt:'prod is throwing 500s on checkout, where do I start',ts:'2026-09-13T22:41:00.000Z',noPriorContext:false}]},
+   ],screened:340,calls:34,truncated:false,unjudged:0,
+    since:'2026-09-08T00:00:00.000Z',until:'2026-09-15T00:00:00.000Z',
+    caveats:['Counts are candidates for review, not measured misses; the judge sees a trimmed window, not the session.','Skills with no recorded placement date were left out of the catalogue and cannot appear here.']});
+  }),
+  usage:async({ref})=>{
+   const name=ref.replace(/^local:/,'').split('/').pop()??ref;
+   const placed:Record<string,{d1:number;d2:number}>={'deploy-check':{d1:0,d2:4},'release-notes':{d1:3,d2:1},'pr-review':{d1:0,d2:0}};
+   const loose:Record<string,{d1:number;d2:number}>={'incident-triage':{d1:1,d2:3}};
+   const hit=placed[name]??loose[name],isPlaced=placed[name]!==undefined;
+   const ratio=(c:{d1:number;d2:number})=>c.d1+c.d2===0?null:c.d1/(c.d1+c.d2);
+   return ok({firings:hit===undefined?null:{...hit,autonomy:ratio(hit),availability:isPlaced?'full' as const:'unknown' as const,placed:isPlaced},
+    since:'2026-08-16T00:00:00.000Z',until:'2026-09-15T00:00:00.000Z',
+    caveats:['Counts are invocations, not outcome-changing uses; reopenings are not deduped.','30-day window: Claude Code prunes transcripts, so earlier use is visible only where this machine has already archived it.']});
+  },
   evalReport:async({ref})=>{const detail=await backend.skill({ref});if(!detail.ok)return detail;const {receipt,summary,incumbentLift,reportNumbers,history,versions,latestState,invalidReceiptFile,localRuns,evalEstimate,evalEstimateText,evalEstimateTip,scoreFractions,wlt}=detail.value;return ok({receipt,summary,incumbentLift,reportNumbers,history,versions,latestState,invalidReceiptFile,localRuns,evalEstimate,evalEstimateText,evalEstimateTip,scoreFractions,wlt});},
   receipts:({skillId,version})=>read('library',()=>{const detail=skillByRef(skillId);if(!detail.ok)return fail(detail.error);return ok(detail.value.version===version?detail.value.receipt??null:null);}),
   inbox:()=>read('inbox',scenario=>ok(scenario==='empty'?[]:inboxItems())),
@@ -347,6 +378,7 @@ export function createMockBackend(opts:{latencyMs?:number}={}):Backend & {readon
   diagnostics:()=>long('status',async ctx=>{for(const line of statusLines(design))ctx.print(line);return ok(undefined);}),
   async openInEditor(path){return (path==='~'||path.startsWith('~/')||path.startsWith('/'))?ok(undefined):fail('An editor path is required.');},
   async copyToClipboard(text){try{if(!navigator.clipboard?.writeText)return fail('Clipboard unavailable.');await navigator.clipboard.writeText(text);return ok(undefined);}catch(error){return fail(error instanceof Error?error.message:'Clipboard unavailable.');}},
+  canShareImage, shareImage, saveImage:saveBrowserImage,
   async copyImage(png){try{if(png.type!=='image/png')return fail('Expected a PNG image.');if(!navigator.clipboard?.write||typeof ClipboardItem==='undefined')return fail('Clipboard unavailable.');await navigator.clipboard.write([new ClipboardItem({'image/png':png})]);return ok(undefined);}catch(error){return fail(error instanceof Error?error.message:'Clipboard unavailable.');}},
   prefs:browserPrefs(),
   subscribe:listener=>{listeners.add(listener);return ()=>{listeners.delete(listener);};}

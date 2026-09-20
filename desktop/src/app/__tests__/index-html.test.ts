@@ -1,7 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { assert, expect, it } from 'vitest';
 
-const html = readFileSync('index.html', 'utf8');
+// A checkout with autocrlf on (the Windows default) has CRLF line ends here; the page is read as LF either way.
+const html = readFileSync('index.html', 'utf8').replaceAll('\r\n', '\n');
 
 it('declares exactly one inline SVG favicon', () => {
  expect(html.match(/<link rel="icon" href="data:image\/svg\+xml,/g)).toHaveLength(1);

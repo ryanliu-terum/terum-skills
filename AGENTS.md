@@ -61,6 +61,14 @@ hold for code written here, and this file wins over any comment or doc that cont
 - Once `src/` exists: `npm run lint`, `npm run typecheck`, `npm test` (vitest, collocated under
   `src/**/__tests__/`, bare-repo fixtures, no network). Report their real output; a self-reported
   green gate is a hypothesis the reviewer re-runs.
+- CI runs the suite on Linux. On Windows some tests skip rather than fail, each with its reason in
+  the source: anything that creates a symlink is gated on `SYMLINKS_SUPPORTED`
+  (`src/lib/__tests__/fixtures.ts`, a probe that needs Developer Mode or an elevated shell); POSIX
+  mode assertions (0600/0700, executable bits) are guarded by `process.platform !== 'win32'`; and
+  the eval engine's setup hooks, requirement probes and `command_succeeds` checks run under
+  `/bin/sh`, which Windows lacks, so those cases skip there. A skip is not a pass: report the
+  skipped count next to the passed count, and never add a skip to hide a failure that a Linux
+  run would show.
 - Use absolute paths in shell commands; do not `cd`.
 
 ## Things that look wrong and are not
@@ -83,3 +91,13 @@ hold for code written here, and this file wins over any comment or doc that cont
 - `guard.ts` accepts a `previousAuthor` for `sync` only, and only for a write that touches
   `SKILL.md` alone with canonical content unchanged. Deliberate: it is the §5.3 managed-field
   refresh after a config email or license change; it can never carry a content change.
+- `safeWrite` runs `git update-index --chmod` after every `git add`. Deliberate: `git add` copies
+  the on-disk mode only where `core.filemode` is on, which it is not on Windows, so without it an
+  executable bit set by the mutation never reaches the commit and a mode-only change stages
+  nothing. On POSIX it restates what `git add` already recorded.
+- `remote.ts` accepts a Windows drive path (`C:\Users\me\team.git`, `C:/…`, `file:///C:/…`) as a
+  local remote on every platform and normalizes it to `file:C:/…`. Deliberate: a Windows user's
+  local bare repo is a remote like any other, and the one parser must spell it one way.
+- `placer.ts` treats EPERM from a rename as "destination exists" only after probing the
+  destination. Deliberate: Windows reports EPERM both for a rename onto an existing directory and
+  for a locked one; the probe tells them apart, and without it every replace on Windows failed.
