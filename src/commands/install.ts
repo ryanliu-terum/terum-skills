@@ -9,7 +9,7 @@ import { ConfigStore, createConfigStore, selectTeam } from '../lib/config.js';
 import type { HookOptions } from '../lib/hook.js';
 import type { WrapperOptions } from '../lib/wrapper.js';
 import type { EditHookOptions } from '../lib/editHook.js';
-import { inspect, lockTarget, moveDirectory, place, appendExclude, resolveTarget } from '../lib/placer.js';
+import { inspect, keptCopyPath, lockTarget, moveDirectory, place, appendExclude, resolveTarget } from '../lib/placer.js';
 import { Prompter } from '../lib/prompt.js';
 import { refuseSecondTeam, teamByRemote } from '../lib/auth.js';
 import { normalizeRemote } from '../lib/remote.js';
@@ -183,9 +183,9 @@ export async function installOne(input: AdoptInstallInput | PlacingInstallInput,
     const ownedKey = (await Promise.all(Object.keys(ledger).map(async key => ({ key, canonical: await canonicalParentPath(key) })))).find(item => item.key === destination || (canonical !== undefined && item.canonical === canonical))?.key;
     const collision = await inspect(destination);
     if (collision.kind === 'present') {
-      const kept = join(dirname(root), 'old-skills', skill.name);
-      // §9.1.1 leaves repeated-backup policy deferred. Keep B5's conservative no-loss refusal.
-      if ((await inspect(kept)).kind !== 'absent') throw new Error(`${kept} already exists; move the kept copy elsewhere before retrying.`);
+      // §9.1.1 left repeated-backup policy deferred and B5 read that as a refusal; rotating the
+      // kept path keeps B5's no-loss guarantee without the dead end (placer.keptCopyPath).
+      const kept = await keptCopyPath(root, skill.name);
       if (!(await io.confirm(`Replace it with ${versionLabel(skill.latestVersion)}?`, { detail: [
         `You already have a skill named ${skill.name}.`, `Your copy is kept at ${kept}.`,
       ] }))) throw new CancelledError('Replace was declined.');
