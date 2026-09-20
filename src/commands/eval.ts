@@ -15,7 +15,7 @@ import { generate, type GeneratedAssets } from '../lib/evals/generate.js';
 import { assessHygiene, exemptAuthorEmail, formatHygieneFindings, hygieneFrontmatter, HygieneRefused, inspectContent, reportHygieneWarnings } from '../lib/evals/hygiene.js';
 import { makeRng } from '../lib/evals/judge.js';
 import { receiptPath, buildReceipt, NO_TEAM_RUNNER_HANDLE } from '../lib/evals/receipt.js';
-import { aggregate, renderReport, runIdFrom, writeRunTree } from '../lib/evals/results.js';
+import { aggregate, renderReport, runIdFrom, writeRunTree, type Aggregate } from '../lib/evals/results.js';
 import type { Verdict } from '../lib/evals/stats.js';
 import { packageVersion } from '../lib/package.js';
 import { parseTriggers, runTriggerEvals, type TriggerSummary } from '../lib/evals/triggers.js';
@@ -26,12 +26,16 @@ import { inspectSkillSource, sourceFiles } from '../lib/skill-source.js';
 import { findSkill, readTeam, skillContentDigest, skillRecords } from '../lib/skills.js';
 import { parseSkillFrontmatter } from '../lib/schema.js';
 import { refIsPath, resolveLibrarySkill, unusableSkillFolder } from '../lib/local-skills.js';
+import { resolveSkillRef } from '../lib/resolve-ref.js';
 import { parseVersionFolder, versionLabel, type SkillVersion } from '../lib/versions.js';
 import { openTeamRepo, refreshClone, lockWait, listVersions, skillVersions } from '../lib/teamRepo.js';
 import { dependencyPlan, scanHeavySkill } from '../lib/evals/dependencies.js';
 
 export interface EvalArgs extends WithForm {
-  ref: string;
+  /** A name, a folder path, or absent: the skill folder above `cwd` (§6.1 rung 0). */
+  ref?: string;
+  /** Where a bare `eval` looks for the skill folder; defaults to process.cwd(). */
+  cwd?: string;
   /** The home the Library roots derive from (tests); defaults to homedir(). */
   home?: string;
   /** Queue guard, re-keyed on the CONTENT HASH (§6.6): never bill bytes other than the queued ones. */
@@ -77,6 +81,8 @@ export interface EvalResult {
   ccVersion: string;
   executionStatus: 'complete' | 'partial' | 'failed';
   receiptPath?: string;
+  /** D11: what `renderReport` printed, as data — the normal run only; an already-evaluated answer carries none. */
+  report?: { aggregate: Aggregate; triggers: TriggerSummary | null };
 }
 
 export function heavyNotice(cases: string): string {
@@ -127,11 +133,19 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
     const team = clone === null ? null : await readTeam(clone);
     // §6.3: the bytes come from the Library, not the clone. The clone is still read for the incumbent
     // arm and the policy, but a folder that belongs to no team is evaluable.
-    const local = await resolveLibrarySkill(args.home ?? homedir(), config, store.root, args.ref);
-    // The ref is a name or a folder path (refIsPath): there is no separate --path flag, so the miss must
-    // not promise one. A path outside every Library root is refused like an unknown name — the roots are
-    // the only place a ref may land — and the sentence says which roots would have held it.
-    if (!local) return failure(missingSkillFolder(args.ref));
+    // §6.1: a name, a path, or nothing (the folder above cwd). eval runs rungs 0–2 only — it is paid, so a
+    // prefix never picks the bill — and reads no team names: the bytes must be a Library folder.
+    const resolved = await resolveSkillRef({
+      ref: args.ref, cwd: args.cwd ?? process.cwd(), home: args.home ?? homedir(), config, stateRoot: store.root, rungs: 2, print: (line) => io.print(line),
+      // The ref is a name or a folder path (refIsPath): there is no separate --path flag, so the miss must
+      // not promise one. A path outside every Library root is refused like an unknown name — the roots are
+      // the only place a ref may land — and the sentence says which roots would have held it.
+      miss: (ref) => `No local skill folder named \`${ref}\` in your library; install it from the marketplace first, or pass the folder's path.`,
+      pathMiss: (ref) => `\`${ref}\` is not a skill folder in your library (~/.claude/skills or an added project's .claude/skills); add the project holding it with \`project add\`, or install it from the marketplace first.`,
+    });
+    if (!resolved.ok) return failure(resolved.error);
+    if (resolved.value.source !== 'library') return failure(`No local skill folder named \`${resolved.value.name}\` in your library; install it from the marketplace first, or pass the folder's path.`);
+    const local = resolved.value.match;
     // D72: the folder is there but the scan rejected it or could not read it. Say so, with the
     // scan's own detail against the path — the miss above is reserved for a name no root holds.
     const unusable = unusableSkillFolder(local);
@@ -435,6 +449,8 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
     return success({
       team: teamName, id: skillId, name: local.name, runDir, ccVersion: preflight.value.ccVersion,
       executionStatus: summary.execution_status,
+      receiptPath: join(runDir, 'receipt.json'),
+      report: { aggregate: summary, triggers },
       ...(shared?.ok === true ? { publishedTo: shared.version } : { shareHint: true }),
     });
   } catch (error) { return fromError(error); }
@@ -818,6 +834,8 @@ export interface EvalQueueResult {
   attempted?: number;
   completed?: number;
   failures?: { item: EvalQueueItem; error: string }[];
+  /** D11: one entry per attempted item in queue order, so a board can name the successes that have left `items`. */
+  outcomes?: { skill: string; team?: string; ok: boolean; error?: string }[];
 }
 export async function runQueue(args: EvalQueueArgs, io: Prompter): Promise<Result<EvalQueueResult>> {
   try {
@@ -841,7 +859,7 @@ export async function runQueue(args: EvalQueueArgs, io: Prompter): Promise<Resul
     }
     return await withEvalQueueLock(store.root, 'drain', async assertHeld => {
       const pending = (await readEvalQueue(store.root, line => io.print(line))).items.filter(item => args.window === undefined || item.window === args.window).slice(0, args.max);
-      if (!pending.length) { io.print('No queued evals.'); return success({ items: (await readEvalQueue(store.root)).items, attempted: 0, completed: 0, failures: [] }); }
+      if (!pending.length) { io.print('No queued evals.'); return success({ items: (await readEvalQueue(store.root)).items, attempted: 0, completed: 0, failures: [], outcomes: [] }); }
       let attempted = 0, completed = 0;
       const failures: { item: EvalQueueItem; error: string }[] = [];
       let probe: ReturnType<typeof systemPreflight> | undefined;
@@ -879,7 +897,11 @@ export async function runQueue(args: EvalQueueArgs, io: Prompter): Promise<Resul
           await updateEvalQueue(store.root, items => items.map(current => queueKey(current) === queueKey(item) && current.requestedAt === item.requestedAt ? { ...current, lastError: outcome.error } : current));
         }
       }
-      const value = { items: (await readEvalQueue(store.root)).items, attempted, completed, failures };
+      const outcomes = pending.map((item, index) => {
+        const outcome = batch.outcomes[index]!;
+        return { skill: item.skill, ...(item.team === undefined ? {} : { team: item.team }), ok: outcome.ok, ...(outcome.ok ? {} : { error: outcome.error }) };
+      });
+      const value = { items: (await readEvalQueue(store.root)).items, attempted, completed, failures, outcomes };
       return failures.length ? failureWith(value, `${failures.length} queued evals failed; they remain queued.`) : success(value);
     });
   } catch (error) { return fromError(error); }

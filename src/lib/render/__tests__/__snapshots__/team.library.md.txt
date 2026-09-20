@@ -1,0 +1,28 @@
+## Library
+**4 skills across 2 roots · attention 1 failing · 3 not evaluated · 1 edited**
+
+### Global — ~/.claude/skills
+
+| Skill | State | Eval | Desc | Path |
+|---|---|---|---|---|
+| tdd | edited ✎ | ⚠ stale — edited since the eval | Red, green, refactor. | `~/.claude/skills/tdd` |
+| deploy-check | placed Version 1 | ✗ FAIL −50% | Use this when a deploy needs a checklist. | `~/.claude/skills/deploy-check` |
+| notes | untracked | — not evaluated | Personal notes on how this team ships. | `~/.claude/skills/notes` |
+
+### Cannot be connected
+
+| Skill | Reason | Path |
+|---|---|---|
+| bad-yaml | SKILL.md frontmatter is not valid YAML: Flow sequence in block collection must be sufficiently indented and end with a ] at line 2, column 1: name: [ description: broken ^ | `~/.claude/skills/bad-yaml` |
+| linked | symbolic link | `~/.claude/skills/linked` |
+
+### proj — <ROOT>/proj/.claude/skills
+
+| Skill | State | Eval | Desc | Path |
+|---|---|---|---|---|
+| diagnose | shared = Version 1 | — not evaluated | Narrow a failure to one cause before changing anything. | `<ROOT>/proj/.claude/skills/diagnose` |
+
+**Notes**
+- acme/diagnose: unreadable receipt v1/20260903T100000Z.json; not considered.
+
+**Next:** `/skill-info notes` · `/eval notes`

@@ -55,9 +55,9 @@ function inspect(raw: string, folderName?: string): { ok: true; description: str
   if (typeof parsed?.description === 'string') described = parsed.description;
   const metadata = parsed?.metadata as Record<string, unknown> | null | undefined;
   if (typeof metadata?.['terum-category'] === 'string') category = metadata['terum-category'];
-  // The /terum-skills Claude Code skill ships inside this package and is placed by setup; it is not a
-  // team skill, so discovery never offers it and connect refuses it by name.
-  if (isManagedFrontmatter(parsed)) return reject('managed-wrapper', 'the /terum-skills Claude Code skill that ships with terum-skills; not a team skill', 'This folder is the /terum-skills Claude Code skill that ships with terum-skills and is placed by setup; it cannot be connected to a team.');
+  // The terum-skills skills ship inside this package and are placed by setup; none is a team skill,
+  // so discovery never offers one and connect refuses it under any folder name.
+  if (isManagedFrontmatter(parsed)) return reject('managed-wrapper', 'a terum-skills skill that ships with terum-skills; not a team skill', 'This folder is a terum-skills skill that ships with terum-skills and is placed by setup; it cannot be connected to a team.');
   const legacyNameMessage = `SKILL.md name must equal folder ${folderName} and description is required.`;
   if (folderName !== undefined && parsed?.name !== folderName) return reject('name-mismatch', `SKILL.md name ${String(parsed?.name)} does not equal folder ${folderName}`, legacyNameMessage);
   if (!parsed || typeof parsed.description !== 'string') return reject('description-missing', 'description is missing', legacyNameMessage);

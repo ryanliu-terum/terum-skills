@@ -25,17 +25,19 @@ export const MARK = `@@@@*=:           .......            :=*@@@@
 @:       .::.        ..        .::.       :@
 @@+.        .::....      ....::.        .+@@
 @@@@*=:          ..........          :=*@@@@`;
-export type StyleKind = 'bold' | 'dim' | 'cyan' | 'green' | 'red';
+export type StyleKind = 'bold' | 'dim' | 'italic' | 'cyan' | 'green' | 'red' | 'yellow';
+const CODES: Record<StyleKind, number> = { bold: 1, dim: 2, italic: 3, cyan: 36, green: 32, red: 31, yellow: 33 };
 export function colorCapable(): boolean {
   return terminalOutputIsTTY() && process.env.NO_COLOR === undefined && process.env.TERM !== 'dumb';
 }
 export function decorate(io: Prompter, args: { quiet?: boolean }): boolean {
   return io.channel !== 'frames' && io.interactive && !args.quiet && colorCapable();
 }
-export function style(kind: StyleKind, line: string): string {
-  const codes: Record<StyleKind, number> = { bold: 1, dim: 2, cyan: 36, green: 32, red: 31 };
-  return colorCapable() ? `\x1b[${codes[kind]}m${line}\x1b[0m` : line;
+/** The pure form: the caller decides whether colour is on (a board's `ctx.color`); `style()` decides from the terminal. */
+export function paint(kind: StyleKind, line: string, enabled: boolean): string {
+  return enabled ? `\x1b[${CODES[kind]}m${line}\x1b[0m` : line;
 }
+export function style(kind: StyleKind, line: string): string { return paint(kind, line, colorCapable()); }
 export function header(title: string): string { return `\n> ${style('bold', title)}`; }
 export function welcome(): string { return `  Welcome to ${style('bold', PACKAGE_NAME)}, your team's skill library.`; }
 export function ok(line: string): string { return colorCapable() ? style('green', `✓ ${line}`) : line; }

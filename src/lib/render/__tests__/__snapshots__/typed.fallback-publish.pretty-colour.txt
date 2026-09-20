@@ -1,0 +1,4 @@
+[1mpublish[0m
+
+  Published notes as Version 1.
+  Category: misc (fallback).

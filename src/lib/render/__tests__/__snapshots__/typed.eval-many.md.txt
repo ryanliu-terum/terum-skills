@@ -1,0 +1,26 @@
+## Eval — batch
+**Evaluated 1 of 2; 1 failed.**
+
+### Requested
+
+| Skill |
+|---|
+| tdd |
+| notes |
+
+> ❌ 1 of 2 evals failed. (partial result above)
+
+**Notes**
+- Stopped after 1 of 2: a declined "Continue?" queued the rest for later.
+- ── tdd ──
+- verdict: PASS
+- ✓ tdd
+- ── notes ──
+- verdict: FAIL
+- ✗ notes: judge failed
+
+**Next:** `/eval-report tdd` · `/eval-report notes`
+
+--- stderr ---
+1 of 2 evals failed.
+--- exit 1 ---

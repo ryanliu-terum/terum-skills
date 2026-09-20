@@ -1,0 +1,54 @@
+[1mterum-skills 0.16.0[0m
+
+[1mTeam acme — you are @seed[0m
+  repository:     https://github.com/acme/team
+  clone:          [32m✓ ok[0m
+  synced:         [33m⚠ today stale[0m
+  membership:     active
+  shared skills:  3
+  policy license: UNLICENSED
+  categories:     ops, engineering, debugging
+
+[1mMembers (3)[0m
+╭─────────────┬────────────┬───────────┬─────────╮
+│ [1mHandle     [0m │ [1mName      [0m │ [1mRole     [0m │ [1mJoined [0m │
+├─────────────┼────────────┼───────────┼─────────┤
+│ @mira       │ Mira Chen  │ —         │ 12d ago │
+│ @ravi       │ Ravi Patel │ Debugging │ 12d ago │
+│ @seed (you) │ Seed       │ Platform  │ 12d ago │
+╰─────────────┴────────────┴───────────┴─────────╯
+
+[1mPending[0m
+╭─────────┬──────────┬────────┬─────────┬─────────╮
+│ [1mOp     [0m │ [1mSkill id[0m │ [1mScope [0m │ [1mVersion[0m │ [1mStarted[0m │
+├─────────┼──────────┼────────┼─────────┼─────────┤
+│ install │ 33333333 │ global │ —       │ 1d ago  │
+╰─────────┴──────────┴────────┴─────────┴─────────╯
+
+[1mPlacements[0m
+╭───────────────────────────────┬──────┬───────────┬────────┬─────────╮
+│ [1mPath                         [0m │ [1mTeam[0m │ [1mVersion  [0m │ [1mScope [0m │ [1mPlaced [0m │
+├───────────────────────────────┼──────┼───────────┼────────┼─────────┤
+│ ~/.claude/skills/deploy-check │ acme │ Version 1 │ global │ 24d ago │
+│ ~/.claude/skills/tdd          │ acme │ Version 1 │ global │ 23d ago │
+╰───────────────────────────────┴──────┴───────────┴────────┴─────────╯
+
+[1mIdentity[0m
+  handle: seed
+  name:   Seed
+  email:  seed@example.com
+  github: seed
+
+[1mTools[0m
+  git: [32m✓ installed[0m
+  gh:  [31m✗ not found[0m
+
+[1mArchitecture[0m
+  host: arm64
+  node: x64
+
+[1mNotes[0m
+  •   From the local clone; GitHub access is not checked.
+  •   Evaluated skills: not yet available
+
+[1mNext:[0m [36m/terum-skills install 33333333-3333-4333-8333-333333333333[0m · [36m/sync-skills[0m

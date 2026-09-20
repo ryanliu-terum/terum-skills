@@ -9,18 +9,19 @@ import { canonicalLedger, isSkillFolder, localSkillCounts, localRootLabel, local
 import { snapshotSkillDirectory } from '../lib/placer/vendor/skillhub/skill-fingerprint.js';
 import { printable, type SourceProblem } from '../lib/skill-source.js';
 import { canonicalDigest, readPerson, skillRecords } from '../lib/skills.js';
-import { ConfigStore, createConfigStore, selectTeam } from '../lib/config.js';
+import { createConfigStore, selectTeam, type ConfigStore } from '../lib/config.js';
 import { normalizeAuthor } from '../lib/guard.js';
-import { Prompter } from '../lib/prompt.js';
-import { installCounts, installersById, type Installer, isActivePerson, latestChange, readPeople, skillEndorsement } from '../lib/readme.js';
+import type { Prompter } from '../lib/prompt.js';
+import { installCounts, installersById, type Installer, isActivePerson, latestChange, type readPeople, skillEndorsement } from '../lib/readme.js';
 import { parseVersionFolder, versionFolderName, versionLabel } from '../lib/versions.js';
 import { NO_TEAM_RUNNER_HANDLE, receiptSchema, type Receipt } from '../lib/evals/receipt.js';
 import { localReceiptsFor, receiptFiles, selectCardEval } from '../lib/evals/receipt-store.js';
 import { versionDigests, type VersionDigest } from '../lib/version-digests.js';
-import { fromError, Result, success } from '../lib/result.js';
-import { Runner, systemRunner } from '../lib/runner.js';
+import { failure, fromError, success, type Result } from '../lib/result.js';
+import { systemRunner, type Runner } from '../lib/runner.js';
 import { type Config, handleSchema, parseJson, parseOrExplain, type Person, teamSchema } from '../lib/schema.js';
 import { githubOwnerRepo, repositoryUrl } from '../lib/remote.js';
+import { resolveSkillRef } from '../lib/resolve-ref.js';
 
 import { skillVersions } from '../lib/teamRepo.js';
 import type { SkillVersion } from '../lib/versions.js';
@@ -28,7 +29,7 @@ import type { SkillVersion } from '../lib/versions.js';
 /** Fingerprint walks are latency-bound; overlap them (W-02). */
 const FINGERPRINT_CONCURRENCY = 8;
 
-export interface LsArgs extends WithForm { local?: boolean; home?: string; cwd?: string; kind?: 'all' | 'member' | 'project'; value?: string; team?: string; config?: ConfigStore; runner?: Runner; }
+export interface LsArgs extends WithForm { local?: boolean; home?: string; cwd?: string; kind?: 'all' | 'member' | 'project' | 'skill'; value?: string; team?: string; config?: ConfigStore; runner?: Runner; }
 /**
  * The display facts of the selected receipt at a published skill version — a strict subset of
  * the receipt, under the receipt's own field names so a shell maps it with the same code it already
@@ -103,9 +104,12 @@ export interface LsPerson {
    */
   local_skills: number | null;
 }
+/** D11: which narrowed read produced this value — a shell cannot tell a project view from the whole team by shape alone. */
+export type LsSelection = { kind: 'member'; handle: string } | { kind: 'project'; name: string } | { kind: 'skill'; name: string; source: 'team' | 'library'; path?: string };
+export interface LsMember { handle: string; displayName: string; role: string | null; projects: readonly string[]; installed: { id: string; name: string | null; version: string | null; scope: Person['installed'][number]['scope']; since: string }[]; profile: { id: string; name: string; version: string; added: string; via: 'publish' | 'install' }[]; }
 export interface LsResult { local?: LocalSection[]; roster: readonly { handle: string; active: boolean; role: string | null; projects: readonly string[] }[]; skills: readonly LsSkill[]; problems: readonly { source: string; message: string }[];
   /** §8.4: emitted on the `kind:'all'` team read only; `member?` still serves the single-member view. */
-  people?: readonly LsPerson[]; projects?: readonly { name: string; skills: readonly string[]; remotes: readonly string[]; [k: string]: unknown }[]; member?: { installed: { id: string; scope: Person['installed'][number]['scope']; since: string }[]; handle: string; role: string | null; projects: readonly string[] }; }
+  people?: readonly LsPerson[]; projects?: readonly { name: string; skills: readonly string[]; remotes: readonly string[]; [k: string]: unknown }[]; member?: LsMember; selection?: LsSelection; viewer?: { handle: string; team: string }; }
 
 /** One byline join for every caller that attributes a skill's managed author to a team handle. */
 export function authorBylines(people: readonly Pick<Person, 'display_name' | 'email' | 'handle'>[]): Map<string, string> {
@@ -116,18 +120,19 @@ export function authorBylines(people: readonly Pick<Person, 'display_name' | 'em
 export async function run(args: LsArgs, io: Prompter): Promise<Result<LsResult>> {
   try {
     if (args.local && (args.kind === 'member' || args.kind === 'project')) throw new Error('--local cannot be combined with member or project.');
+    if (args.local && args.kind === 'skill') throw new Error('--local cannot be combined with skill; ls skill reads both the team and your Library.');
     if (args.local && args.team) throw new Error('--local lists every configured team; drop --team.');
     const store = args.config ?? createConfigStore();
-    if (args.local) return await showLocal(store, args.home ?? homedir(), io, args.runner ?? systemRunner);
-    const [teamName] = selectTeam((await store.read()).teams, args.team, args.form);
-    const clone = store.teamClone(teamName);
     const runner = args.runner ?? systemRunner;
+    if (args.local) return await showLocal(store, args.home ?? homedir(), io, runner);
+    if (args.kind === 'skill') return await showSkill(args, store, io, runner);
+    const [teamName, binding] = selectTeam((await store.read()).teams, args.team, args.form);
+    const viewer = { handle: binding.handle, team: teamName };
+    const clone = store.teamClone(teamName);
     const team = parseJson(teamSchema, await readFile(join(clone, 'team.json'), 'utf8'), 'team.json');
     const projects = Object.entries(team.projects).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).map(([name, project]) => ({ ...project, name }));
     const problems: { source: string; message: string }[] = [];
-    const report = (source: string, message: string) => { problems.push({ source, message }); io.print(`${source}: ${message}`); };
-    const people = (await Promise.all((await readdir(join(clone, 'people'))).filter((file) => file.endsWith('.json')).sort().map((file) => readPerson(clone, file.slice(0, -5)).catch((error: unknown) => { report(`people/${file}`, error instanceof Error ? error.message : String(error)); return undefined; })))).filter((person) => person !== undefined);
-    const roster = people.sort((a, b) => a.handle.localeCompare(b.handle)).map((person) => ({ handle: person.handle, active: isActivePerson(person, team.archived), role: person.role ?? null, projects: person.projects ?? [] }));
+    const { people, roster } = await readTeamPeople(clone, team, io, problems);
     // §8.4: built from the same parsed people the roster and the install counts come from — no extra
     // read, no second process, and one shape every marketplace reader shares.
     const bylines = authorBylines(people);
@@ -151,21 +156,28 @@ export async function run(args: LsArgs, io: Prompter): Promise<Result<LsResult>>
     }
     // `return await`: a returned promise leaves the try block before it settles, so a throw inside
     // showMember/showProject would reject run() instead of becoming the failure Result every verb returns.
-    if (args.kind === 'member') return await showMember(args.value, people, skills, io, roster, projects, problems);
-    if (args.kind === 'project') return await showProject(args.value, team, skills, io, roster, projects, problems);
+    if (args.kind === 'member') return await showMember(args.value, people, skills, io, roster, projects, problems, viewer);
+    if (args.kind === 'project') return await showProject(args.value, team, skills, io, roster, projects, problems, viewer);
     io.print('Members:');
     for (const member of roster) io.print(`  ${member.handle}${member.active ? '' : ' (inactive)'}`);
     io.print('Skills:');
     for (const skill of skills) io.print(format(skill));
     io.print(`Local skills: ${invocation(args.form, 'ls --local')}`);
-    return success({ roster, skills, projects, problems, people: personRows });
+    return success({ roster, skills, projects, problems, people: personRows, viewer });
   } catch (error) { return fromError(error); }
 }
 
-async function listSkills(team: ReturnType<typeof teamSchema.parse>, people: Awaited<ReturnType<typeof readPeople>>, clone: string, runner: Runner, io: Prompter, teamName: string, problems: { source: string; message: string }[]): Promise<LsSkill[]> {
+async function readTeamPeople(clone: string, team: ReturnType<typeof teamSchema.parse>, io: Prompter, problems: { source: string; message: string }[]): Promise<{ people: Awaited<ReturnType<typeof readPeople>>; roster: LsResult['roster'] }> {
+  const report = (source: string, message: string) => { problems.push({ source, message }); io.print(`${source}: ${message}`); };
+  const people = (await Promise.all((await readdir(join(clone, 'people'))).filter((file) => file.endsWith('.json')).sort().map((file) => readPerson(clone, file.slice(0, -5)).catch((error: unknown) => { report(`people/${file}`, error instanceof Error ? error.message : String(error)); return undefined; })))).filter((person) => person !== undefined);
+  const roster = people.sort((a, b) => a.handle.localeCompare(b.handle)).map((person) => ({ handle: person.handle, active: isActivePerson(person, team.archived), role: person.role ?? null, projects: person.projects ?? [] }));
+  return { people, roster };
+}
+
+async function listSkills(team: ReturnType<typeof teamSchema.parse>, people: Awaited<ReturnType<typeof readPeople>>, clone: string, runner: Runner, io: Prompter, teamName: string, problems: { source: string; message: string }[], only?: string): Promise<LsSkill[]> {
   // Preserve ls's fail-closed root boundary; skillRecords treats an absent root as an empty team.
   await readdir(join(clone, 'skills'));
-  const records = await skillRecords(clone, teamName, { onProblem: ({ name, message }) => { problems.push({ source: `skills/${name}`, message }); io.print(`${name}: ${message}`); } });
+  const records = (await skillRecords(clone, teamName, { onProblem: ({ name, message }) => { problems.push({ source: `skills/${name}`, message }); io.print(`${name}: ${message}`); } })).filter((record) => only === undefined || record.name === only);
   const counts = installCounts(people), installers = installersById(people);
   // §8.4: `skillRecords` already resolved each skill's latest version folder, and a name holding none
   // never reaches here — so the old `skillVersions` spawn and the `unresolved` row it fed are gone.
@@ -213,7 +225,7 @@ async function cardReceipt(clone: string, id: string, versions: readonly SkillVe
   const { model, k, cc_version, timestamp, runner_handle } = found.provenance;
   return { ...fields, receipt: { run_id: found.run_id, verdict: found.verdict, execution_status: found.execution_status, expected_rows: found.expected_rows, scored_rows: found.scored_rows, ...(found.dropped_cases === undefined ? {} : { dropped_cases: found.dropped_cases }), comparisons: found.comparisons, arm_scores: found.arm_scores, provenance: { model, k, cc_version, timestamp, runner_handle } } };
 }
-async function showMember(handle: string | undefined, people: Awaited<ReturnType<typeof readPeople>>, skills: readonly LsSkill[], io: Prompter, roster: LsResult['roster'], projects: NonNullable<LsResult['projects']>, problems: LsResult['problems']): Promise<Result<LsResult>> {
+async function showMember(handle: string | undefined, people: Awaited<ReturnType<typeof readPeople>>, skills: readonly LsSkill[], io: Prompter, roster: LsResult['roster'], projects: NonNullable<LsResult['projects']>, problems: LsResult['problems'], viewer: LsResult['viewer']): Promise<Result<LsResult>> {
   if (!handle) throw new Error('Specify a member handle.');
   const normalizedHandle = parseOrExplain(handleSchema, handle, 'member handle');
   const member = people.find((person) => person.handle === normalizedHandle);
@@ -223,15 +235,73 @@ async function showMember(handle: string | undefined, people: Awaited<ReturnType
   io.print(`Member ${member.handle}:`);
   io.print(`  Authored: ${authored.map((skill) => skill.name).join(', ') || '—'}`);
   io.print(`  Installed: ${member.installed.map((item) => namesById.get(item.id) ?? item.id).join(', ') || '—'}`);
-  return success({ roster, skills: authored, projects, problems, member: { installed: member.installed.map(({id,scope,since}) => ({id,scope,since})), handle: member.handle, role: member.role ?? null, projects: member.projects ?? [] } });
+  return success({ roster, skills: authored, projects, problems, viewer, selection: { kind: 'member', handle: member.handle }, member: {
+    handle: member.handle, displayName: member.display_name, role: member.role ?? null, projects: member.projects ?? [],
+    installed: member.installed.map(({ id, version, scope, since }) => ({ id, name: namesById.get(id) ?? null, version, scope, since })),
+    profile: (member.profile ?? []).map(({ id, name, version, added, via }) => ({ id, name, version, added, via })),
+  } });
 }
-async function showProject(projectName: string | undefined, team: ReturnType<typeof teamSchema.parse>, skills: readonly LsSkill[], io: Prompter, roster: LsResult['roster'], projects: NonNullable<LsResult['projects']>, problems: LsResult['problems']): Promise<Result<LsResult>> {
+async function showProject(projectName: string | undefined, team: ReturnType<typeof teamSchema.parse>, skills: readonly LsSkill[], io: Prompter, roster: LsResult['roster'], projects: NonNullable<LsResult['projects']>, problems: LsResult['problems'], viewer: LsResult['viewer']): Promise<Result<LsResult>> {
   if (!projectName || !Object.hasOwn(team.projects, projectName)) throw new Error(`No project named ${projectName ?? ''}.`);
   const projectIds = new Set(team.projects[projectName]!.skills);
   const selected = skills.filter((skill) => projectIds.has(skill.id));
   io.print(`Project ${projectName}:`);
   for (const skill of selected) io.print(format(skill));
-  return success({ roster, skills: selected, projects, problems });
+  return success({ roster, skills: selected, projects, problems, viewer, selection: { kind: 'project', name: projectName } });
+}
+
+function skillSelection(name: string, source: 'team' | 'library', row: LocalSection['rows'][number] | undefined): LsSelection {
+  return { kind: 'skill', name, source, ...(row === undefined ? {} : { path: row.path }) };
+}
+
+/** D10: one skill, whole — from the team record when the name is a team skill, else from the Library row. Resolution through §6.1, rungs 0–4. */
+async function showSkill(args: LsArgs, store: ConfigStore, io: Prompter, runner: Runner): Promise<Result<LsResult>> {
+  const config = await store.read();
+  const home = args.home ?? homedir();
+  const selected = args.team !== undefined || Object.keys(config.teams).length > 0 ? selectTeam(config.teams, args.team, args.form) : null;
+  const teamName = selected === null ? null : selected[0];
+  const viewer = selected === null ? undefined : { handle: selected[1].handle, team: selected[0] };
+  const clone = teamName === null ? null : store.teamClone(teamName);
+  const resolved = await resolveSkillRef({
+    ref: args.value, cwd: args.cwd ?? process.cwd(), home, config, stateRoot: store.root, rungs: 4, print: (line) => io.print(line),
+    ...(clone === null || teamName === null ? {} : { team: { clone, name: teamName } }),
+    miss: (ref) => `No skill named ${ref}.`,
+  });
+  if (!resolved.ok) return failure(resolved.error);
+  const name = resolved.value.name;
+  const library = await collectLocal(store, home, io, runner, name);
+  const local = library.sections.map((section) => ({ ...section, rows: section.rows.filter((row) => row.name === name), notOffered: section.notOffered.filter((entry) => entry.name === name) })).filter((section) => section.rows.length > 0 || section.notOffered.length > 0);
+  const fallbackRow = local.find((section) => section.rows.length > 0)?.rows[0];
+  const resolvedLibraryPath = resolved.value.source === 'library' ? resolved.value.match.path : undefined;
+  const row = resolvedLibraryPath !== undefined
+    ? local.flatMap((section) => section.rows).find((candidate) => candidate.path === resolvedLibraryPath) ?? fallbackRow
+    : fallbackRow;
+  if (clone !== null && teamName !== null && viewer !== undefined) {
+    const team = parseJson(teamSchema, await readFile(join(clone, 'team.json'), 'utf8'), 'team.json');
+    const problems: { source: string; message: string }[] = [];
+    const { people, roster } = await readTeamPeople(clone, team, io, problems);
+    const skills = await listSkills(team, people, clone, runner, io, teamName, problems, name);
+    const record = skills[0];
+    if (record !== undefined) {
+      const projects = Object.entries(team.projects).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).map(([projectName, project]) => ({ ...project, name: projectName })).filter((project) => project.skills.includes(record.id));
+      io.print(format(record));
+      io.print(record.description);
+      if (record.body !== null && record.body.trim() !== '') io.print(record.body.trimEnd());
+      return success({ roster, skills: [record], projects, problems, local, viewer, selection: skillSelection(name, 'team', row) });
+    }
+    if (row === undefined) return failure(`No skill named ${args.value ?? name}.`);
+    printLibraryDetail(io, row);
+    return success({ roster, skills: [], projects: [], problems, local, viewer, selection: skillSelection(name, 'library', row) });
+  }
+  if (row === undefined) return failure(`No skill named ${args.value ?? name}.`);
+  printLibraryDetail(io, row);
+  return success({ roster: [], skills: [], problems: [], local, viewer, selection: skillSelection(name, 'library', row) });
+}
+
+function printLibraryDetail(io: Prompter, row: LocalSection['rows'][number]): void {
+  io.print(`  ${printable(row.name)} — ${printable(row.state)}${row.problem === undefined ? '' : `; source problem: ${printable(row.problem)}`}; path: ${printable(row.path)}`);
+  if (row.description !== null) io.print(row.description);
+  if (row.body !== null && row.body !== undefined && row.body.trim() !== '') io.print(row.body.trimEnd());
 }
 /** One skill per line, the §6 `ls` format; `search` prints hits through the same function. */
 /** D1: the printed line is prose, so the folder is rendered here — the DTO stays an address. */
@@ -375,8 +445,8 @@ function matchVersion(candidates: readonly (VersionDigest & { team: string })[],
   return { match: sorted[0]!, ambiguous: false };
 }
 
-/** Local discovery is independent of team selection, and only enriches ledger references. */
-async function showLocal(store: ConfigStore, home: string, io: Prompter, runner: Runner): Promise<Result<LsResult>> {
+/** The Library read without its report: sections in root order, plus the discovery problems the report ends with. */
+export async function collectLocal(store: ConfigStore, home: string, io: Prompter, runner: Runner, only?: string): Promise<{ sections: LocalSection[]; discoveryProblems: { path: string; reason: string }[] }> {
   const config = await store.read();
   const ledger = await canonicalLedger(config);
   // §7.2: no ledger-inferred roots and no cwd root. The Library shows the projects you added, and
@@ -436,15 +506,15 @@ async function showLocal(store: ConfigStore, home: string, io: Prompter, runner:
     const overrides = await loadOverrides(overrideFilesFor({ scope: root.scope, repoRoot: root.repoRoot }, home).read);
     const local: LocalSection = { ...root, root: inventory.root, rootState: inventory.rootState, label: localRootLabel(root), remote: remotes[index]!, counts: localSkillCounts(inventory), rows: [], notOffered: [], problems: [...inventory.problems, ...overrides.problems] };
     sections.push(local);
-    io.print(`Local Claude Code skills (${printable(inventory.root)}; ${inventory.scope}${root.registered ? '; registered' : ''}${root.parent === undefined ? '' : `; sub-project of ${printable(root.parent)}`}):`);
-    if (root.repoRoot !== undefined) io.print(`  GitHub: ${local.remote === null ? 'not connected' : local.remote.slug === null ? `not connected (origin is ${printable(local.remote.url)})` : printable(local.remote.slug)}`);
+    // `only`: one folder's row without the fingerprint and digest cost of every other folder; counts stay the root's.
+    const entries = only === undefined ? inventory.entries : inventory.entries.filter((entry) => entry.name === only);
     // Recursive fingerprint reads dominate latency on UNC roots; retain row order after the wave.
-    const healthNeeded = inventory.entries.filter((entry) => entry.placement !== undefined || entry.inspection.kind === 'candidate');
+    const healthNeeded = entries.filter((entry) => entry.placement !== undefined || entry.inspection.kind === 'candidate');
     const healths = new Map<LocalEntry, LocalHealth>();
     const computed = await mapWithConcurrency(healthNeeded, FINGERPRINT_CONCURRENCY, (entry) => healthOf(entry));
     healthNeeded.forEach((entry, index) => healths.set(entry, computed[index]!));
-    const evals = await Promise.all(inventory.entries.map(evalOf));
-    for (const [entryIndex, entry] of inventory.entries.entries()) {
+    const evals = await Promise.all(entries.map(evalOf));
+    for (const [entryIndex, entry] of entries.entries()) {
       const tracked = entry.placement !== undefined;
       const inspection = entry.inspection;
       // §7.4(b) / D16: a plain file is not a skill folder — no row, no card, no count (isSkillFolder). A
@@ -464,16 +534,31 @@ async function showLocal(store: ConfigStore, home: string, io: Prompter, runner:
         local.problems.push({ path: entry.path, reason: inspection.reason });
       }
     }
+  }
+  return { sections, discoveryProblems: discovery.problems };
+}
+
+/** The Library report, exactly the lines `ls --local` has always printed, in the same order. */
+export function printLocal(io: Prompter, sections: readonly LocalSection[], discoveryProblems: readonly { path: string; reason: string }[]): void {
+  for (const local of sections) {
+    io.print(`Local Claude Code skills (${printable(local.root)}; ${local.scope}${local.registered ? '; registered' : ''}${local.parent === undefined ? '' : `; sub-project of ${printable(local.parent)}`}):`);
+    if (local.repoRoot !== undefined) io.print(`  GitHub: ${local.remote === null ? 'not connected' : local.remote.slug === null ? `not connected (origin is ${printable(local.remote.url)})` : printable(local.remote.slug)}`);
     for (const row of local.rows) io.print(`  ${printable(row.name)} — ${printable(row.state)}${row.problem === undefined ? '' : `; source problem: ${printable(row.problem)}`}; path: ${printable(row.path)}`);
     if (local.notOffered.length) {
       io.print('Could not inspect as skills:');
       for (const entry of local.notOffered) io.print(`  ${printable(entry.name)} — ${printable(entry.detail)}; path: ${printable(entry.path)}`);
     }
-    if (inventory.rootState === 'absent') io.print(`  none (${printable(inventory.root)} does not exist)`);
-    else if (inventory.rootState === 'scanned' && !inventory.entries.some(isSkillFolder)) io.print('  none');
+    if (local.rootState === 'absent') io.print(`  none (${printable(local.root)} does not exist)`);
+    else if (local.rootState === 'scanned' && local.counts.skillFolders === 0) io.print('  none');
     for (const problem of local.problems) io.print(`Could not inspect ${printable(problem.path)}: ${printable(problem.reason)}`);
     io.print(`  ${local.counts.skillFolders} skill ${local.counts.skillFolders === 1 ? 'folder' : 'folders'} (${local.counts.connectable} connectable)`);
   }
-  for (const problem of discovery.problems) io.print(`Could not inspect ${printable(problem.path)}: ${printable(problem.reason)}`);
+  for (const problem of discoveryProblems) io.print(`Could not inspect ${printable(problem.path)}: ${printable(problem.reason)}`);
+}
+
+/** Local discovery is independent of team selection, and only enriches ledger references. */
+async function showLocal(store: ConfigStore, home: string, io: Prompter, runner: Runner): Promise<Result<LsResult>> {
+  const { sections, discoveryProblems } = await collectLocal(store, home, io, runner);
+  printLocal(io, sections, discoveryProblems);
   return success({ roster: [], skills: [], problems: [], local: sections });
 }

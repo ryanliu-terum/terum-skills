@@ -1,0 +1,13 @@
+[1mInstall[0m
+1 skill placed
+
+╭──────────┬───────────┬───────────────────────────────┬──────┬──────────╮
+│ [1mId      [0m │ [1mVersion  [0m │ [1mPath                         [0m │ [1mTeam[0m │ [1mProfiled[0m │
+├──────────┼───────────┼───────────────────────────────┼──────┼──────────┤
+│ 11111111 │ Version 2 │ ~/.claude/skills/deploy-check │ acme │ [2m— no[0m     │
+╰──────────┴───────────┴───────────────────────────────┴──────┴──────────╯
+
+[1mNotes[0m
+  • Your copy is kept at <HOME>/.claude/old-skills/deploy-check.
+
+[1mNext:[0m [36m/list-skills --local[0m

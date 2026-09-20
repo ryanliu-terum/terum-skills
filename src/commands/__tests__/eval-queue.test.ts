@@ -52,7 +52,7 @@ it('drains with pinned versions and one shared probe', async () => {
     expect(await args.preflight?.()).toEqual(success({ ccVersion: 'test' }));
     await Promise.resolve(); return success(result);
   });
-  expect(await runQueue({ config, drain: true, preflight, evaluate }, io)).toEqual(success({ items: [], attempted: 2, completed: 2, failures: [] }));
+  expect(await runQueue({ config, drain: true, preflight, evaluate }, io)).toEqual(success({ items: [], attempted: 2, completed: 2, failures: [], outcomes: [{ skill: 'alpha', team: 'team', ok: true }, { skill: 'beta', team: 'team', ok: true }] }));
   expect(evaluate).toHaveBeenCalledTimes(2); expect(preflight).toHaveBeenCalledTimes(1); expect((await readEvalQueue(config.root)).items).toEqual([]);
 });
 it('retains failures with lastError, continues to the next item, and counts attempts toward max', async () => {
@@ -60,6 +60,7 @@ it('retains failures with lastError, continues to the next item, and counts atte
   const evaluate = vi.fn(async (args: EvalArgs) => args.ref === 'alpha' ? failure('probe failed') : success(result));
   const outcome = await runQueue({ config, drain: true, max: 2, evaluate }, io);
   expect(outcome).toMatchObject({ ok: false, value: { attempted: 2, completed: 1, items: [{ ...item(), lastError: 'probe failed' }, item('gamma')] } });
+  expect(outcome.value?.outcomes).toEqual([{ skill: 'alpha', team: 'team', ok: false, error: 'probe failed' }, { skill: 'beta', team: 'team', ok: true }]);
   expect(evaluate).toHaveBeenCalledTimes(2);
 });
 it.each(['declined', 'thrown'] as const)('keeps an item after %s evaluation', async mode => {
@@ -187,7 +188,7 @@ it('§6.2/§6.6: bytes that already carry a LOCAL receipt are dropped before pro
 });
 it('an empty window selection preserves other queued items and prints no zero-size batch',async()=>{
  const {config,io}=await fixture();await enqueueEvals(config.root,[item('later','later')]);const evaluate=vi.fn();
- expect(await runQueue({config,drain:true,window:'overnight',evaluate},io)).toEqual(success({items:[item('later','later')],attempted:0,completed:0,failures:[]}));expect(io.lines).toEqual(['No queued evals.']);expect(evaluate).not.toHaveBeenCalled();
+ expect(await runQueue({config,drain:true,window:'overnight',evaluate},io)).toEqual(success({items:[item('later','later')],attempted:0,completed:0,failures:[],outcomes:[]}));expect(io.lines).toEqual(['No queued evals.']);expect(evaluate).not.toHaveBeenCalled();
 });
 
 it('D61: a dropped queue item is named, not silently discarded', async () => {

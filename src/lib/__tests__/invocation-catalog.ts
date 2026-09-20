@@ -4,6 +4,42 @@
  */
 export const invocationLiteralCatalog: readonly { file: string; line: number; policy: 'routed' | 'fixed' | 'prose' | 'not-a-hint'; pattern: string }[] = [
   {
+    "file": "src/lib/render/cells.ts",
+    "line": 57,
+    "policy": "fixed",
+    "pattern": "return item.skill === undefined ? `${sigil}terum-skills ${item.verb}${tail}` : `${sigil}${item.skill}${tail}`;"
+  },
+  {
+    "file": "src/lib/render/board.ts",
+    "line": 31,
+    "policy": "prose",
+    "pattern": "/** A next step: a named skill (`/skill-info x`, `$skill-info x`) or a verb (`/terum-skills install x`); `raw` is a command that is not a terum-skills verb. */"
+  },
+  {
+    "file": "src/lib/render/verbs/update.ts",
+    "line": 7,
+    "policy": "not-a-hint",
+    "pattern": "const b = board(`terum-skills ${running ?? 'version unknown'}`);"
+  },
+  {
+    "file": "src/lib/render/verbs/status.ts",
+    "line": 20,
+    "policy": "not-a-hint",
+    "pattern": "const b = board(version === null ? 'terum-skills (version unknown)' : `terum-skills ${version}`);"
+  },
+  {
+    "file": "src/lib/render/verbs/status.ts",
+    "line": 57,
+    "policy": "not-a-hint",
+    "pattern": "/^terum-skills /, /^Team .+ \\((you are|configured handle) @/, /^  Repository: /, /^  Clone: /,"
+  },
+  {
+    "file": "src/commands/install.ts",
+    "line": 40,
+    "policy": "prose",
+    "pattern": "/** Where that bootstrap offers the bundled terum-skills skills (test knob). */"
+  },
+  {
     "file": "src/cli.ts",
     "line": 46,
     "policy": "not-a-hint",
@@ -11,9 +47,9 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
   },
   {
     "file": "src/cli.ts",
-    "line": 206,
+    "line": 168,
     "policy": "prose",
-    "pattern": "program.command('uninstall').description('Remove terum-skills from this machine: your team (placed skills, local clone, cache), the session-start hook and the /terum-skills Claude Code skill if present, and ~/.terum/skills except recovery data; then prints the package-manager step').allowExcessArguments().action(async (_options: Record<string, never>, command: Command) => execute(async (io) => command.args.length ? failure(`To remove a skill, use \\`${invocation(context.form, 'uninstall-skill <ref>')}\\`.`) : active.uninstallMachine({ launch: context.launch, form: context.form }, io), { verb: 'uninstall', notices: true }));"
+    "pattern": "program.command('uninstall').description('Remove terum-skills from this machine: your team (placed skills, local clone, cache), the session-start hook and the terum-skills skills for Claude Code and Codex if present, and ~/.terum/skills except recovery data; then prints the package-manager step').allowExcessArguments().action(async (_options: Record<string, never>, command: Command) => execute(async (io) => command.args.length ? failure(`To remove a skill, use \\`${invocation(context.form, 'uninstall-skill <ref>')}\\`.`) : active.uninstallMachine({ launch: context.launch, form: context.form }, io), { verb: 'uninstall', notices: true }));"
   },
   {
     "file": "src/index.ts",
@@ -229,13 +265,13 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "file": "src/lib/skill-source.ts",
     "line": 58,
     "policy": "prose",
-    "pattern": "// The /terum-skills Claude Code skill ships inside this package and is placed by setup; it is not a"
+    "pattern": "// The terum-skills skills ship inside this package and are placed by setup; none is a team skill,"
   },
   {
     "file": "src/lib/skill-source.ts",
     "line": 60,
     "policy": "not-a-hint",
-    "pattern": "if (isManagedFrontmatter(parsed)) return reject('managed-wrapper', 'the /terum-skills Claude Code skill that ships with terum-skills; not a team skill', 'This folder is the /terum-skills Claude Code skill that ships with terum-skills and is placed by setup; it cannot be connected to a team.');"
+    "pattern": "if (isManagedFrontmatter(parsed)) return reject('managed-wrapper', 'a terum-skills skill that ships with terum-skills; not a team skill', 'This folder is a terum-skills skill that ships with terum-skills and is placed by setup; it cannot be connected to a team.');"
   },
   {
     "file": "src/lib/teamRepo.ts",
@@ -311,117 +347,69 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
   },
   {
     "file": "src/lib/wrapper.ts",
-    "line": 13,
-    "policy": "prose",
-    "pattern": "* The `/terum-skills` Claude Code skill: the SKILL.md that teaches Claude Code which verbs it may"
-  },
-  {
-    "file": "src/lib/wrapper.ts",
-    "line": 15,
-    "policy": "prose",
-    "pattern": "* `scripts/bundle-skill.mjs` into dist/claude/skills/terum-skills/SKILL.md at build time, from the"
-  },
-  {
-    "file": "src/lib/wrapper.ts",
-    "line": 16,
-    "policy": "prose",
-    "pattern": "* one canonical copy at .claude/skills/terum-skills/SKILL.md) and is placed under the user's global"
-  },
-  {
-    "file": "src/lib/wrapper.ts",
-    "line": 22,
-    "policy": "not-a-hint",
-    "pattern": "export const WRAPPER_NAME = 'terum-skills';"
-  },
-  {
-    "file": "src/lib/wrapper.ts",
     "line": 23,
     "policy": "not-a-hint",
     "pattern": "export const MANAGED_BY = 'terum-skills';"
   },
   {
     "file": "src/lib/wrapper.ts",
-    "line": 25,
+    "line": 130,
     "policy": "not-a-hint",
-    "pattern": "export const BUNDLED_WRAPPER = join(packageRoot() ?? fileURLToPath(new URL('../../', import.meta.url)), 'dist', 'claude', 'skills', 'terum-skills', 'SKILL.md');"
+    "pattern": "if (presence.kind === 'foreign') throw new Error(`${directory} exists and is not a bundled terum-skills skill (${presence.why}); move it aside and re-run.`);"
   },
   {
     "file": "src/lib/wrapper.ts",
-    "line": 35,
-    "policy": "prose",
-    "pattern": "/** The idempotency key on parsed frontmatter: `name: terum-skills` plus `metadata.managed-by: terum-skills`. */"
-  },
-  {
-    "file": "src/lib/wrapper.ts",
-    "line": 55,
-    "policy": "prose",
-    "pattern": "* What sits at `<skillsRoot>/terum-skills`. Judged without following links (the repo's rule for"
-  },
-  {
-    "file": "src/lib/wrapper.ts",
-    "line": 94,
+    "line": 155,
     "policy": "not-a-hint",
-    "pattern": "if (bundled === null) throw new Error(`The /terum-skills Claude Code skill is not bundled in this copy of terum-skills (expected at ${options.source}).`);"
+    "pattern": "if (states.kind === 'unavailable') { io.print(`The terum-skills skills are not bundled in this copy of terum-skills (expected under ${states.bundle}); skipped.`); return 'unavailable'; }"
   },
   {
     "file": "src/lib/wrapper.ts",
-    "line": 97,
+    "line": 158,
     "policy": "not-a-hint",
-    "pattern": "if (presence.kind === 'foreign') throw new Error(`${directory} exists and is not the bundled /terum-skills skill (${presence.why}); move it aside and re-run.`);"
+    "pattern": "for (const root of roots) for (const skill of root.skills) if (skill.state === 'foreign') io.print(`${skill.directory} exists and is not a bundled terum-skills skill (${skill.why}); left alone. Move it aside and re-run setup to install the bundled one.`);"
   },
   {
     "file": "src/lib/wrapper.ts",
-    "line": 132,
+    "line": 165,
     "policy": "not-a-hint",
-    "pattern": "if (state === 'unavailable') { io.print(`The /terum-skills Claude Code skill is not bundled in this copy of terum-skills (expected at ${options.source}); skipped.`); return 'unavailable'; }"
+    "pattern": "if (!(await io.confirm(`Install the terum-skills skills for ${hosts} so ${targets.length > 1 ? 'they' : 'it'} can run terum-skills for you? (writes ${where})`))) {"
   },
   {
     "file": "src/lib/wrapper.ts",
-    "line": 133,
+    "line": 166,
     "policy": "not-a-hint",
-    "pattern": "if (state === 'foreign') { io.print(`${directory} exists and is not the bundled /terum-skills skill; left alone. Move it aside and re-run setup to install the bundled one.`); return 'foreign'; }"
+    "pattern": "io.print('Skipped the terum-skills skills; re-run setup to install them later.');"
   },
   {
     "file": "src/lib/wrapper.ts",
-    "line": 134,
+    "line": 179,
     "policy": "not-a-hint",
-    "pattern": "if (state === 'current') { io.print(`The /terum-skills Claude Code skill at ${directory} is current.`); return 'present'; }"
+    "pattern": "if (written.length) io.print(`Installed the terum-skills skills at ${root.root}: ${listNames(written)}.`);"
   },
   {
     "file": "src/lib/wrapper.ts",
-    "line": 135,
+    "line": 180,
     "policy": "not-a-hint",
-    "pattern": "if (state === 'outdated') { await installWrapper(options); io.print(`Updated the /terum-skills Claude Code skill at ${directory}.`); return 'replaced'; }"
+    "pattern": "if (refreshed.length) io.print(`Updated the terum-skills skills at ${root.root}: ${listNames(refreshed)}.`);"
   },
   {
     "file": "src/lib/wrapper.ts",
-    "line": 136,
+    "line": 185,
     "policy": "not-a-hint",
-    "pattern": "if (!(await io.confirm(`Install the /terum-skills Claude Code skill so Claude can run terum-skills for you? (writes ${directory})`))) {"
+    "pattern": "io.print(`The terum-skills skills at ${roots.map((root) => root.root).join(' and ')} are current.`);"
   },
   {
     "file": "src/lib/wrapper.ts",
-    "line": 137,
+    "line": 21,
     "policy": "not-a-hint",
-    "pattern": "io.print('Skipped the /terum-skills skill; re-run setup to install it later.');"
+    "pattern": "/** The command spelling every placed copy teaches (lib/invocation.ts pinnedPrefix); the bundled copies say `npx -y terum-skills@latest`. */"
   },
   {
     "file": "src/lib/wrapper.ts",
-    "line": 141,
+    "line": 41,
     "policy": "not-a-hint",
-    "pattern": "io.print(`Installed the /terum-skills Claude Code skill at ${directory}.`);"
-  },
-  {
-    "file": "src/lib/wrapper.ts",
-    "line": 31,
-    "policy": "not-a-hint",
-    "pattern": "/** The command spelling the placed copy teaches (lib/invocation.ts pinnedPrefix); the bundled copy says `npx -y terum-skills@latest`. */"
-  },
-  {
-    "file": "src/lib/wrapper.ts",
-    "line": 40,
-    "policy": "not-a-hint",
-    "pattern": "* The bundled manual with every `npx -y terum-skills@latest` replaced by this machine's spelling. The"
+    "pattern": "* A bundled skill with every `npx -y terum-skills@latest` replaced by this machine's spelling. The"
   },
   {
     "file": "src/lib/placer/vendor/skillhub/skill-target-lock.ts",
@@ -496,12 +484,6 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "pattern": "if (checked) io.print(`terum-skills push guard: ${checked} path(s) to ${stripRemoteCredentials(args.url)} are yours.`);"
   },
   {
-    "file": "src/commands/install.ts",
-    "line": 44,
-    "policy": "prose",
-    "pattern": "/** Where that bootstrap offers the bundled /terum-skills Claude Code skill (test knob). */"
-  },
-  {
     "file": "src/commands/invite.ts",
     "line": 86,
     "policy": "prose",
@@ -545,15 +527,15 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
   },
   {
     "file": "src/commands/refresh.ts",
-    "line": 164,
-    "policy": "prose",
-    "pattern": "notices.push('Updated your /terum-skills manual for this CLI.');"
-  },
-  {
-    "file": "src/commands/refresh.ts",
     "line": 171,
     "policy": "not-a-hint",
     "pattern": "notices.push('Updated your terum-skills edit hook for this CLI.');"
+  },
+  {
+    "file": "src/commands/refresh.ts",
+    "line": 166,
+    "policy": "not-a-hint",
+    "pattern": "if (written.length) notices.push('Updated your terum-skills skills for this CLI.');"
   },
   {
     "file": "src/commands/refresh.ts",
@@ -569,33 +551,33 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
   },
   {
     "file": "src/commands/setup.ts",
-    "line": 72,
-    "policy": "prose",
-    "pattern": "/** Where the bundled /terum-skills Claude Code skill is offered from and placed (test knob). */"
-  },
-  {
-    "file": "src/commands/setup.ts",
     "line": 91,
     "policy": "prose",
     "pattern": "'Welcome to terum-skills.',"
   },
   {
     "file": "src/commands/setup.ts",
-    "line": 93,
+    "line": 65,
     "policy": "prose",
-    "pattern": "'This wizard helps you create a team, join one, invite teammates, and offer the session hook, the /terum-skills Claude Code skill and a reminder to publish a skill after Claude edits one; re-run it any time to continue, and leave the invitation question blank to skip it.',"
+    "pattern": "/** Where the bundled terum-skills skills are offered from and placed (test knob). */"
   },
   {
     "file": "src/commands/setup.ts",
-    "line": 145,
+    "line": 83,
     "policy": "prose",
-    "pattern": "`Setup stopped here, so the project, eval, session hook, /terum-skills and edit-hook steps were not offered — run \\`${invocation(form, 'setup')}\\` again to finish.`,"
+    "pattern": "'This wizard helps you create a team, join one, invite teammates, and offer the session hook and the terum-skills skills for Claude Code and Codex and a reminder to publish a skill after Claude edits one; re-run it any time to continue, and leave the invitation question blank to skip it.',"
   },
   {
     "file": "src/commands/setup.ts",
-    "line": 508,
+    "line": 138,
     "policy": "prose",
-    "pattern": "// The /terum-skills Claude Code skill ships inside this package, and setup is the one onboarding"
+    "pattern": "`Setup stopped here, so the project, eval, session hook, terum-skills skills and edit-hook steps were not offered — run \\`${invocation(form, 'setup')}\\` again to finish.`,"
+  },
+  {
+    "file": "src/commands/setup.ts",
+    "line": 425,
+    "policy": "prose",
+    "pattern": "// The terum-skills skills ship inside this package, and setup is the one onboarding step"
   },
   {
     "file": "src/commands/status.ts",
@@ -731,27 +713,9 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
   },
   {
     "file": "src/commands/uninstallMachine.ts",
-    "line": 35,
-    "policy": "prose",
-    "pattern": "// The /terum-skills Claude Code skill setup placed: only a copy carrying our marker is ours to remove."
-  },
-  {
-    "file": "src/commands/uninstallMachine.ts",
     "line": 60,
     "policy": "prose",
     "pattern": "detail.push('terum-skills will be removed from this machine.');"
-  },
-  {
-    "file": "src/commands/uninstallMachine.ts",
-    "line": 73,
-    "policy": "not-a-hint",
-    "pattern": "if (wrapperPresence.kind === 'foreign') detail.push(`  ${wrapperDir} is not the bundled /terum-skills Claude Code skill (${wrapperPresence.why}); left alone`);"
-  },
-  {
-    "file": "src/commands/uninstallMachine.ts",
-    "line": 74,
-    "policy": "not-a-hint",
-    "pattern": "else detail.push(`  ${wrapperPresence.kind === 'managed' ? '/terum-skills Claude Code skill at' : 'No /terum-skills Claude Code skill at'} ${wrapperDir}`);"
   },
   {
     "file": "src/commands/uninstallMachine.ts",
@@ -779,21 +743,39 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
   },
   {
     "file": "src/commands/uninstallMachine.ts",
-    "line": 104,
-    "policy": "not-a-hint",
-    "pattern": "catch (error) { return failure(`${message(error)}; the /terum-skills skill was left in place and nothing else was removed`); }"
-  },
-  {
-    "file": "src/commands/uninstallMachine.ts",
-    "line": 105,
-    "policy": "not-a-hint",
-    "pattern": "if (wrapperRemoved) io.print(`Removed the /terum-skills Claude Code skill from ${wrapperDir}.`);"
-  },
-  {
-    "file": "src/commands/uninstallMachine.ts",
     "line": 111,
     "policy": "not-a-hint",
     "pattern": "try { if (await removeEditHook(editHook) === 'removed') io.print(`Removed the terum-skills edit hook from ${editHookPath} and ${editHook.settingsFile}.`); }"
+  },
+  {
+    "file": "src/commands/uninstallMachine.ts",
+    "line": 35,
+    "policy": "prose",
+    "pattern": "// The terum-skills skills setup placed under each host's skills root: only a copy carrying our marker is ours to remove."
+  },
+  {
+    "file": "src/commands/uninstallMachine.ts",
+    "line": 73,
+    "policy": "not-a-hint",
+    "pattern": "detail.push(root.managed.length ? `  terum-skills skills in ${root.root}: ${root.managed.map((skill) => skill.name).join(', ')}` : `  No terum-skills skills in ${root.root}`);"
+  },
+  {
+    "file": "src/commands/uninstallMachine.ts",
+    "line": 74,
+    "policy": "not-a-hint",
+    "pattern": "for (const entry of root.foreign) detail.push(`  ${entry.directory} is not a bundled terum-skills skill (${entry.why}); left alone`);"
+  },
+  {
+    "file": "src/commands/uninstallMachine.ts",
+    "line": 108,
+    "policy": "not-a-hint",
+    "pattern": "catch (error) { return failure(`${message(error)}; removing the terum-skills skills stopped at ${skill.directory} and the teams were left in place`); }"
+  },
+  {
+    "file": "src/commands/uninstallMachine.ts",
+    "line": 110,
+    "policy": "not-a-hint",
+    "pattern": "if (removed.length) io.print(`Removed the terum-skills skills from ${root.root}: ${removed.join(', ')}.`);"
   },
   {
     "file": "src/commands/unpublish.ts",
@@ -841,7 +823,7 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "file": ".claude/skills/terum-skills/SKILL.md",
     "line": 3,
     "policy": "prose",
-    "pattern": "description: \"Drive the terum-skills CLI from a Claude Code session: inspect the local Library or team Marketplace, fetch with sync, publish immutable skill versions, install the latest version into Global or an added project, evaluate local skills, and prepare terminal commands for project setup, skill move/rename/delete, pruning, and team administration. Use when the user wants to manage, evaluate, publish, or install skills; hand questions requiring a TTY to the user's terminal.\""
+    "pattern": "description: \"Drive the terum-skills CLI from a Claude Code or Codex session: run any verb with --format md and show its board — inspect the Library or the team Marketplace, search, fetch with sync, validate or fix a local skill, install the latest version into Global or an added project, publish a local skill as an immutable version, manage the eval queue — and prepare the verbs that belong in a terminal (project setup, skill move/copy/rename/delete, prune, reconcile, machine uninstall, team administration). Use when the user wants to manage, evaluate, publish or install skills and no narrower terum-skills skill fits.\""
   },
   {
     "file": ".claude/skills/terum-skills/SKILL.md",
@@ -851,405 +833,411 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
   },
   {
     "file": ".claude/skills/terum-skills/SKILL.md",
-    "line": 8,
+    "line": 6,
     "policy": "prose",
-    "pattern": "Run one `terum-skills` verb on the user's behalf, or prepare it for them when the CLI would"
+    "pattern": "short-description: \"Run any terum-skills verb from a session\""
   },
   {
     "file": ".claude/skills/terum-skills/SKILL.md",
-    "line": 10,
+    "line": 9,
     "policy": "prose",
-    "pattern": "skill only decides *whether* to run it here and *how* to show the result."
-  },
-  {
-    "file": ".claude/skills/terum-skills/SKILL.md",
-    "line": 12,
-    "policy": "prose",
-    "pattern": "This file ships inside the `terum-skills` npm package and is placed at"
-  },
-  {
-    "file": ".claude/skills/terum-skills/SKILL.md",
-    "line": 13,
-    "policy": "prose",
-    "pattern": "`~/.claude/skills/terum-skills/` by `terum-skills setup`. The `metadata.managed-by` marker identifies"
-  },
-  {
-    "file": ".claude/skills/terum-skills/SKILL.md",
-    "line": 14,
-    "policy": "prose",
-    "pattern": "Terum's copy. Setup can refresh it; `sync --hook` also refreshes an outdated managed copy and"
+    "pattern": "Run one `terum-skills` verb on the user's behalf and show its board, or prepare the verb for a"
   },
   {
     "file": ".claude/skills/terum-skills/SKILL.md",
     "line": 15,
     "policy": "prose",
-    "pattern": "announces `Updated your /terum-skills manual for this CLI.` A foreign copy is left alone. The placed"
+    "pattern": "eval (with the cost confirmation), eval-report, skill-status (`status` then `update`), sync-skills."
   },
   {
     "file": ".claude/skills/terum-skills/SKILL.md",
-    "line": 16,
+    "line": 18,
     "policy": "prose",
-    "pattern": "copy is written in this machine's command spelling — the bare binary of a global install, or npx"
+    "pattern": "This file ships inside the `terum-skills` npm package with those seven skills. Setup places them at"
   },
   {
     "file": ".claude/skills/terum-skills/SKILL.md",
     "line": 21,
     "policy": "prose",
+    "pattern": "`sync --hook` refreshes or adds them in a root that already holds one, announcing"
+  },
+  {
+    "file": ".claude/skills/terum-skills/SKILL.md",
+    "line": 22,
+    "policy": "prose",
+    "pattern": "`Updated your terum-skills skills for this CLI.` A foreign folder at one of those names is left alone."
+  },
+  {
+    "file": ".claude/skills/terum-skills/SKILL.md",
+    "line": 28,
+    "policy": "prose",
     "pattern": "note beginning *\"You edited <name>, a skill in this machine's terum-skills Library\"* appears after an"
   },
   {
     "file": ".claude/skills/terum-skills/SKILL.md",
-    "line": 24,
+    "line": 31,
     "policy": "prose",
     "pattern": "the `publish` it names here. A skill edited and never published is a skill only that machine has."
   },
   {
     "file": ".claude/skills/terum-skills/SKILL.md",
-    "line": 44,
-    "policy": "fixed",
-    "pattern": "- Always `npx -y terum-skills@latest <verb> …`, exactly that spelling, for a runnable command."
+    "line": 34,
+    "policy": "prose",
+    "pattern": "path can have several tokens (`skill move`, `team project create`); pass the remaining arguments"
   },
   {
     "file": ".claude/skills/terum-skills/SKILL.md",
-    "line": 49,
+    "line": 35,
     "policy": "prose",
-    "pattern": "`validate` exits 1 on error findings; warnings alone are not a failure."
-  },
-  {
-    "file": ".claude/skills/terum-skills/SKILL.md",
-    "line": 50,
-    "policy": "prose",
-    "pattern": "- `$ARGUMENTS`: the command path can have multiple tokens (`skill move`, `team project create`)."
-  },
-  {
-    "file": ".claude/skills/terum-skills/SKILL.md",
-    "line": 52,
-    "policy": "prose",
-    "pattern": "`status`. Explain the tables below briefly; ask for the user's intent before assembling flags."
-  },
-  {
-    "file": ".claude/skills/terum-skills/SKILL.md",
-    "line": 53,
-    "policy": "prose",
-    "pattern": "- Use the grammar below. This CLI has no standalone refresh command; use `sync` for fetching."
+    "pattern": "unchanged. With no arguments, ask which verb, defaulting to `status`. Explain the tables below"
   },
   {
     "file": ".claude/skills/terum-skills/SKILL.md",
     "line": 54,
-    "policy": "prose",
-    "pattern": "`team migrate` exists but is terminal-only (Table B); do not invent any other migration invocation."
-  },
-  {
-    "file": ".claude/skills/terum-skills/SKILL.md",
-    "line": 60,
-    "policy": "prose",
-    "pattern": "| `status` | nothing | show stdout; exit 0 means the query succeeded, not that setup is complete. Pending work needs the matching install or removal retried, not a fetch |"
-  },
-  {
-    "file": ".claude/skills/terum-skills/SKILL.md",
-    "line": 61,
-    "policy": "prose",
-    "pattern": "| `ls`, `ls member <h>`, `ls project <n>` | nothing | show the team inventory |"
-  },
-  {
-    "file": ".claude/skills/terum-skills/SKILL.md",
-    "line": 62,
-    "policy": "prose",
-    "pattern": "| `ls --local` | nothing | show the requested project section; summarise other roots and rejected/unreadable folders by count and reason unless asked for all. This inventory is local-only |"
-  },
-  {
-    "file": ".claude/skills/terum-skills/SKILL.md",
-    "line": 63,
-    "policy": "prose",
-    "pattern": "| `project add <abs-path>`, `project remove <abs-path>`, `project rename <abs-path> --to <name>`, `project list` | confirm with the user before adding, renaming, or forgetting a root | show stdout; removing a project leaves its files and placement ledger unchanged; a folder registered inside another registered folder is listed as its sub-project |"
-  },
-  {
-    "file": ".claude/skills/terum-skills/SKILL.md",
-    "line": 64,
-    "policy": "prose",
-    "pattern": "| `search <term> [--category <c>] [--author <a>] [--project <p>]` | nothing | show stdout; `No skills found.` is a result |"
-  },
-  {
-    "file": ".claude/skills/terum-skills/SKILL.md",
-    "line": 65,
     "policy": "fixed",
-    "pattern": "| `skill fix <abs-path>` | none; the folder is the user's own | show stdout; it applies the repairs with one right answer (quote a frontmatter value YAML refuses, `name` to the folder, `license` to team policy, strip invisible characters, clear an executable bit on a non-script) and prints `Still needs you` for the rest |"
+    "pattern": "- Always `npx -y terum-skills@latest ls --format md`-shaped — exactly that spelling, a real verb, `--format md` last — for a runnable command."
   },
   {
     "file": ".claude/skills/terum-skills/SKILL.md",
     "line": 66,
-    "policy": "routed",
-    "pattern": "| `skill category <abs-path> --to <name>` | none; the folder is the user's own | show stdout; it rewrites `metadata.terum-category` locally and publishes nothing, so the team keeps showing the category its newest version carries until the user runs the `publish` the output prints. Any name is accepted; an off-list one gets the same advisory warning `publish` gives |"
-  },
-  {
-    "file": ".claude/skills/terum-skills/SKILL.md",
-    "line": 67,
     "policy": "prose",
-    "pattern": "| `validate <abs-path or name> [--cwd <team-root>]` | requires team policy from the configured clone or explicit team root | show findings verbatim. Validation does not inject managed fields; an unpublished folder may fail strict frontmatter checks. Publish injects its managed fields before checking; local eval permits those fields to be absent |"
-  },
-  {
-    "file": ".claude/skills/terum-skills/SKILL.md",
-    "line": 68,
-    "policy": "prose",
-    "pattern": "| `update` | nothing | show the update command; the CLI never runs a package manager |"
-  },
-  {
-    "file": ".claude/skills/terum-skills/SKILL.md",
-    "line": 69,
-    "policy": "prose",
-    "pattern": "| `app` | confirm download/install and opening the desktop app | show stdout |"
-  },
-  {
-    "file": ".claude/skills/terum-skills/SKILL.md",
-    "line": 70,
-    "policy": "prose",
-    "pattern": "| `app-update --check` | nothing | show cached advertisement and installed/staged state; `--force` on this check requests a release probe |"
-  },
-  {
-    "file": ".claude/skills/terum-skills/SKILL.md",
-    "line": 71,
-    "policy": "prose",
-    "pattern": "| `app-update --stage [--release <version>]`, `app-update --apply [--release <version>] [--reason manual]` | confirm download or installation; on macOS quit the running app before terminal apply | staging verifies the download; apply hands installation to a detached process |"
-  },
-  {
-    "file": ".claude/skills/terum-skills/SKILL.md",
-    "line": 72,
-    "policy": "prose",
-    "pattern": "| `sync` | say it fetches and resets each disposable team clone to `origin/main`; it never uploads, places, or edits the user's skill folders | show stdout; disclose each team reported as not refreshed. A successful fetch records its time and HEAD. Use `run_in_background` for a slow fetch |"
+    "pattern": "- This CLI has no standalone refresh command; `sync` fetches. `team migrate` exists but is"
   },
   {
     "file": ".claude/skills/terum-skills/SKILL.md",
     "line": 73,
     "policy": "prose",
-    "pattern": "| `sync --hook` | do not run by hand; this is the SessionStart entry | stdout is the reload directive, notices go to stderr; only Terum's managed manual may be refreshed |"
+    "pattern": "| `status` | nothing | show the board; exit 0 means the query succeeded, not that setup is complete. Pending work needs the matching install or removal retried, not a fetch |"
   },
   {
     "file": ".claude/skills/terum-skills/SKILL.md",
     "line": 74,
     "policy": "prose",
-    "pattern": "| `install <ref> [--into global\\|<project root>]`, `install member <h> [--into global\\|<project root>]`, `install project <n> [--into global\\|<project root>]` | confirm the skill/list and destination: this places files and writes install records. Use an explicitly chosen `--into`; an unregistered project path refuses and needs `project add` first | installs the highest numbered version in the clone. A tool-grant question or replace question needs a terminal; report any completed work before handing off |"
+    "pattern": "| `ls`, `ls --local`, `ls member <h>`, `ls project <n>`, `ls skill <name>` | nothing | show the board (the list-skills and skill-info skills exist for the common cases) |"
   },
   {
     "file": ".claude/skills/terum-skills/SKILL.md",
     "line": 75,
-    "policy": "fixed",
-    "pattern": "| `publish <ref> [--project <p>] [--category <c>]` | confirm the local skill, the team when more than one is configured, and any `--project` or `--category` the user chose; say that it rewrites the folder's managed frontmatter and writes an immutable version to team main. Omit optional flags the user has not chosen | show stdout, including the version line and any category disclosure. Its only question is a confirm when the latest local eval of these exact bytes failed; without a TTY that refuses before the local write-back or the team write, so quote the refusal and hand the same command to a terminal |"
+    "policy": "prose",
+    "pattern": "| `project add <abs-path>`, `project remove <abs-path>`, `project rename <abs-path> --to <name>`, `project list` | confirm with the user before adding, renaming, or forgetting a root | show the board, or the fenced block for `project rename`; removing a project leaves its files and placement ledger unchanged; a folder registered inside another registered folder is listed as its sub-project |"
   },
   {
     "file": ".claude/skills/terum-skills/SKILL.md",
     "line": 76,
     "policy": "prose",
-    "pattern": "| `invite <github-login…>` | confirm with the user: sends GitHub collaborator invitations | show stdout and the teammate join block |"
+    "pattern": "| `search <term> [--category <c>] [--author <a>] [--project <p>]` | nothing | show the board; `No skills found.` is a result |"
   },
   {
     "file": ".claude/skills/terum-skills/SKILL.md",
     "line": 77,
     "policy": "prose",
-    "pattern": "| `profile [--name <display>] [--bio <text>] [--role <role>] [--project <name>]… [--remove <skill>]` | confirm the profile changes; project membership names team projects; `--remove` takes one skill off the profile list | show stdout |"
+    "pattern": "| `skill fix <abs-path>` | confirm with the user, as for install: it rewrites the folder's SKILL.md | it applies the repairs with one right answer (quote a frontmatter value YAML refuses, `name` to the folder, `license` to team policy, strip invisible characters, clear an executable bit on a non-script) and prints `Still needs you` for the rest; show the fenced block |"
   },
   {
     "file": ".claude/skills/terum-skills/SKILL.md",
     "line": 78,
     "policy": "prose",
-    "pattern": "| `login --set <key=value>` | confirm the identity change; keys are `name`, `email`, `default-handle`; repeat the flag for multiple fields | show the identity notice; published versions keep their recorded author |"
+    "pattern": "| `skill category <abs-path> --to <name>` | confirm with the user: it rewrites the folder's category | show the board; it rewrites `metadata.terum-category` locally and publishes nothing, so the team keeps showing the category its newest version carries until the user runs the `publish` the output prints. Any name is accepted; an off-list one gets the same advisory warning `publish` gives |"
   },
   {
     "file": ".claude/skills/terum-skills/SKILL.md",
     "line": 79,
     "policy": "prose",
-    "pattern": "| `team workflow-update --print` | nothing | show the workflow scaffold and its manual migration instruction; this does not migrate the team's skill layout |"
+    "pattern": "| `validate <abs-path or name> [--cwd <team-root>]` | requires team policy from the configured clone or an explicit team root | show the board's findings verbatim. Validation does not inject managed fields; an unpublished folder may fail strict frontmatter checks. Publish injects its managed fields before checking; local eval permits those fields to be absent |"
   },
   {
     "file": ".claude/skills/terum-skills/SKILL.md",
     "line": 80,
     "policy": "prose",
-    "pattern": "| `eval <skill> [--k <n>] [--triggers-only] [--execution-only] [--case <stem>] [--model <m>] [--judge-model <m>] [--no-gen]` | see the eval section | see the eval section |"
+    "pattern": "| `update` | nothing | show the board; the CLI never runs a package manager, and the command it prints is for the user's terminal |"
   },
   {
     "file": ".claude/skills/terum-skills/SKILL.md",
     "line": 81,
     "policy": "prose",
-    "pattern": "| `eval <skill> <skill>… [--batch <n>] [--parallel <n>]`, `eval --pending` | confirm the paid runs: several skills run as one batch after one agent probe; `--pending` means every shared skill with no receipt for its current version; `--batch <n>` asks before each further batch | show ✓/✗ per skill and the `Evaluated X of N` line; a declined continuation queues the rest for later |"
+    "pattern": "| `app` | confirm download/install and opening the desktop app | show the fenced block |"
   },
   {
     "file": ".claude/skills/terum-skills/SKILL.md",
     "line": 82,
     "policy": "prose",
-    "pattern": "| `eval <skill…> --window overnight\\|later`, `eval --pending --window overnight` | confirm queueing; nothing is paid for now | show the queued count; overnight items run in the desktop app between 01:00 and 05:00, later items wait for `eval --drain` |"
+    "pattern": "| `app-update --check` | nothing | show cached advertisement and installed/staged state; `--force` on this check requests a release probe |"
   },
   {
     "file": ".claude/skills/terum-skills/SKILL.md",
     "line": 83,
     "policy": "prose",
-    "pattern": "| `eval-report <skill> [--team <team>]` | nothing | show committed receipts and local run history for a skill in the team clone; no fetch |"
+    "pattern": "| `app-update --stage [--release <version>]`, `app-update --apply [--release <version>] [--reason manual]` | confirm download or installation; on macOS quit the running app before terminal apply | staging verifies the download; apply hands installation to a detached process |"
   },
   {
     "file": ".claude/skills/terum-skills/SKILL.md",
     "line": 84,
     "policy": "prose",
-    "pattern": "| `eval --queue-list` | nothing | show the local queue |"
+    "pattern": "| `sync` | say it fetches and resets each disposable team clone to `origin/main`; it never uploads, places, or edits the user's skill folders | show the board; disclose each team reported as not refreshed. Run it in the background when your shell tool can |"
   },
   {
     "file": ".claude/skills/terum-skills/SKILL.md",
     "line": 85,
     "policy": "prose",
-    "pattern": "| `eval --dequeue <skill>` | confirm removal from the queue | show remaining items; a team-qualified selector is also accepted |"
+    "pattern": "| `sync --hook` | do not run by hand; this is the SessionStart entry and refuses `--format` | stdout is the reload directive, notices go to stderr; only Terum's managed skills may be refreshed |"
   },
   {
     "file": ".claude/skills/terum-skills/SKILL.md",
     "line": 86,
     "policy": "prose",
-    "pattern": "| `eval --drain [--parallel <n>] [--window overnight] [--max <n>]` | confirm paid runs, as below | show successes and failures; default parallelism is four |"
+    "pattern": "| `install <ref> [--into global\\|<project root>]`, `install member <h> [--into global\\|<project root>]`, `install project <n> [--into global\\|<project root>]` | confirm the skill/list and destination: this places files and writes install records. Use an explicitly chosen `--into`; an unregistered project path refuses and needs `project add` first | installs the highest numbered version in the clone. A tool-grant question or replace question needs a terminal; report any completed work from the board's **Notes** before handing off |"
   },
   {
     "file": ".claude/skills/terum-skills/SKILL.md",
     "line": 87,
     "policy": "prose",
-    "pattern": "| `serve` | do not run as a one-shot Bash command; it requires `--frames` and a request/answer client | accepts only `status`, `ls`, `eval-report`, `search`, `validate`, `update`; every write uses its own process |"
+    "pattern": "| `publish <ref> [--project <p>] [--category <c>]` | confirm the local skill, the team when more than one is configured, and any `--project` or `--category` the user chose; say that it rewrites the folder's managed frontmatter and writes an immutable version to team main. Omit optional flags the user has not chosen | show the fenced block, including the version line and any category disclosure. Its only question is a confirm when the latest local eval of these exact bytes failed; without a TTY that refuses before the local write-back or the team write, so quote the refusal and hand the same command to a terminal |"
+  },
+  {
+    "file": ".claude/skills/terum-skills/SKILL.md",
+    "line": 88,
+    "policy": "prose",
+    "pattern": "| `invite <github-login…>` | confirm with the user: sends GitHub collaborator invitations | show the fenced block and the teammate join line |"
+  },
+  {
+    "file": ".claude/skills/terum-skills/SKILL.md",
+    "line": 89,
+    "policy": "prose",
+    "pattern": "| `profile [--name <display>] [--bio <text>] [--role <role>] [--project <name>]… [--remove <skill>]` | confirm the profile changes; project membership names team projects; `--remove` takes one skill off the profile list | show the fenced block |"
+  },
+  {
+    "file": ".claude/skills/terum-skills/SKILL.md",
+    "line": 90,
+    "policy": "prose",
+    "pattern": "| `login --set <key=value>` | confirm the identity change; keys are `name`, `email`, `default-handle`; repeat the flag for multiple fields | show the identity notice; published versions keep their recorded author |"
+  },
+  {
+    "file": ".claude/skills/terum-skills/SKILL.md",
+    "line": 91,
+    "policy": "prose",
+    "pattern": "| `team workflow-update --print` | nothing | show the workflow scaffold and its manual migration instruction; this does not migrate the team's skill layout |"
+  },
+  {
+    "file": ".claude/skills/terum-skills/SKILL.md",
+    "line": 92,
+    "policy": "prose",
+    "pattern": "| `eval <skill> [flags]` | use the eval skill: it confirms the cost first | the eval skill shows the board |"
+  },
+  {
+    "file": ".claude/skills/terum-skills/SKILL.md",
+    "line": 93,
+    "policy": "prose",
+    "pattern": "| `eval <skill> <skill>… [--batch <n>] [--parallel <n>]`, `eval --pending` | confirm the paid runs once for the whole batch: several skills run as one batch after one agent probe; `--pending` means every shared skill with no receipt for its current version; `--batch <n>` asks before each further batch (a question — hand it to a terminal, or run without `--batch`) | show the batch board (`Evaluated X of N`); a declined continuation queues the rest for later |"
+  },
+  {
+    "file": ".claude/skills/terum-skills/SKILL.md",
+    "line": 94,
+    "policy": "prose",
+    "pattern": "| `eval <skill…> --window overnight\\|later`, `eval --pending --window overnight` | confirm queueing; nothing is paid for now | show the queued board; overnight items run in the desktop app between 01:00 and 05:00, later items wait for `eval --drain` |"
   },
   {
     "file": ".claude/skills/terum-skills/SKILL.md",
     "line": 95,
-    "policy": "not-a-hint",
-    "pattern": "copy stays under that project. If the kept-copy path already exists, the command refuses; move"
+    "policy": "prose",
+    "pattern": "| `eval-report <skill> [--team <team>]` | nothing | show the board: committed receipts and local run history for a skill in the team clone; no fetch |"
   },
   {
     "file": ".claude/skills/terum-skills/SKILL.md",
     "line": 96,
     "policy": "prose",
-    "pattern": "that backup elsewhere yourself before retrying. Neither the Library nor `prune` cleans old-skills."
+    "pattern": "| `eval --queue-list` | nothing | show the queue board |"
+  },
+  {
+    "file": ".claude/skills/terum-skills/SKILL.md",
+    "line": 97,
+    "policy": "prose",
+    "pattern": "| `eval --dequeue <skill>` | confirm removal from the queue | show the remaining items; a team-qualified selector is also accepted |"
+  },
+  {
+    "file": ".claude/skills/terum-skills/SKILL.md",
+    "line": 98,
+    "policy": "prose",
+    "pattern": "| `eval --drain [--parallel <n>] [--window overnight] [--max <n>]` | confirm paid runs, as the eval skill does | show the drain board's successes and failures; default parallelism is four |"
   },
   {
     "file": ".claude/skills/terum-skills/SKILL.md",
     "line": 99,
     "policy": "prose",
+    "pattern": "| `uninstall-skill <ref> [--from global\\|<project root>]` | confirm the removal; `member <h>` and `project <n>` selectors also exist | it asks once before removing, so expect the refusal block: hand the command over |"
+  },
+  {
+    "file": ".claude/skills/terum-skills/SKILL.md",
+    "line": 100,
+    "policy": "prose",
+    "pattern": "| `serve` | do not run as a one-shot command; it requires `--frames` and a request/answer client, and refuses `--format` | accepts only `status`, `ls`, `eval-report`, `search`, `validate`, `update`; every write uses its own process |"
+  },
+  {
+    "file": ".claude/skills/terum-skills/SKILL.md",
+    "line": 108,
+    "policy": "prose",
+    "pattern": "copy stays under that project. If the kept-copy path already exists, the command refuses; move"
+  },
+  {
+    "file": ".claude/skills/terum-skills/SKILL.md",
+    "line": 109,
+    "policy": "prose",
+    "pattern": "that backup elsewhere yourself before retrying. Neither the Library nor `prune` cleans old-skills."
+  },
+  {
+    "file": ".claude/skills/terum-skills/SKILL.md",
+    "line": 112,
+    "policy": "prose",
     "pattern": "profile with no question, interactive or not; `profile --remove <name>` takes it off again."
   },
   {
     "file": ".claude/skills/terum-skills/SKILL.md",
-    "line": 117,
+    "line": 139,
     "policy": "fixed",
     "pattern": "| `project add` (no path) | none | `npx -y terum-skills@latest project add` — asks for a folder |"
   },
   {
     "file": ".claude/skills/terum-skills/SKILL.md",
-    "line": 118,
+    "line": 140,
+    "policy": "fixed",
+    "pattern": "| `unpublish <skill> [--yes]` | none; confirm the skill and team with the user | `npx -y terum-skills@latest unpublish <skill>` — it asks the user to type the skill's name; use `--yes` only after an explicit confirmation |"
+  },
+  {
+    "file": ".claude/skills/terum-skills/SKILL.md",
+    "line": 141,
     "policy": "fixed",
     "pattern": "| `skill move <abs-path> --to global\\|<project root>` | none | `npx -y terum-skills@latest skill move <abs-path> --to <destination>` |"
   },
   {
     "file": ".claude/skills/terum-skills/SKILL.md",
-    "line": 119,
-    "policy": "routed",
+    "line": 142,
+    "policy": "fixed",
     "pattern": "| `skill copy <abs-path> --to global\\|<project root>` | none | `npx -y terum-skills@latest skill copy <abs-path> --to <destination>` — the source folder stays where it is |"
   },
   {
     "file": ".claude/skills/terum-skills/SKILL.md",
-    "line": 120,
+    "line": 143,
     "policy": "fixed",
     "pattern": "| `skill rename <abs-path> --to <new-name>` | none | `npx -y terum-skills@latest skill rename <abs-path> --to <new-name>` |"
   },
   {
     "file": ".claude/skills/terum-skills/SKILL.md",
-    "line": 121,
+    "line": 144,
     "policy": "fixed",
     "pattern": "| `skill delete <abs-path>` | none | `npx -y terum-skills@latest skill delete <abs-path>` |"
   },
   {
     "file": ".claude/skills/terum-skills/SKILL.md",
-    "line": 122,
+    "line": 145,
     "policy": "fixed",
     "pattern": "| `skill disable <abs-path>` | none | `npx -y terum-skills@latest skill disable <abs-path>` — writes `off` for the folder's name into Claude Code's own `skillOverrides` setting (the same key the `/skills` menu writes); the folder stays where it is |"
   },
   {
     "file": ".claude/skills/terum-skills/SKILL.md",
-    "line": 123,
+    "line": 146,
     "policy": "fixed",
     "pattern": "| `skill enable <abs-path>` | none | `npx -y terum-skills@latest skill enable <abs-path>` — removes that `off` and nothing else |"
   },
   {
     "file": ".claude/skills/terum-skills/SKILL.md",
-    "line": 124,
+    "line": 147,
     "policy": "fixed",
     "pattern": "| `prune` | none; an empty quarantine simply returns | `npx -y terum-skills@latest prune` |"
   },
   {
     "file": ".claude/skills/terum-skills/SKILL.md",
-    "line": 125,
-    "policy": "fixed",
-    "pattern": "| `uninstall-skill <ref> [--from global\\|<project root>]` | none; the CLI previews before confirming | `npx -y terum-skills@latest uninstall-skill <ref> --from <destination>` — `member <h>` and `project <n>` selectors also exist |"
-  },
-  {
-    "file": ".claude/skills/terum-skills/SKILL.md",
-    "line": 126,
+    "line": 148,
     "policy": "fixed",
     "pattern": "| `uninstall` | none | `npx -y terum-skills@latest uninstall` — machine teardown, preserving recovery data and printing the package-manager step |"
   },
   {
     "file": ".claude/skills/terum-skills/SKILL.md",
-    "line": 127,
+    "line": 149,
     "policy": "prose",
     "pattern": "| `team leave <name>`, `team remove <handle>` | none | the same command with the supported npx prefix |"
   },
   {
     "file": ".claude/skills/terum-skills/SKILL.md",
-    "line": 128,
+    "line": 150,
     "policy": "fixed",
     "pattern": "| `team move <org>/<repo> [--from <team>] [--yes]` | none; one confirmation, then leave + join + re-place | `npx -y terum-skills@latest team move <org>/<repo>` — when a team's repository was recreated elsewhere (`sync` reports it and offers this) |"
   },
   {
     "file": ".claude/skills/terum-skills/SKILL.md",
-    "line": 129,
+    "line": 151,
     "policy": "fixed",
     "pattern": "| `team project create [name] [--remote <url>]` | none | `npx -y terum-skills@latest team project create <name> --remote <url>` |"
   },
   {
     "file": ".claude/skills/terum-skills/SKILL.md",
-    "line": 130,
-    "policy": "prose",
+    "line": 152,
+    "policy": "fixed",
     "pattern": "| `team project delete [name] [--yes]` | none; the CLI confirms and names what survives | `npx -y terum-skills@latest team project delete <name>` — removes the list only; its skills stay in the marketplace |"
   },
   {
     "file": ".claude/skills/terum-skills/SKILL.md",
-    "line": 131,
+    "line": 153,
     "policy": "fixed",
     "pattern": "| `team migrate [--team <name>]` | none | `npx -y terum-skills@latest team migrate` — once per team, from a terminal, only after the release carrying the new CLI has reached every teammate (an un-upgraded teammate cannot read a migrated repo); refuses under `--frames` |"
   },
   {
     "file": ".claude/skills/terum-skills/SKILL.md",
-    "line": 132,
+    "line": 154,
+    "policy": "fixed",
+    "pattern": "| `reconcile [--list]` | `--list` lists matches without asking or writing | `npx -y terum-skills@latest reconcile` — it asks before recording a Library folder as an installed team skill |"
+  },
+  {
+    "file": ".claude/skills/terum-skills/SKILL.md",
+    "line": 155,
     "policy": "fixed",
     "pattern": "| `setup [target]`, `team create`, `team join <target>`, `login` | none; setup/join can clone before asking | `npx -y terum-skills@latest setup` / `setup <org>/<repo>` / `team create` / `team join <target>` / `login` with the same npx prefix |"
   },
   {
     "file": ".claude/skills/terum-skills/SKILL.md",
-    "line": 136,
+    "line": 159,
     "policy": "prose",
     "pattern": "publish needs no project and asks for none. Identical bytes reuse the existing version;"
   },
   {
     "file": ".claude/skills/terum-skills/SKILL.md",
-    "line": 143,
+    "line": 163,
     "policy": "prose",
-    "pattern": "without asking — publishing is the endorsement (`profile --remove <name>` takes it back)."
+    "pattern": "category line. Otherwise the CLI discloses the source before writing. It writes managed frontmatter"
   },
   {
     "file": ".claude/skills/terum-skills/SKILL.md",
-    "line": 146,
+    "line": 165,
     "policy": "prose",
-    "pattern": "The three `skill` operations require a direct child of Global or an added project's skills root"
+    "pattern": "without asking — publishing is the endorsement (`profile --remove <name>` takes it back). A failed"
   },
   {
     "file": ".claude/skills/terum-skills/SKILL.md",
-    "line": 152,
+    "line": 166,
     "policy": "prose",
-    "pattern": "unchanged. `prune` permanently deletes confirmed quarantine contents only."
+    "pattern": "team write can leave that frontmatter on disk. Do not treat publish as a dry run."
   },
   {
     "file": ".claude/skills/terum-skills/SKILL.md",
-    "line": 191,
+    "line": 168,
     "policy": "prose",
-    "pattern": "- Several skills at once: `eval <a> <b>…` runs them as one batch after one preflight (`--parallel <n>`, default"
+    "pattern": "The `skill` folder operations require a direct child of Global or an added project's skills root."
+  },
+  {
+    "file": ".claude/skills/terum-skills/SKILL.md",
+    "line": 169,
+    "policy": "prose",
+    "pattern": "Only `delete` asks you to type the folder's name; move, copy and rename ask nothing, because each"
+  },
+  {
+    "file": ".claude/skills/terum-skills/SKILL.md",
+    "line": 175,
+    "policy": "prose",
+    "pattern": "the curated profile unchanged. `prune` permanently deletes confirmed quarantine contents only."
+  },
+  {
+    "file": ".claude/skills/terum-skills/SKILL.md",
+    "line": 193,
+    "policy": "prose",
+    "pattern": "When `CODEX_SANDBOX_NETWORK_DISABLED=1` is set and the command starts with `npx`, add `--prefer-offline` after `npx` so a cached package resolves without the registry; if npx still reports a network error, ask the user to run the command in a terminal. In that sandbox the verbs that need the network — `sync`, `install`, `publish`, `invite`, `eval`, and `update`'s release probe — are handed to a terminal with the reason."
   },
   {
     "file": "README.md",
@@ -1291,7 +1279,7 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "file": "README.md",
     "line": 68,
     "policy": "prose",
-    "pattern": "- Setup offers a `/terum-skills` skill for Claude Code, so Claude can run these commands for you inside a session, and a session-start hook that keeps the team repo fetched."
+    "pattern": "- Setup offers eight skills for Claude Code and Codex (`list-skills`, `skill-info`, `search-skills`, `eval`, `eval-report`, `skill-status`, `sync-skills`, and `terum-skills` for any other verb), so either assistant can run these commands for you inside a session and show the result as a board, and a session-start hook that keeps the team repo fetched."
   },
   {
     "file": "README.md",
@@ -1363,7 +1351,7 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "file": "README.md",
     "line": 140,
     "policy": "prose",
-    "pattern": "| Evals | `validate <path\\|name>` · `eval <skill…>` · `eval-report <skill>` · `usage [skill]` · `misses [skill]` |"
+    "pattern": "| Evals | `validate <path\\|name>` · `eval <skill…>` · `eval-report [skill]` · `usage [skill]` · `misses [skill]` |"
   },
   {
     "file": "README.md",
@@ -1373,15 +1361,75 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
   },
   {
     "file": "README.md",
-    "line": 145,
+    "line": 148,
+    "policy": "fixed",
+    "pattern": "Setup places eight skills at `~/.claude/skills/<name>/` for Claude Code and `~/.codex/skills/<name>/` for Codex (when `~/.codex` exists), so either assistant can run terum-skills for you inside a session and show the result as a Markdown board. They ship inside the npm package; re-running `npx -y terum-skills@latest setup` after an update refreshes them, and the session hook refreshes or adds them on a machine that already holds one. Invoke them as `/name` in Claude Code and `$name` in Codex: Each placed copy names the copy of the CLI that placed it, never `@latest`. Uninstall removes the copies it placed; a folder at one of those names that is not the bundled skill is left alone."
+  },
+  {
+    "file": "README.md",
+    "line": 152,
+    "policy": "prose",
+    "pattern": "| `list-skills [--local\\|--team]` | `ls --local --format md` and `ls --format md` — your Library and the team Marketplace |"
+  },
+  {
+    "file": "README.md",
+    "line": 153,
+    "policy": "prose",
+    "pattern": "| `skill-info <name>` | `ls skill <name> --format md`, then `eval-report <name> --format md` for a team skill |"
+  },
+  {
+    "file": "README.md",
+    "line": 154,
+    "policy": "prose",
+    "pattern": "| `search-skills <term>` | `search <term> --format md` |"
+  },
+  {
+    "file": "README.md",
+    "line": 155,
+    "policy": "prose",
+    "pattern": "| `eval <skill> [flags]` | `eval <skill> --format md`, after confirming the cost with you |"
+  },
+  {
+    "file": "README.md",
+    "line": 156,
+    "policy": "prose",
+    "pattern": "| `eval-report <skill>` | `eval-report <skill> --format md` |"
+  },
+  {
+    "file": "README.md",
+    "line": 157,
+    "policy": "prose",
+    "pattern": "| `skill-status` | `status --format md`, then `update --format md` |"
+  },
+  {
+    "file": "README.md",
+    "line": 158,
+    "policy": "prose",
+    "pattern": "| `sync-skills` | `sync --format md` |"
+  },
+  {
+    "file": "README.md",
+    "line": 159,
+    "policy": "prose",
+    "pattern": "| `terum-skills <verb …>` | any verb with `--format md`; the verbs that ask a question are handed to your terminal |"
+  },
+  {
+    "file": "README.md",
+    "line": 163,
     "policy": "fixed",
     "pattern": "`npx -y terum-skills@latest --help` lists the verbs, and `<verb> --help` their options; the full reference is [docs/reference/cli.md](docs/reference/cli.md). Programs drive the CLI with `--frames`, one JSON object per line; see [docs/frame-protocol.md](docs/frame-protocol.md)."
   },
   {
     "file": "README.md",
-    "line": 149,
+    "line": 165,
+    "policy": "prose",
+    "pattern": "**Boards.** Every command above takes `--format <plain|md|pretty|json|auto>` (default `plain`, the output the tables describe). `--format md` renders the result as a Markdown board — the form the shipped Claude Code and Codex skills ask for — `pretty` draws box tables with colour for a terminal, `json` writes one document (`{ verb, ok, exitCode, error?, declined?, refused?, value?, lines }`), and `auto` picks `pretty` on a TTY and `md` otherwise. `--rows <n|all>` caps table rows (default 25), `--width <n>` sets a pretty board's width, `--host <claude|codex|terminal>` phrases the board's **Next** line, `--no-color` drops ANSI. The flags go anywhere before `--`; they are refused with `--frames`, `serve`, and `sync --hook`, whose stdout is spoken for. `ls skill <name>` shows one skill whole, and `ls skill`, `eval-report` and `validate` accept a unique prefix; `eval` takes an exact or case-insensitive name; each of the four, run inside a Library skill folder, needs no name at all (`validate` also accepts any skill folder by path). A usage error (unknown verb, missing argument, bad option value) under any `--format` writes nothing to stdout — one stderr message and exit 1, nothing runs; a reader that sees exit 1 with empty stdout reads stderr."
+  },
+  {
+    "file": "README.md",
+    "line": 169,
     "policy": "fixed",
-    "pattern": "Updates are yours to take. The session hook and the `/terum-skills` skill run the copy of the CLI that set them up: the bare `terum-skills` binary when that copy is a global install the CLI found on your PATH on macOS or Linux, otherwise `npx -y terum-skills@<version>` pinned to that release. Nothing fetches a newer CLI at session start. `update` prints the newest advertised release and the exact command that updates *this* copy; after updating, re-run `setup` and the hook and skill move with it. The desktop app asks GitHub for a new release once a day, downloads it, and installs it when you quit, overnight, or when you press Install now, whichever you chose in Settings ▸ Updates; every download must match its published checksum and carry a build attestation from this repository's release workflow. `npx -y terum-skills@latest uninstall` removes your team from this machine (placed skills, the local clone, the hooks, the Claude Code skill, and on macOS the app bundle) and keeps your backups, quarantine, and local eval runs. On Windows, remove the app from Settings ▸ Apps."
+    "pattern": "Updates are yours to take. The session hook and the eight skills setup places run the copy of the CLI that set them up: the bare `terum-skills` binary when that copy is a global install the CLI found on your PATH on macOS or Linux, otherwise `npx -y terum-skills@<version>` pinned to that release. Nothing fetches a newer CLI at session start. `update` prints the newest advertised release and the exact command that updates *this* copy; after updating, re-run `setup` and the hook and skill move with it. The desktop app asks GitHub for a new release once a day, downloads it, and installs it when you quit, overnight, or when you press Install now, whichever you chose in Settings ▸ Updates; every download must match its published checksum and carry a build attestation from this repository's release workflow. `npx -y terum-skills@latest uninstall` removes your team from this machine (placed skills, the local clone, the hooks, the Claude Code skill, and on macOS the app bundle) and keeps your backups, quarantine, and local eval runs. On Windows, remove the app from Settings ▸ Apps."
   },
   {
     "file": "SECURITY.md",
@@ -1409,21 +1457,9 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
   },
   {
     "file": "SECURITY.md",
-    "line": 14,
-    "policy": "prose",
-    "pattern": "| `/terum-skills` skill | Only when Claude Code decides the skill applies, or you invoke it | The CLI verbs the skill describes, in the same pinned spelling | Whatever the verb does; verbs that ask a question are handed to your terminal instead |"
-  },
-  {
-    "file": "SECURITY.md",
     "line": 18,
     "policy": "prose",
     "pattern": "The CLI never runs a package manager on your behalf. `terum-skills update` prints the command that"
-  },
-  {
-    "file": "SECURITY.md",
-    "line": 23,
-    "policy": "prose",
-    "pattern": "The session hook and the placed `/terum-skills` skill name the copy of the CLI that installed them:"
   },
   {
     "file": "SECURITY.md",
@@ -1441,12 +1477,12 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "file": "SECURITY.md",
     "line": 27,
     "policy": "prose",
-    "pattern": "yourself and, for the pinned `npx` spelling, re-run `setup` so the hook and the skill move with it."
+    "pattern": "yourself and, for the pinned `npx` spelling, re-run `setup` so the hook and the skills move with it."
   },
   {
     "file": "SECURITY.md",
     "line": 29,
-    "policy": "prose",
+    "policy": "fixed",
     "pattern": "Releases before 0.21 wrote `npx -y terum-skills@latest` into the hook. The first session hook run of"
   },
   {
@@ -1514,12 +1550,6 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "line": 8,
     "policy": "fixed",
     "pattern": "npx -y terum-skills@latest setup"
-  },
-  {
-    "file": "docs/README.md",
-    "line": 31,
-    "policy": "prose",
-    "pattern": "- [Claude Code integration](guides/claude-code-integration.md): the `/terum-skills` skill, the session hook, the edit hook, the per-machine switch."
   },
   {
     "file": "docs/README.md",
@@ -1927,7 +1957,7 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "file": "docs/contributing/release.md",
     "line": 56,
     "policy": "prose",
-    "pattern": "The tarball is then inspected. It must contain `package.json`, `README.md`, `SECURITY.md`, `LICENSE`, `NOTICE`, `dist/index.js` and `dist/claude/skills/terum-skills/SKILL.md`, and no path may contain `__tests__` or start with `src/`. `SECURITY.md` and the shipped manual are what make this check stricter than the equivalent one in `ci.yml`, which requires neither (`ci.yml:84`). The packed tarball is then installed into a fresh throwaway project and run from a foreign directory, and uploaded as the `release-tarball` artifact with the digest that `publish` later compares against."
+    "pattern": "The tarball is then inspected. It must contain `package.json`, `README.md`, `SECURITY.md`, `LICENSE`, `NOTICE`, `dist/index.js`, `dist/claude/skills/<name>/SKILL.md` for each of the eight bundled skills and `dist/claude/hooks/terum-skills-edit.mjs`, and no path may contain `__tests__` or start with `src/`. `SECURITY.md` and the shipped skills are what make this check stricter than the equivalent one in `ci.yml`, which requires neither (`ci.yml:84`). The packed tarball is then installed into a fresh throwaway project and run from a foreign directory, and uploaded as the `release-tarball` artifact with the digest that `publish` later compares against."
   },
   {
     "file": "docs/contributing/release.md",
@@ -2573,589 +2603,607 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
   },
   {
     "file": "docs/frame-protocol.md",
-    "line": 34,
+    "line": 23,
+    "policy": "prose",
+    "pattern": "`--format` (the Markdown / terminal / JSON boards of `README.md`) and `--frames` are exclusive: a run given both ends in one `result` frame with the error `--frames is already a machine format; drop --format.` and exit 1. `serve` refuses `--format` on stderr too (`serve answers over --frames; drop --format.`). A usage error (unknown verb, missing argument, bad option value) under any `--format` writes nothing to stdout — one stderr message and exit 1, nothing runs; a reader that sees exit 1 with empty stdout reads stderr."
+  },
+  {
+    "file": "docs/frame-protocol.md",
+    "line": 36,
     "policy": "prose",
     "pattern": "1. **The `gh auth login` offer never arrives over frames.** When `gh` is installed but logged out, the CLI in frame mode prints `GitHub CLI is installed but logged out. Run \\`gh auth login\\` in a terminal, then try again.` instead of asking (it would otherwise hand its stdio to `gh`, which here means the frame pipes). Likewise `setup` never asks the desktop-app opt-in question over frames. If a shell ever does see that confirm, the CLI is older than 0.1.6: answer `false`."
   },
   {
     "file": "docs/frame-protocol.md",
-    "line": 35,
+    "line": 37,
     "policy": "prose",
     "pattern": "2. **Never use `sync --hook` over frames.** Its stdout is the Claude Code reload directive, not frames; the CLI refuses it with a `result` frame and exit 1. Call plain `sync` for both foreground and background use: it fetches and changes nothing on this machine (see `f-sync`)."
   },
   {
     "file": "docs/frame-protocol.md",
-    "line": 37,
+    "line": 39,
     "policy": "prose",
     "pattern": "4. **`cwd` is advisory; every write names its destination.** `install` asks `Install to` (or takes `--into`), `sync` fetches every team clone from any cwd, `uninstall-skill` takes `--from`."
   },
   {
     "file": "docs/frame-protocol.md",
-    "line": 38,
+    "line": 40,
     "policy": "prose",
     "pattern": "5. **`uninstall`: the consent inventory is the confirm's detail.** Render `ask.detail` verbatim in the danger dialog; answer false to cancel. Its result includes cleanup outcomes, `kept`, `record`, and CLI-generated `advice`."
   },
   {
     "file": "docs/frame-protocol.md",
-    "line": 41,
+    "line": 43,
     "policy": "prose",
     "pattern": "## Read sessions (`serve`)"
   },
   {
     "file": "docs/frame-protocol.md",
-    "line": 43,
+    "line": 45,
     "policy": "prose",
     "pattern": "`terum-skills --frames serve` starts one stdio session, advertising `features.serve: true`"
   },
   {
     "file": "docs/frame-protocol.md",
-    "line": 44,
+    "line": 46,
     "policy": "prose",
     "pattern": "in its single `hello`. Without `--frames`, `serve` immediately fails"
   },
   {
     "file": "docs/frame-protocol.md",
-    "line": 45,
+    "line": 47,
     "policy": "prose",
     "pattern": "with the error `serve requires --frames` and exits 1. This is an app-owned child, not a"
   },
   {
     "file": "docs/frame-protocol.md",
-    "line": 51,
+    "line": 53,
     "policy": "prose",
     "pattern": "{\"t\":\"request\",\"id\":\"r7\",\"argv\":[\"status\",\"--team\",\"acme\"],\"cwd\":\"/some/path\"}"
   },
   {
     "file": "docs/frame-protocol.md",
-    "line": 60,
+    "line": 62,
     "policy": "prose",
     "pattern": "Only `status`, `ls`, `eval-report`, `search`, `validate`, `update`, and `usage` are accepted. Any"
   },
   {
     "file": "docs/frame-protocol.md",
-    "line": 61,
+    "line": 63,
     "policy": "prose",
     "pattern": "other verb gets `ok:false` with `serve does not run <verb>; spawn it as its own process`, without"
   },
   {
     "file": "docs/frame-protocol.md",
-    "line": 63,
+    "line": 65,
     "policy": "prose",
     "pattern": "(including `update`'s release-advertisement probe and local release-state maintenance). Six of the"
   },
   {
     "file": "docs/frame-protocol.md",
-    "line": 64,
+    "line": 66,
     "policy": "prose",
     "pattern": "seven write nothing. `usage` is the one deliberate exception: it appends the firings it scanned to"
   },
   {
     "file": "docs/frame-protocol.md",
-    "line": 72,
+    "line": 74,
     "policy": "prose",
     "pattern": "one-shot protocol states that `serve` deliberately breaks.** Rule 6 (\"one run per verb\")"
   },
   {
     "file": "docs/frame-protocol.md",
-    "line": 73,
+    "line": 75,
     "policy": "prose",
     "pattern": "continues to hold for every verb except `serve` itself."
   },
   {
     "file": "docs/frame-protocol.md",
-    "line": 91,
+    "line": 93,
     "policy": "prose",
     "pattern": "< {\"t\":\"request\",\"id\":\"r1\",\"argv\":[\"status\"]}"
   },
   {
     "file": "docs/frame-protocol.md",
-    "line": 92,
+    "line": 94,
     "policy": "prose",
     "pattern": "< {\"t\":\"request\",\"id\":\"r2\",\"argv\":[\"ls\",\"--local\"],\"cwd\":\"/work/acme\"}"
   },
   {
     "file": "docs/frame-protocol.md",
-    "line": 93,
+    "line": 95,
     "policy": "prose",
     "pattern": "> {\"t\":\"print\",\"id\":\"r1\",\"level\":\"info\",\"line\":\"terum-skills 0.14.0\"}"
   },
   {
     "file": "docs/frame-protocol.md",
-    "line": 96,
+    "line": 98,
     "policy": "prose",
     "pattern": "< {\"t\":\"request\",\"id\":\"r3\",\"argv\":[\"install\",\"example\"]}"
   },
   {
     "file": "docs/frame-protocol.md",
-    "line": 114,
+    "line": 116,
     "policy": "prose",
     "pattern": "$ printf '' | terum-skills --frames status"
   },
   {
     "file": "docs/frame-protocol.md",
-    "line": 116,
+    "line": 118,
     "policy": "prose",
     "pattern": "{\"t\":\"print\",\"level\":\"info\",\"line\":\"terum-skills 0.14.0\"}"
   },
   {
     "file": "docs/frame-protocol.md",
-    "line": 122,
+    "line": 124,
     "policy": "prose",
     "pattern": "An `install` whose tool grants are declined:"
   },
   {
     "file": "docs/frame-protocol.md",
-    "line": 191,
+    "line": 193,
     "policy": "prose",
     "pattern": "`team migrate` is registered but terminal-only: under `--frames` it fails before doing any work and tells the"
   },
   {
     "file": "docs/frame-protocol.md",
-    "line": 193,
+    "line": 195,
     "policy": "prose",
     "pattern": "command: use `sync`. Neither belongs in the advertised verb list."
   },
   {
     "file": "docs/frame-protocol.md",
-    "line": 195,
+    "line": 197,
     "policy": "prose",
     "pattern": "`hello.features` names `libraryProjects`, `projectRename`, `projects`, `memberRole`, `localIdentity`, `roles`, `favorites`, `follow`, `lastSeen`, `installScope`, `inviteScoping`, `disablePerMachine`, `projectMembers`, `liftOnCards`, `runEvalInApp`, `perCase`, `progress`, `refresh`, `appUpdate`, `reconcile`, `serve`, `usage`, and `misses`."
   },
   {
     "file": "docs/frame-protocol.md",
-    "line": 199,
+    "line": 201,
     "policy": "prose",
     "pattern": "`reconcile`, `serve`, `usage`."
   },
   {
     "file": "docs/frame-protocol.md",
-    "line": 204,
+    "line": 206,
     "policy": "prose",
     "pattern": "`libraryProjects` is the explicit local registry (`project add`, `project remove`, `project list`), and `projectRename` its `project rename`;"
   },
   {
     "file": "docs/frame-protocol.md",
-    "line": 205,
+    "line": 207,
     "policy": "prose",
     "pattern": "`projects` is team grouping (`team project create`). `memberRole` is the owner-written job label;"
   },
   {
     "file": "docs/frame-protocol.md",
-    "line": 206,
+    "line": 208,
     "policy": "prose",
     "pattern": "`roles` supports GitHub Admin/Member permissions from `status --permissions` (otherwise unknown)."
   },
   {
     "file": "docs/frame-protocol.md",
-    "line": 207,
+    "line": 209,
     "policy": "prose",
     "pattern": "`installScope` supports destinations and destination-aware removal. `appUpdate` and `serve`"
   },
   {
     "file": "docs/frame-protocol.md",
-    "line": 208,
+    "line": 210,
     "policy": "prose",
     "pattern": "advertise their respective verbs. `reconcile` gates the Library's Sync action, which runs the fetch-only `sync` and then `reconcile --list`."
   },
   {
     "file": "docs/frame-protocol.md",
-    "line": 225,
+    "line": 227,
     "policy": "prose",
     "pattern": "Team `ls` includes `people` with automatic `installed` records and curated `profile` entries."
   },
   {
     "file": "docs/frame-protocol.md",
-    "line": 243,
+    "line": 229,
+    "policy": "prose",
+    "pattern": "`ls` also carries `viewer: { handle, team }` on every team read and, on `ls member`, `ls project` and `ls skill`, a `selection` (`{ kind: 'member', handle }`, `{ kind: 'project', name }`, `{ kind: 'skill', name, source: 'team' | 'library' }`); `ls skill <name>` is the one-skill read — `skills` holds the team record (or nothing), `local` the Library row (or nothing), `projects` only the lists holding it. `member` gained `displayName`, per-install `name`/`version`, and `profile`; `installedBy` rows gained `version`. Additive; protocol stays 1."
+  },
+  {
+    "file": "docs/frame-protocol.md",
+    "line": 247,
     "policy": "prose",
     "pattern": "`install <ref> [--into global|<project root>]` installs the highest numbered version in the clone,"
   },
   {
     "file": "docs/frame-protocol.md",
-    "line": 244,
+    "line": 248,
     "policy": "prose",
     "pattern": "including its eval assets. `install member <handle>` and `install project <name>` use the same"
   },
   {
     "file": "docs/frame-protocol.md",
-    "line": 246,
+    "line": 250,
     "policy": "prose",
     "pattern": "is refused with a `project add` hint; install never registers a root itself."
   },
   {
     "file": "docs/frame-protocol.md",
-    "line": 270,
+    "line": 274,
     "policy": "prose",
     "pattern": "`install --adopt <path> [--team <team>]` records a direct child of the Global Library or a registered"
   },
   {
     "file": "docs/frame-protocol.md",
-    "line": 271,
+    "line": 275,
     "policy": "prose",
     "pattern": "project as installed when its bytes equal exactly one published version in the selected team and its folder"
   },
   {
     "file": "docs/frame-protocol.md",
-    "line": 277,
+    "line": 281,
     "policy": "prose",
     "pattern": "`reconcile --list [--team <team>]` scans unrecorded Library folders once and returns"
   },
   {
     "file": "docs/frame-protocol.md",
-    "line": 280,
+    "line": 284,
     "policy": "prose",
     "pattern": "renamed rows carry `version` and `teamName` and are reported only. Running `reconcile` without `--list` asks"
   },
   {
     "file": "docs/frame-protocol.md",
-    "line": 284,
+    "line": 288,
     "policy": "prose",
     "pattern": "`publish <ref> [--project <name>] [--category <name>]` resolves a local Library folder, checks"
   },
   {
     "file": "docs/frame-protocol.md",
-    "line": 288,
+    "line": 292,
     "policy": "prose",
     "pattern": "publish has no project select. A local FAIL receipt can trigger a confirm; there is no"
   },
   {
     "file": "docs/frame-protocol.md",
-    "line": 289,
+    "line": 293,
     "policy": "prose",
     "pattern": "unconditional publish confirmation. `project` in the result is the named project or `null`."
   },
   {
     "file": "docs/frame-protocol.md",
-    "line": 309,
+    "line": 313,
     "policy": "prose",
     "pattern": "`skill move <path> --to global|<project root>`, `skill copy <path> --to global|<project root>`,"
   },
   {
     "file": "docs/frame-protocol.md",
-    "line": 310,
+    "line": 314,
     "policy": "prose",
     "pattern": "`skill rename <path> --to <new-name>`, and"
   },
   {
     "file": "docs/frame-protocol.md",
-    "line": 311,
+    "line": 315,
     "policy": "prose",
     "pattern": "`skill delete <path>` are one-shot frame writes. Only `skill delete` asks: its `text` ask is"
   },
   {
     "file": "docs/frame-protocol.md",
-    "line": 323,
+    "line": 327,
     "policy": "prose",
     "pattern": "`skill disable <path>` / `skill enable <path>` are one-shot frame writes with no ask. They are the"
   },
   {
     "file": "docs/frame-protocol.md",
-    "line": 325,
+    "line": 329,
     "policy": "prose",
     "pattern": "and the app draws no switch): `disable` writes `\"off\"` for the"
   },
   {
     "file": "docs/frame-protocol.md",
-    "line": 327,
+    "line": 331,
     "policy": "prose",
     "pattern": "`enable` removes that `\"off\"` (never a `name-only` or `user-invocable-only` a person set by hand). A folder under"
   },
   {
     "file": "docs/frame-protocol.md",
-    "line": 331,
+    "line": 335,
     "policy": "prose",
     "pattern": "so. Every `ls --local` row, and every `notOffered` entry (a symlinked or half-broken folder Claude Code still"
   },
   {
     "file": "docs/frame-protocol.md",
-    "line": 333,
+    "line": 337,
     "policy": "prose",
     "pattern": "the switch belongs to any folder under a skills root, placed by Terum or not. `skill delete` drops the folder's"
   },
   {
     "file": "docs/frame-protocol.md",
-    "line": 334,
+    "line": 338,
     "policy": "prose",
     "pattern": "`\"off\"` the way `uninstall-skill` does, and `skill rename` / `skill move` carry it to the new name or the new"
   },
   {
     "file": "docs/frame-protocol.md",
-    "line": 337,
+    "line": 341,
     "policy": "prose",
     "pattern": "`skill fix <path>` is a one-shot frame write with no ask. It applies every repair whose outcome is"
   },
   {
     "file": "docs/frame-protocol.md",
-    "line": 339,
+    "line": 343,
     "policy": "prose",
     "pattern": "(the `ls --local` `invalid-yaml` reason), setting `name` to the folder name, setting `license` to the"
   },
   {
     "file": "docs/frame-protocol.md",
-    "line": 340,
+    "line": 344,
     "policy": "prose",
     "pattern": "team policy, removing HYG2's invisible characters, and clearing an executable mode on a non-script."
   },
   {
     "file": "docs/frame-protocol.md",
-    "line": 341,
+    "line": 345,
     "policy": "prose",
     "pattern": "It then runs the same inspection and hygiene gate as `ls --local` and `validate` and prints what still"
   },
   {
     "file": "docs/frame-protocol.md",
-    "line": 345,
+    "line": 349,
     "policy": "prose",
     "pattern": "three, and `validate`'s result carries `repairs`, one sentence per change `skill fix` would make, and"
   },
   {
     "file": "docs/frame-protocol.md",
-    "line": 348,
+    "line": 352,
     "policy": "prose",
     "pattern": "`skill category <path> --to <name>` is a one-shot frame write with no ask. It rewrites"
   },
   {
     "file": "docs/frame-protocol.md",
-    "line": 354,
+    "line": 358,
     "policy": "prose",
     "pattern": "category inside that version's immutable files), and print the `publish` that would mint the next"
   },
   {
     "file": "docs/frame-protocol.md",
-    "line": 359,
+    "line": 363,
     "policy": "prose",
     "pattern": "`prune` lists quarantine paths and asks `Delete <n> quarantined item(s)?`; empty quarantine asks"
   },
   {
     "file": "docs/frame-protocol.md",
-    "line": 362,
+    "line": 366,
     "policy": "prose",
     "pattern": "Neither `skill` nor `project` is in `SERVE_READ_VERBS`: serve gates on the first argv token, so"
   },
   {
     "file": "docs/frame-protocol.md",
-    "line": 363,
+    "line": 367,
     "policy": "prose",
     "pattern": "even `project list` needs its own process. The seven accepted verbs are unchanged."
   },
   {
     "file": "docs/frame-protocol.md",
-    "line": 365,
+    "line": 369,
     "policy": "prose",
     "pattern": "## What `status` reports about this machine"
   },
   {
     "file": "docs/frame-protocol.md",
-    "line": 367,
+    "line": 371,
     "policy": "prose",
     "pattern": "`status`'s result carries two architecture fields, on success and on a failing read alike:"
   },
   {
     "file": "docs/frame-protocol.md",
-    "line": 386,
+    "line": 390,
     "policy": "prose",
     "pattern": "`app` reports the same condition as `emulation`, either `\"win32-arm64-on-x64\"` or `null`, and prints one"
   },
   {
     "file": "docs/frame-protocol.md",
-    "line": 394,
+    "line": 398,
     "policy": "prose",
     "pattern": "`eval-report <skill> [--team <team>]` is read-only: it reads the local clone and this machine's run tree without fetching, networking, or prompting. `result.value` is an `EvalReport`:"
   },
   {
     "file": "docs/frame-protocol.md",
-    "line": 401,
+    "line": 405,
+    "policy": "prose",
+    "pattern": "`eval`'s own result (`EvalResult`) gained `report: { aggregate, triggers }` — the numbers `renderReport` prints, as data — and `receiptPath` on a completed run; `eval --drain` gained `outcomes: { skill, team?, ok, error? }[]`, one per attempted item in queue order. `validate` gained `directory`, the folder it checked. Additive; protocol stays 1."
+  },
+  {
+    "file": "docs/frame-protocol.md",
+    "line": 407,
     "policy": "prose",
     "pattern": "`sync [--team <team>]` fetches and resets the disposable clone under its writer lock and records"
   },
   {
     "file": "docs/frame-protocol.md",
-    "line": 405,
+    "line": 411,
     "policy": "prose",
     "pattern": "`project add [path]` · `project remove <path>` · `project list` · `project rename <path> --to <name>` are the Library's local project registry. `add` asks `Which folder?` as a `path` ask when no argument is given (default: the nearest git repository above the cwd) and returns `{ path, label, added, parent, reconcile? }`; after a newly added project it scans only that project, and frame mode carries the non-writing reconcile result so the shell can open a dialog only when it is non-empty. `remove` returns `{ path, placementsRemaining, subProjectsRemaining }` and forgets the path only, so nothing on disk changes; `list` returns `{ projects: { path, label, parent, rootState, skillFolders }[] }` in tree order; `rename` returns `{ path, label, previous }` and changes display text only, never the folder. A project registered inside another registered project is its sub-project: `parent` is that project's root (null at the top level), read off the paths on every call so the tree always matches the folder structure, and every `ls --local` project section carries the same `parent`. A sub-project's derived label is its path inside the parent (`apps/web`); a renamed label is kept as typed until renamed again, and the derived labels move out of its way. A project is added only by an explicit act: no verb registers one as a side effect, and `install --into <path>` refuses a path that is not already a project rather than adding it."
   },
   {
     "file": "docs/frame-protocol.md",
-    "line": 409,
+    "line": 415,
     "policy": "prose",
     "pattern": "`app-update --check` (the default) reads the cached release advertisement and local staged/installed versions, and keeps that advertisement fresh by itself: when the last probe is missing or a day old it probes release tags under the same GitHub-team policy and 10 s deadline as `update` (`probe: 'ok' | 'failed'`, at most once a day), otherwise it serves the cache (`probe: 'cached'`, or `'failed'` while the day's attempt failed). `--check --force` probes regardless of the cap. A check never touches the app or the CLI; its only write is the CLI's own release state in `run/latest-version.json` (the advertisement, the attempt, and the running observation every `sync` used to record). Checks always succeed, reporting probe failures as data. Until 0.15.0 the check was read-only and the advertisement was filled by the old sync; after the fetch-only sync collapse (§10) nothing on the app's path probed, so the app could never learn about a newer version by itself. The check owns the probe now."
   },
   {
     "file": "docs/frame-protocol.md",
-    "line": 411,
+    "line": 417,
     "policy": "prose",
     "pattern": "`app-update --stage [--release <version>]` downloads the selected release through `gh`, verifies its published SHA-256, and stages it without installing. The default release is this CLI's version. An advertised tag with missing release assets returns `ok: true, notPublished: true, staged: false`; the shell stays quiet and retries on the next launch."
   },
   {
     "file": "docs/frame-protocol.md",
-    "line": 413,
+    "line": 419,
     "policy": "prose",
     "pattern": "`app-update --apply [--release <version>] [--reason on-close|overnight|manual]` hands a staged install to a detached process. The public result values are:"
   },
   {
     "file": "docs/frame-protocol.md",
-    "line": 433,
+    "line": 439,
     "policy": "prose",
     "pattern": "`app-update --apply` returns as soon as the background installer process exists. The shell must then quit; it is the shell's job to quit and the CLI never kills it. `--apply` watches the CLI's parent process only in frame mode, where that parent is the shell itself; from a terminal it installs immediately."
   },
   {
     "file": "docs/frame-protocol.md",
-    "line": 439,
+    "line": 445,
     "policy": "prose",
     "pattern": "`ls` skill rows add `frontmatter: string | null` beside `body`; `ls --local` rows and `notOffered` entries also include the raw fenced frontmatter when readable (otherwise null), without adding body text to local inventory; key order, quoting, and internal line endings are preserved, and older CLIs may omit the field."
   },
   {
     "file": "docs/frame-protocol.md",
-    "line": 442,
+    "line": 448,
     "policy": "prose",
     "pattern": "`app-update --reason on-close|overnight|manual` records the install reason in every apply marker and forwards it from `--apply` to `--apply-now`. Omission remains compatible with old callers and displays the manual wording. No CLI verb or feature key is added."
   },
   {
     "file": "docs/frame-protocol.md",
-    "line": 444,
+    "line": 450,
     "policy": "prose",
     "pattern": "The desktop checks once at launch; that check refreshes the advertisement at most once a day (App updates above) and displays the advertised version in its top-bar update chip. Settings ▸ Updates uses `updates:app:policy`: `ask` (manual download/install), `on-close` (the default), or `overnight` (01:00–05:00 local after 30 idle minutes). The old boolean migrates once: false → ask, true → on-close. Successful install markers display “Updated to {version}”, adding “when you quit” or “overnight”; `updates:app:lastShown` acknowledges the marker across launches while the current session retains it. Failure markers remain visible. Settings ▸ Updates also carries a one-shot `Update and relaunch` row: it runs `app-update --check --force`, then `--stage` for the advertised build when it is newer and not yet staged, then the same confirmation dialog and `--apply --reason manual` followed by quit. A failed probe is reported as unreachable rather than as up to date, and the launch hook's automatic policy skips a version the row already started downloading in this session."
   },
   {
     "file": "docs/frame-protocol.md",
-    "line": 446,
+    "line": 452,
     "policy": "prose",
     "pattern": "Native-command amendment: `app_update_on_close({ version: string | null })` arms or disarms one detached installer. This additional command is necessary because the installer must outlive the WebView. The base actually has six commands including `quit`, so this is its seventh (the original decision's “five” count predates `quit`). On the last window's CloseRequested or ExitRequested, the shell consumes the arm once and invokes the recorded Node/CLI with `app-update --apply-now --release <version> --reason on-close`, plus `--await-pid <shell-pid>` to preserve the CLI's Windows wait. It uses a new process group on macOS and CREATE_NO_WINDOW | DETACHED_PROCESS on Windows and stays outside the bridge's child cleanup. The command follows the existing application-command registration, without a separate app ACL permission. Before spawning, the shell writes a waiting marker; a spawn failure replaces it with a failed marker. A child that dies before executing the CLI leaves the waiting marker visible as an unfinished install on the next launch. An unwritable marker is logged without preventing close. A manual or overnight handoff first disarms the close action to prevent two installers; a failed handoff restores the previous arm unless the policy changed in the meantime."
   },
   {
     "file": "docs/frame-protocol.md",
-    "line": 454,
+    "line": 460,
     "policy": "prose",
     "pattern": "`eval --queue-list` returns `{ items }`, where each item has `skill`, `path`, `contentHash`, `requestedAt`, optional `team`,"
   },
   {
     "file": "docs/frame-protocol.md",
-    "line": 455,
+    "line": 461,
     "policy": "prose",
     "pattern": "`window: \"overnight\" | \"later\"`, and an optional `lastError`. `eval --dequeue <team>/<skill>` removes all queued"
   },
   {
     "file": "docs/frame-protocol.md",
-    "line": 459,
+    "line": 465,
     "policy": "prose",
     "pattern": "`eval --drain [--parallel n] [--window overnight] [--max n]` returns `{ items, attempted, completed, failures }`."
   },
   {
     "file": "docs/frame-protocol.md",
-    "line": 467,
+    "line": 473,
     "policy": "prose",
     "pattern": "`eval <skill> <skill>… [--parallel n] [--batch n] [--window overnight|later] [--pending]` (past setup, 2026-09-13) runs the wizard's Now / In batches / Overnight choices as flags over any set of Library skills, or over `--pending`, the wizard's own candidate set (every shared skill with no receipt for its current version; needs a team). Several skills run as one batch after a single agent probe, `--parallel` deep (default four, never more than the batch). `--batch n` runs n at a time and asks `Continue with the next …?` before each further batch; a declined continuation queues the remainder for `later`, and a non-interactive caller runs every batch unasked. `--window` queues instead of running and never probes. The result is `{ mode: \"ran\" | \"queued\", team, skills, ok, failed, queued, stoppedAfter? }`; a run with failures is `ok:false` with that partial value, exactly like a drain. Print and `progress` frames name each skill and `progress.total` is the whole set. One skill with none of those flags is the ordinary single eval; the queue modes refuse skills, `--batch` and `--pending`."
   },
   {
     "file": "docs/frame-protocol.md",
-    "line": 470,
+    "line": 476,
     "policy": "prose",
     "pattern": "summary and marks the step `printed`; the shell owns the choices by calling `reconcile --list` and then"
   },
   {
     "file": "docs/frame-protocol.md",
-    "line": 471,
+    "line": 477,
     "policy": "prose",
     "pattern": "`install --adopt` or `publish`. `--no-existing`, quiet and non-interactive setup mark it `skipped`."
   },
   {
     "file": "docs/frame-protocol.md",
-    "line": 475,
+    "line": 481,
     "policy": "prose",
     "pattern": "team clone: sum each arm mean multiplied by `provenance.cases.length * provenance.k`, for both cost and duration. Receipts with null arm measurements do not qualify. With fewer than three eligible receipts,"
   },
   {
     "file": "docs/frame-protocol.md",
-    "line": 478,
+    "line": 484,
     "policy": "prose",
     "pattern": "A declined batch continuation queues the remaining skills for `later`; `eval --drain` includes those items."
   },
   {
     "file": "docs/frame-protocol.md",
-    "line": 482,
+    "line": 488,
     "policy": "prose",
     "pattern": "between 01:00 and 05:00 after thirty minutes without pointer or keyboard activity. The app starts `eval --drain --parallel 4` once that night; Stop cancels that one process. Activity, the preference, and the window are checked before launch; an active batch may finish. This unfiltered drain includes later items too, as required by A1. The app must remain open. Closed-app scheduling is deferred; a person can run"
   },
   {
     "file": "docs/frame-protocol.md",
-    "line": 483,
+    "line": 489,
     "policy": "prose",
     "pattern": "`eval --drain` manually at any time. The overnight preference defaults to true."
   },
   {
     "file": "docs/frame-protocol.md",
-    "line": 505,
+    "line": 511,
     "policy": "prose",
     "pattern": "eval offer available. Batch-size input is limited to three attempts. An empty drain prints `No queued evals.`;"
   },
   {
     "file": "docs/frame-protocol.md",
-    "line": 511,
+    "line": 517,
     "policy": "prose",
     "pattern": "`sync` fetches each configured team clone and hard-resets it to `origin/main`, one team at a time,"
   },
   {
     "file": "docs/frame-protocol.md",
-    "line": 518,
+    "line": 524,
     "policy": "prose",
     "pattern": "The result is `{ changed, teams, notices }`. `notices` carries run-wide lines already phrased for a person, one concern per entry and no diagnostics, because a frame-driven caller may render them verbatim: the desktop app prints them under Settings ▸ Sync after an automatic fetch that did not refresh every team. Each attempted team reports `team`, its own `changed`,"
   },
   {
     "file": "docs/frame-protocol.md",
-    "line": 522,
+    "line": 528,
     "policy": "prose",
     "pattern": "session-start hook left it alone (§8); a plain `sync` always fetches. Top-level `changed` is true when any team moved; a tracked tree that was"
   },
   {
     "file": "docs/frame-protocol.md",
-    "line": 538,
+    "line": 544,
     "policy": "prose",
     "pattern": "terum-skills process is writing the clone; a younger one is named in `detail` and never touched. Every prompt"
   },
   {
     "file": "docs/frame-protocol.md",
-    "line": 547,
+    "line": 555,
     "policy": "prose",
-    "pattern": "files of Terum's own when this CLI has moved past them: the bundled `/terum-skills` manual, and"
+    "pattern": "copy and adds a missing one, and it replaces `~/.terum/skills/hooks/terum-skills-edit.mjs`. Each"
   },
   {
     "file": "docs/frame-protocol.md",
-    "line": 548,
+    "line": 556,
     "policy": "prose",
-    "pattern": "`~/.terum/skills/hooks/terum-skills-edit.mjs`. Each rewrite is reported as a notice"
-  },
-  {
-    "file": "docs/frame-protocol.md",
-    "line": 549,
-    "policy": "prose",
-    "pattern": "(`Updated your /terum-skills manual for this CLI.`, `Updated your terum-skills edit hook for this"
-  },
-  {
-    "file": "docs/frame-protocol.md",
-    "line": 552,
-    "policy": "prose",
-    "pattern": "An interactive terminal `sync` may also offer to follow a team repository that has gone, and an"
-  },
-  {
-    "file": "docs/frame-protocol.md",
-    "line": 553,
-    "policy": "prose",
-    "pattern": "accepted offer runs `team move --yes`, which removes and re-places every placed skill. The offer is"
+    "pattern": "rewrite is reported as a notice (`Updated your terum-skills skills for this CLI.`, `Updated your"
   },
   {
     "file": "docs/frame-protocol.md",
     "line": 557,
     "policy": "prose",
+    "pattern": "terum-skills edit hook for this CLI.`). A foreign copy, or an edit hook that is absent because the"
+  },
+  {
+    "file": "docs/frame-protocol.md",
+    "line": 560,
+    "policy": "prose",
+    "pattern": "An interactive terminal `sync` may also offer to follow a team repository that has gone, and an"
+  },
+  {
+    "file": "docs/frame-protocol.md",
+    "line": 561,
+    "policy": "prose",
+    "pattern": "accepted offer runs `team move --yes`, which removes and re-places every placed skill. The offer is"
+  },
+  {
+    "file": "docs/frame-protocol.md",
+    "line": 565,
+    "policy": "prose",
     "pattern": "Work recorded in `pending` is drained by re-running the matching `install` or `uninstall-skill`, never"
   },
   {
     "file": "docs/frame-protocol.md",
-    "line": 558,
+    "line": 566,
     "policy": "prose",
     "pattern": "by `sync`."
   },
   {
     "file": "docs/frame-protocol.md",
-    "line": 560,
+    "line": 568,
     "policy": "prose",
     "pattern": "The desktop app is an unattended caller: it spawns plain `sync` at the first hello whose `features.refresh` is true and again whenever its window regains focus, at most once a minute, one at a time, and never while a foreground write verb of its own is running. It drives the run read-only and kills it rather than answer, so `sync` must never ask a question; it keeps only `changed`, each team's `state`/`detail`, and `notices`, so anything a person needs to act on has to be in those fields rather than in printed prose. Every completed automatic fetch refreshes the stamp-driven boards (Status, Settings ▸ Sync, Inbox); one that moved a clone also refreshes the Marketplace boards."
   },
@@ -3487,7 +3535,7 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "file": "docs/getting-started/install.md",
     "line": 103,
     "policy": "prose",
-    "pattern": "13. **The `/terum-skills` skill.** \"Install the /terum-skills Claude Code skill so Claude can run terum-skills for you? (writes ~/.claude/skills/terum-skills)\" (default No)."
+    "pattern": "13. **The skills.** \"Install the terum-skills skills for Claude Code and Codex so they can run terum-skills for you? (writes ~/.claude/skills/{eval, eval-report, list-skills, search-skills, skill-info, skill-status, sync-skills, terum-skills} and ~/.codex/skills/{…})\" (default No). Without `~/.codex` on the machine the question names Claude Code alone and the run says `No ~/.codex on this machine; Codex skills skipped.`"
   },
   {
     "file": "docs/getting-started/install.md",
@@ -3499,7 +3547,7 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "file": "docs/getting-started/install.md",
     "line": 107,
     "policy": "prose",
-    "pattern": "These are three separate questions on purpose. The session hook fetches on a schedule; the edit hook runs after every Write and Edit the agent makes and reads the path it touched. Folding the second into a yes already given would install something else. All three default to No, and declining any of them is remembered only in the sense that nothing was written: a later `sync --hook` never installs a copy you declined, it only refreshes one you accepted. A re-run does not ask again for one you already have. An installed session hook is reported rather than offered, and an out-of-date `/terum-skills` skill or edit-hook script of ours is refreshed without a question, because the consent was given when it was installed. Anything at either path that is not ours is named and left alone. The hook entry and the `/terum-skills` skill both name the copy of the CLI that wrote them rather than the registry's latest release, so a session runs the copy you installed; a later `sync --hook` re-points an entry written by an earlier release at the copy that is running and says so on stderr. See [Claude Code integration](../guides/claude-code-integration.md), and [security](../../SECURITY.md) for what runs on this machine and when."
+    "pattern": "These are three separate questions on purpose. The session hook fetches on a schedule; the edit hook runs after every Write and Edit the agent makes and reads the path it touched. Folding the second into a yes already given would install something else. All three default to No, and declining any of them is remembered only in the sense that nothing was written: a later `sync --hook` never installs a copy you declined, it only refreshes one you accepted. A re-run does not ask again for one you already have. An installed session hook is reported rather than offered, and out-of-date copies of the eight skills, or an out-of-date edit-hook script of ours, are refreshed without a question, because the consent was given when they were installed; a skills root that already holds Terum's copies also receives any of the eight that are missing. Anything at one of those paths that is not ours is named and left alone. The hook entry and the placed skills all name the copy of the CLI that wrote them rather than the registry's latest release, so a session runs the copy you installed; a later `sync --hook` re-points an entry written by an earlier release at the copy that is running and says so on stderr. See [Claude Code integration](../guides/claude-code-integration.md), and [security](../../SECURITY.md) for what runs on this machine and when."
   },
   {
     "file": "docs/getting-started/install.md",
@@ -3529,7 +3577,7 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "file": "docs/getting-started/install.md",
     "line": 133,
     "policy": "prose",
-    "pattern": "| `~/.claude/skills/terum-skills/` | Only if you accept the `/terum-skills` skill | The bundled skill that teaches Claude Code which verbs it may run. Anything else already at that path is named and left alone. |"
+    "pattern": "| `~/.claude/skills/<name>/`, eight folders, and `~/.codex/skills/<name>/` when `~/.codex` exists | Only if you accept the skills | The bundled skills that let Claude Code and Codex run terum-skills for you; see [Claude Code integration](../guides/claude-code-integration.md#the-eight-skills). Anything else already at one of those paths is named and left alone. |"
   },
   {
     "file": "docs/getting-started/install.md",
@@ -3553,7 +3601,7 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "file": "docs/getting-started/install.md",
     "line": 152,
     "policy": "fixed",
-    "pattern": "The `npx -y terum-skills@latest …` form resolves the registry's latest release on each run, so a command you type is always the newest release. The session hook and the `/terum-skills` skill are the exception: each is pinned to the copy that installed it, and re-running `setup` is what moves them."
+    "pattern": "The `npx -y terum-skills@latest …` form resolves the registry's latest release on each run, so a command you type is always the newest release. The session hook and the placed skills are the exception: each is pinned to the copy that installed it, and re-running `setup` is what moves them."
   },
   {
     "file": "docs/getting-started/install.md",
@@ -3583,7 +3631,7 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "file": "docs/getting-started/install.md",
     "line": 173,
     "policy": "fixed",
-    "pattern": "| `npx -y terum-skills@latest` | Each run requests the registry's latest release. Re-run `setup` to move the session hook and the `/terum-skills` skill onto it. |"
+    "pattern": "| `npx -y terum-skills@latest` | Each run requests the registry's latest release. Re-run `setup` to move the session hook and the placed skills onto it. |"
   },
   {
     "file": "docs/getting-started/install.md",
@@ -3607,13 +3655,13 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "file": "docs/getting-started/install.md",
     "line": 183,
     "policy": "prose",
-    "pattern": "`update` prints the running version, where this copy lives, the latest advertised release, and the command that would update this copy. Where that copy is a global install, an npx run, or one whose installation method could not be established, it also names the re-run of `setup` that moves the session hook and the `/terum-skills` skill onto the release you updated to. It never runs a package manager. The release advertisement comes from a `git ls-remote --tags` probe of this project's public repository, capped at once a day for the passive notice and forced when you run `update` yourself. A machine whose team remote is not on GitHub does not probe at all, and says so: \"Release advertisements are not checked on this machine.\""
+    "pattern": "`update` prints the running version, where this copy lives, the latest advertised release, and the command that would update this copy. Where that copy is a global install, an npx run, or one whose installation method could not be established, it also names the re-run of `setup` that moves the session hook and the placed skills onto the release you updated to. It never runs a package manager. The release advertisement comes from a `git ls-remote --tags` probe of this project's public repository, capped at once a day for the passive notice and forced when you run `update` yourself. A machine whose team remote is not on GitHub does not probe at all, and says so: \"Release advertisements are not checked on this machine.\""
   },
   {
     "file": "docs/getting-started/install.md",
     "line": 187,
     "policy": "fixed",
-    "pattern": "`npx -y terum-skills@latest uninstall` removes terum-skills from this machine after one confirmation that lists everything it is about to touch: your team binding, every placed skill folder, the team clone, the version cache and run files, the session hook and the Write/Edit entry in `~/.claude/settings.json`, the managed `/terum-skills` skill and the edit-hook script (a foreign file at either path is named and left alone), the app download records, and `config.json`. It keeps your quarantine folder when it holds anything, the `backups/` folder including a record of the uninstall, and `evals/` with its runs and transcripts, and it says so under `Kept:` before you answer. More can survive than that line names. At the end it removes `app/` outright, but removes `run/`, `cache/`, `teams/` and `quarantine/` only when they are already empty. So anything still under `run/`, such as the usage archive and the eval queue, stays behind and is reported as `Kept <path> (not empty)`, and a quarantine folder is reported with its item count. The state root `~/.terum/skills` itself is left in place whenever anything remains inside it, with no line at all. A clone holding uncommitted or unpushed work is moved to quarantine rather than deleted, and a placed folder you have edited is quarantined rather than deleted. Your membership and installed-skill records in the team repo are unchanged. On macOS the app bundle at `~/Applications/Terum Skills.app` is deleted; on Windows the app stays installed and you remove it from Windows Settings, Apps. The npm package itself is never removed by this command; the last line tells you how. Full detail, including what survives and why, is in [local state](../reference/local-state.md)."
+    "pattern": "`npx -y terum-skills@latest uninstall` removes terum-skills from this machine after one confirmation that lists everything it is about to touch: your team binding, every placed skill folder, the team clone, the version cache and run files, the session hook and the Write/Edit entry in `~/.claude/settings.json`, the managed skills under `~/.claude/skills/` and `~/.codex/skills/` and the edit-hook script (a foreign file at any of those paths is named and left alone), the app download records, and `config.json`. It keeps your quarantine folder when it holds anything, the `backups/` folder including a record of the uninstall, and `evals/` with its runs and transcripts, and it says so under `Kept:` before you answer. More can survive than that line names. At the end it removes `app/` outright, but removes `run/`, `cache/`, `teams/` and `quarantine/` only when they are already empty. So anything still under `run/`, such as the usage archive and the eval queue, stays behind and is reported as `Kept <path> (not empty)`, and a quarantine folder is reported with its item count. The state root `~/.terum/skills` itself is left in place whenever anything remains inside it, with no line at all. A clone holding uncommitted or unpushed work is moved to quarantine rather than deleted, and a placed folder you have edited is quarantined rather than deleted. Your membership and installed-skill records in the team repo are unchanged. On macOS the app bundle at `~/Applications/Terum Skills.app` is deleted; on Windows the app stays installed and you remove it from Windows Settings, Apps. The npm package itself is never removed by this command; the last line tells you how. Full detail, including what survives and why, is in [local state](../reference/local-state.md)."
   },
   {
     "file": "docs/getting-started/join-a-team.md",
@@ -3637,7 +3685,7 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "file": "docs/getting-started/join-a-team.md",
     "line": 15,
     "policy": "prose",
-    "pattern": "`team join` still ends with one offer of the session-start hook, after the join itself is durable. It never offers the `/terum-skills` skill or the edit hook; only `setup` does."
+    "pattern": "`team join` still ends with one offer of the session-start hook, after the join itself is durable. It never offers the eight skills or the edit hook; only `setup` does."
   },
   {
     "file": "docs/getting-started/join-a-team.md",
@@ -3703,13 +3751,13 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "file": "docs/guides/claude-code-integration.md",
     "line": 3,
     "policy": "prose",
-    "pattern": "terum-skills puts four things inside your Claude Code setup. Three of them are separate offers during setup, each with its own question, and every question defaults to No, so nothing below is on your machine unless you answered yes. The fourth, the per-machine switch, is a verb you run."
+    "pattern": "terum-skills puts four things inside your Claude Code setup, and the first of them inside Codex too. Three of them are separate offers during setup, each with its own question, and every question defaults to No, so nothing below is on your machine unless you answered yes. The fourth, the per-machine switch, is a verb you run."
   },
   {
     "file": "docs/guides/claude-code-integration.md",
     "line": 7,
     "policy": "prose",
-    "pattern": "| The `/terum-skills` skill | `~/.claude/skills/terum-skills/` | Teaches Claude Code which verbs it may run for you and which to hand to your terminal |"
+    "pattern": "| The eight skills | `~/.claude/skills/<name>/`, and `~/.codex/skills/<name>/` for Codex | Run terum-skills for you and show the result as a board; the manual among them says which verbs to hand to your terminal |"
   },
   {
     "file": "docs/guides/claude-code-integration.md",
@@ -3725,205 +3773,235 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
   },
   {
     "file": "docs/guides/claude-code-integration.md",
-    "line": 14,
-    "policy": "prose",
-    "pattern": "## The /terum-skills skill"
-  },
-  {
-    "file": "docs/guides/claude-code-integration.md",
     "line": 16,
     "policy": "prose",
-    "pattern": "This is the operator manual for Claude Code. It ships inside the npm package and setup copies it to `~/.claude/skills/terum-skills/SKILL.md`. With it installed, asking Claude to \"list my team's skills\" or \"evaluate this skill\" gets a correct invocation instead of a guess."
+    "pattern": "terum-skills ships eight skills inside the npm package. Setup places them for Claude Code under `~/.claude/skills/<name>/` and, when `~/.codex` exists on the machine, for Codex under `~/.codex/skills/<name>/` (`CODEX_HOME` moves that root). Seven are narrow, one per common request; the eighth, `terum-skills`, is the operator manual for everything else. With them installed, asking Claude or Codex to \"list my team's skills\" or \"evaluate this skill\" gets a correct invocation instead of a guess, and the result comes back as a Markdown board (`--format md`)."
   },
   {
     "file": "docs/guides/claude-code-integration.md",
-    "line": 18,
-    "policy": "fixed",
-    "pattern": "The copy that lands on your machine is not the bundled copy byte for byte. Every `npx -y terum-skills@latest` in it is rewritten to the spelling this machine uses: `terum-skills` where the [bare invocation form](../reference/cli.md#invocation) is available, and `npx -y terum-skills@<the version that placed it>` everywhere else, including every Windows machine. A session therefore runs the copy you installed, never whatever the registry has published since."
+    "line": 20,
+    "policy": "prose",
+    "pattern": "| `list-skills [--local\\|--team]` | `ls --local --format md` and `ls --format md`: your Library and the team Marketplace |"
+  },
+  {
+    "file": "docs/guides/claude-code-integration.md",
+    "line": 21,
+    "policy": "prose",
+    "pattern": "| `skill-info <name>` | `ls skill <name> --format md`, then `eval-report <name> --format md` for a team skill |"
+  },
+  {
+    "file": "docs/guides/claude-code-integration.md",
+    "line": 22,
+    "policy": "prose",
+    "pattern": "| `search-skills <term>` | `search <term> --format md` |"
   },
   {
     "file": "docs/guides/claude-code-integration.md",
     "line": 23,
     "policy": "prose",
-    "pattern": "Install the /terum-skills Claude Code skill so Claude can run terum-skills for you? (writes ~/.claude/skills/terum-skills) [y/N]"
+    "pattern": "| `eval <skill> [flags]` | `eval <skill> --format md`, after confirming the cost with you |"
+  },
+  {
+    "file": "docs/guides/claude-code-integration.md",
+    "line": 24,
+    "policy": "prose",
+    "pattern": "| `eval-report <skill>` | `eval-report <skill> --format md` |"
+  },
+  {
+    "file": "docs/guides/claude-code-integration.md",
+    "line": 25,
+    "policy": "prose",
+    "pattern": "| `skill-status` | `status --format md`, then `update --format md` |"
   },
   {
     "file": "docs/guides/claude-code-integration.md",
     "line": 26,
     "policy": "prose",
-    "pattern": "Answering no prints `Skipped the /terum-skills skill; re-run setup to install it later.` and writes nothing."
+    "pattern": "| `sync-skills` | `sync --format md` |"
   },
   {
     "file": "docs/guides/claude-code-integration.md",
-    "line": 30,
+    "line": 27,
     "policy": "prose",
-    "pattern": "Terum's copy is marked in the SKILL.md frontmatter: `name: terum-skills` plus `metadata.managed-by: terum-skills`. That marker is the whole idempotency key."
+    "pattern": "| `terum-skills <verb …>` | any verb with `--format md`; the verbs that ask a question are handed to your terminal |"
   },
   {
     "file": "docs/guides/claude-code-integration.md",
-    "line": 32,
-    "policy": "prose",
-    "pattern": "An outdated copy carrying that marker is refreshed in place without a second question, because the consent was given when it was installed and a stale manual teaches Claude the wrong verbs. Setup does it, and `sync --hook` does it too, printing `Updated your /terum-skills manual for this CLI.` on its notice channel. Outdated means byte-different from the bundled copy rendered in this machine's spelling, so a manual placed by a different copy of the CLI is outdated by that definition and is rewritten on the next setup or hook run."
-  },
-  {
-    "file": "docs/guides/claude-code-integration.md",
-    "line": 48,
-    "policy": "prose",
-    "pattern": "`status`, `ls`, `ls member`, `ls project`, `ls --local`, `project add <path>`, `project remove`, `project rename`, `project list`, `search`, `skill fix`, `skill category`, `validate`, `update`, `app`, `app-update`, `sync`, `install`, `invite`, `profile`, `login --set`, `team workflow-update --print`, the whole `eval` family, `eval-report` and `serve`."
-  },
-  {
-    "file": "docs/guides/claude-code-integration.md",
-    "line": 52,
-    "policy": "prose",
-    "pattern": "`publish`, `project add` with no path, `skill move`, `skill copy`, `skill rename`, `skill delete`, `skill enable`, `skill disable`, `prune`, `uninstall-skill`, `uninstall`, `team leave`, `team remove`, `team move`, `team project create`, `team project delete`, `team migrate`, and the wizards: `setup`, `team create`, `team join`, bare `login`."
-  },
-  {
-    "file": "docs/guides/claude-code-integration.md",
-    "line": 54,
-    "policy": "prose",
-    "pattern": "`unpublish` and `reconcile` are in neither list, so the skill gives Claude no rule for them."
-  },
-  {
-    "file": "docs/guides/claude-code-integration.md",
-    "line": 56,
-    "policy": "prose",
-    "pattern": "The skill's own rules keep that line honest: never pipe `y` on stdin, never invent flags, never drive the CLI through `expect` or `script`, and never use `--frames` to get around the TTY rule. It also tells Claude to confirm with you before anything that spends money (every `eval`) or changes the team (`install`, `invite`, `profile`)."
-  },
-  {
-    "file": "docs/guides/claude-code-integration.md",
-    "line": 60,
+    "line": 29,
     "policy": "fixed",
-    "pattern": "There is no separate remove verb. `npx -y terum-skills@latest uninstall` removes the managed copy as part of the machine teardown and prints `Removed the /terum-skills Claude Code skill from <path>.` Otherwise delete `~/.claude/skills/terum-skills/` yourself; setup offers it again next time."
+    "pattern": "None of the copies that land on your machine is the bundled copy byte for byte. Every `npx -y terum-skills@latest` in each of them is rewritten to the spelling this machine uses: `terum-skills` where the [bare invocation form](../reference/cli.md#invocation) is available, and `npx -y terum-skills@<the version that placed it>` everywhere else, including every Windows machine. A session therefore runs the copy you installed, never whatever the registry has published since."
   },
   {
     "file": "docs/guides/claude-code-integration.md",
-    "line": 76,
+    "line": 34,
+    "policy": "prose",
+    "pattern": "Install the terum-skills skills for Claude Code and Codex so they can run terum-skills for you? (writes ~/.claude/skills/{eval, eval-report, list-skills, search-skills, skill-info, skill-status, sync-skills, terum-skills} and ~/.codex/skills/{eval, eval-report, list-skills, search-skills, skill-info, skill-status, sync-skills, terum-skills}) [y/N]"
+  },
+  {
+    "file": "docs/guides/claude-code-integration.md",
+    "line": 37,
+    "policy": "prose",
+    "pattern": "On a machine without `~/.codex` the question names Claude Code alone and the run says `No ~/.codex on this machine; Codex skills skipped.` Answering no prints `Skipped the terum-skills skills; re-run setup to install them later.` and writes nothing."
+  },
+  {
+    "file": "docs/guides/claude-code-integration.md",
+    "line": 41,
+    "policy": "prose",
+    "pattern": "Terum's copies are marked in each SKILL.md frontmatter: the skill's own `name` plus `metadata.managed-by: terum-skills`. That marker is the whole idempotency key."
+  },
+  {
+    "file": "docs/guides/claude-code-integration.md",
+    "line": 43,
+    "policy": "prose",
+    "pattern": "An outdated copy carrying that marker is refreshed in place without a second question, because the consent was given when it was installed and a stale skill teaches the agent the wrong verbs. Setup does it, and so does `sync --hook`: in a root that already holds one of Terum's copies it rewrites the outdated ones and adds any that are missing, which is how a release that ships a new skill reaches you, printing `Updated your terum-skills skills for this CLI.` on its notice channel. Outdated means byte-different from the bundled copy rendered in this machine's spelling, so a copy placed by a different copy of the CLI is outdated by that definition and is rewritten on the next setup or hook run."
+  },
+  {
+    "file": "docs/guides/claude-code-integration.md",
+    "line": 59,
+    "policy": "prose",
+    "pattern": "`status`, `ls`, `ls member`, `ls project`, `ls skill`, `ls --local`, `project add <path>`, `project remove`, `project rename`, `project list`, `search`, `skill fix`, `skill category`, `validate`, `update`, `app`, `app-update`, `sync`, `install`, `publish`, `invite`, `profile`, `login --set`, `team workflow-update --print`, the whole `eval` family, `eval-report` and `serve`."
+  },
+  {
+    "file": "docs/guides/claude-code-integration.md",
+    "line": 63,
+    "policy": "prose",
+    "pattern": "`unpublish`, `reconcile`, `project add` with no path, `skill move`, `skill copy`, `skill rename`, `skill delete`, `skill enable`, `skill disable`, `prune`, `uninstall-skill`, `uninstall`, `team leave`, `team remove`, `team move`, `team project create`, `team project delete`, `team migrate`, and the wizards: `setup`, `team create`, `team join`, bare `login`."
+  },
+  {
+    "file": "docs/guides/claude-code-integration.md",
+    "line": 65,
+    "policy": "prose",
+    "pattern": "The manual's own rules keep that line honest: never pipe `y` on stdin, never invent flags, never drive the CLI through `expect` or `script`, and never use `--frames` to get around the TTY rule. It also tells the agent to confirm with you before anything that spends money (every `eval`) or changes the team (`install`, `publish`, `invite`, `profile`)."
+  },
+  {
+    "file": "docs/guides/claude-code-integration.md",
+    "line": 69,
+    "policy": "fixed",
+    "pattern": "There is no separate remove verb. `npx -y terum-skills@latest uninstall` removes the managed copies as part of the machine teardown and prints `Removed the terum-skills skills from <root>: <names>.` for each root. Otherwise delete the folders under `~/.claude/skills/` and `~/.codex/skills/` yourself; setup offers them again next time."
+  },
+  {
+    "file": "docs/guides/claude-code-integration.md",
+    "line": 85,
     "policy": "prose",
     "pattern": "{ \"type\": \"command\", \"command\": \"npx -y terum-skills@0.20.1 sync --hook\", \"async\": true, \"timeout\": 60 }"
   },
   {
     "file": "docs/guides/claude-code-integration.md",
-    "line": 81,
+    "line": 90,
     "policy": "prose",
     "pattern": "The command is this copy of the CLI, pinned, and never `@latest`. Where the [bare invocation form](../reference/cli.md#invocation) is available, which means a global install this CLI found first on `PATH` on macOS or Linux, the entry reads `terum-skills sync --hook` instead; everywhere else, including every Windows machine, it is the npx form carrying this copy's version. Nothing fetches a newer CLI at the start of a session, and a newer release reaches the entry only when you update the package and re-run `setup`."
   },
   {
     "file": "docs/guides/claude-code-integration.md",
-    "line": 83,
+    "line": 92,
     "policy": "prose",
     "pattern": "Before the first write it takes one verbatim backup of your settings file to `~/.terum/skills/backups/settings.<timestamp>.json`, and only if no settings backup exists yet. Writes are atomic and keep the file's mode. A settings file that is not valid JSON, or whose `hooks`, `hooks.SessionStart` or `hooks.PostToolUse` is the wrong shape, is refused outright: `Cannot edit <path>: it is not valid JSON. Fix it by hand or move it aside, then re-run.` Reinstalling strips every terum-skills command already under `SessionStart` first, so there is never a duplicate, and a group that holds other people's commands keeps them."
   },
   {
     "file": "docs/guides/claude-code-integration.md",
-    "line": 89,
-    "policy": "prose",
-    "pattern": "It places nothing, uploads nothing and edits none of your skill folders. The exceptions are Terum's own artefacts described on this page: its own `SessionStart` entry, an outdated `/terum-skills` manual and an outdated edit-hook script."
-  },
-  {
-    "file": "docs/guides/claude-code-integration.md",
-    "line": 91,
+    "line": 100,
     "policy": "fixed",
     "pattern": "Re-pointing its own entry is a one-time migration. Releases before the pinning change wrote `npx -y terum-skills@latest sync --hook`, so a hook run compares the command in the entry against the one this copy would write and rewrites the entry when the two differ. It never installs an entry where none of ours exists, because an hourly hook must not install what somebody declined. When it does rewrite one, stderr carries:"
   },
   {
     "file": "docs/guides/claude-code-integration.md",
-    "line": 94,
+    "line": 103,
     "policy": "fixed",
     "pattern": "Pinned your session hook to this copy of terum-skills (npx -y terum-skills@0.20.1 sync --hook); it no longer fetches the newest release at session start. Re-run `npx -y terum-skills@latest setup` after an update to move it."
   },
   {
     "file": "docs/guides/claude-code-integration.md",
-    "line": 105,
+    "line": 114,
     "policy": "prose",
     "pattern": "Everything else, including per-team failures and the two refresh notices, goes to stderr so that line stays parseable. Concurrent runs on one clone are serialised by that clone's own writer lock, and a run that finds it held reports `<team>: not refreshed (busy)` on stderr and still exits 0. `sync --hook` is refused under `--frames`."
   },
   {
     "file": "docs/guides/claude-code-integration.md",
-    "line": 111,
+    "line": 120,
     "policy": "prose",
     "pattern": "The hook goes when your last team goes. `team leave <name>` removes it with the last team and prints `Removed the session hook from <path>.`, and `uninstall` removes it during machine teardown. There is no separate switch, and the app's Settings ▸ Sync row says so: it is read-only and reads `Managed by setup`. You can also delete the entry from `~/.claude/settings.json` by hand."
   },
   {
     "file": "docs/guides/claude-code-integration.md",
-    "line": 120,
+    "line": 129,
     "policy": "prose",
     "pattern": "Remind Claude Code to publish a skill after it edits one? (installs ~/.terum/skills/hooks/terum-skills-edit.mjs and a Write/Edit hook in ~/.claude/settings.json) [y/N]"
   },
   {
     "file": "docs/guides/claude-code-integration.md",
-    "line": 123,
+    "line": 132,
     "policy": "prose",
     "pattern": "Yes writes the script to `~/.terum/skills/hooks/terum-skills-edit.mjs` and this entry into `hooks.PostToolUse`:"
   },
   {
     "file": "docs/guides/claude-code-integration.md",
-    "line": 129,
+    "line": 138,
     "policy": "prose",
     "pattern": "{ \"type\": \"command\", \"command\": \"node \\\"<home>/.terum/skills/hooks/terum-skills-edit.mjs\\\"\", \"timeout\": 10 }"
   },
   {
     "file": "docs/guides/claude-code-integration.md",
-    "line": 136,
+    "line": 145,
     "policy": "prose",
     "pattern": "When the edit is inside a skill folder, terum-skills is set up and a team is configured, the hook writes a note that begins:"
   },
   {
     "file": "docs/guides/claude-code-integration.md",
-    "line": 139,
+    "line": 148,
     "policy": "prose",
     "pattern": "You edited <name>, a skill in this machine's terum-skills Library (<folder>)."
   },
   {
     "file": "docs/guides/claude-code-integration.md",
-    "line": 142,
+    "line": 151,
     "policy": "prose",
     "pattern": "The rest of the note says whether that folder is an installed copy of a team version, that the edit is local until it is published, and gives the `publish` and `eval` commands, with the warning that `publish` asks questions and so needs a real terminal. It appears once per skill per session, recorded under `~/.terum/skills/run/edit-hints/`, swept after seven days. Any failure is silence: the script always exits 0, because a reminder is never worth interrupting an edit."
   },
   {
     "file": "docs/guides/claude-code-integration.md",
-    "line": 146,
+    "line": 155,
     "policy": "prose",
     "pattern": "`uninstall` removes both halves, the settings entry first so that no entry ever names a deleted script, and prints `Removed the terum-skills edit hook from <path> and <settings>.` By hand, delete the `Write|Edit` entry from `~/.claude/settings.json` and the script under `~/.terum/skills/hooks/`. A file at that path that is not Terum's own keeps its settings entry too: the CLI removes only what it wrote."
   },
   {
     "file": "docs/guides/claude-code-integration.md",
-    "line": 150,
+    "line": 159,
     "policy": "prose",
     "pattern": "Claude Code loads whatever sits in a skills directory, so terum-skills cannot switch a placed copy off without moving the folder. It does not have to. Claude Code has its own `skillOverrides` setting, and `off` hides a skill from the model and from the `/` menu. This is the same key the `/skills` menu writes."
   },
   {
     "file": "docs/guides/claude-code-integration.md",
-    "line": 153,
+    "line": 162,
     "policy": "fixed",
     "pattern": "npx -y terum-skills@latest skill disable ~/.claude/skills/deploy-check"
   },
   {
     "file": "docs/guides/claude-code-integration.md",
-    "line": 154,
+    "line": 163,
     "policy": "fixed",
     "pattern": "npx -y terum-skills@latest skill enable ~/.claude/skills/deploy-check"
   },
   {
     "file": "docs/guides/claude-code-integration.md",
-    "line": 166,
+    "line": 175,
     "policy": "prose",
     "pattern": "Only `off` belongs to terum-skills. `name-only` and `user-invocable-only` still let Claude or you reach the skill, so they read as enabled, and `enable` never removes them. Names are matched the way Claude Code matches them, ignoring case and spacing, so a hand-written entry is honoured."
   },
   {
     "file": "docs/guides/claude-code-integration.md",
-    "line": 177,
+    "line": 186,
     "policy": "prose",
     "pattern": "The switch on a Library card in [the app](desktop-app.md) calls exactly this verb, and the next Library read brings `enabled` back from the same settings files, so the app's switch and Claude's menu can never disagree. Every row `ls --local` returns carries the same `enabled` field. A skill moved or renamed with `skill move` or `skill rename` carries its `off` to the destination's settings file, and removing a skill clears the `off` so a reinstall is not born disabled."
   },
   {
     "file": "docs/guides/claude-code-integration.md",
-    "line": 185,
+    "line": 194,
     "policy": "prose",
     "pattern": "`usage` reads Claude Code's own transcripts under `~/.claude/projects` and counts each placed skill's firings, then archives what it scanned to `~/.terum/skills/run/usage-events.jsonl` so the count survives Claude Code's roughly 30-day transcript retention. It makes no model call at all, which is what lets the app run it on every skill page. Its `--since` bound is validated and canonicalised before the scan, and `--all` folds the names that fired with no placement here into the one table."
   },
   {
     "file": "docs/guides/claude-code-integration.md",
-    "line": 187,
+    "line": 196,
     "policy": "prose",
     "pattern": "`misses` reads the same transcripts for the question `usage` cannot answer: which prompts a placed skill should have been chosen for and was not. It harvests the prompts themselves rather than firing records, and it does spend Claude Code sessions, one `claude -p` call per ten prompts, so it is a verb you run rather than something a page opens. It writes nothing."
   },
@@ -4559,21 +4637,15 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
   },
   {
     "file": "docs/guides/install-and-manage.md",
-    "line": 286,
-    "policy": "prose",
-    "pattern": "- an outdated managed copy of the bundled `/terum-skills` skill is refreshed, printing `Updated your"
-  },
-  {
-    "file": "docs/guides/install-and-manage.md",
     "line": 287,
     "policy": "prose",
-    "pattern": "/terum-skills manual for this CLI.`, and so is the edit hook's script, printing `Updated your"
+    "pattern": "and missing ones added, printing `Updated your terum-skills skills for this CLI.`, and so is the edit"
   },
   {
     "file": "docs/guides/install-and-manage.md",
     "line": 288,
     "policy": "prose",
-    "pattern": "terum-skills edit hook for this CLI.` A copy you declined, or never saw offered, is never installed"
+    "pattern": "hook's script, printing `Updated your terum-skills edit hook for this CLI.` A copy you declined, or never saw offered, is never installed"
   },
   {
     "file": "docs/guides/install-and-manage.md",
@@ -5419,7 +5491,7 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "file": "docs/reference/cli.md",
     "line": 135,
     "policy": "prose",
-    "pattern": "Writes: `~/.terum/skills/config.json`, the team clone under `~/.terum/skills/teams/<team>/`, and whichever of `~/.claude/settings.json`, `~/.claude/skills/terum-skills/` and `~/.terum/skills/hooks/terum-skills-edit.mjs` you accept. On macOS and Windows it also installs the desktop app. It writes the team repository through `team create` or `team join` only."
+    "pattern": "Writes: `~/.terum/skills/config.json`, the team clone under `~/.terum/skills/teams/<team>/`, and whichever of `~/.claude/settings.json`, the eight skill folders under `~/.claude/skills/` (and under `~/.codex/skills/` when `~/.codex` exists) and `~/.terum/skills/hooks/terum-skills-edit.mjs` you accept. On macOS and Windows it also installs the desktop app. It writes the team repository through `team create` or `team join` only."
   },
   {
     "file": "docs/reference/cli.md",
@@ -5977,7 +6049,7 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "file": "docs/reference/cli.md",
     "line": 895,
     "policy": "prose",
-    "pattern": "The verb's help says \"Nothing on this machine is changed\", and that is true of your skills in the ordinary case, but two paths do write outside the clone. `--hook` refreshes three artefacts of terum-skills' own: its own `SessionStart` entry, the `/terum-skills` Claude Code skill, and the edit-hook script. Each is touched only where it is already present and out of date (never when absent, which means you declined it, and never when foreign). Refreshing the edit hook is both halves of it, so that path also rewrites the `PostToolUse` entry in `~/.claude/settings.json`, after backing the file up."
+    "pattern": "The verb's help says \"Nothing on this machine is changed\", and that is true of your skills in the ordinary case, but two paths do write outside the clone. `--hook` refreshes three artefacts of terum-skills' own: its own `SessionStart` entry, the eight skills it placed for Claude Code and Codex, and the edit-hook script. Each is touched only where it is already present and out of date (never when absent, which means you declined it, and never when foreign), with one extension: a skills root that already holds Terum's copies also receives any of the eight that are missing. Refreshing the edit hook is both halves of it, so that path also rewrites the `PostToolUse` entry in `~/.claude/settings.json`, after backing the file up."
   },
   {
     "file": "docs/reference/cli.md",
@@ -5989,7 +6061,7 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "file": "docs/reference/cli.md",
     "line": 903,
     "policy": "prose",
-    "pattern": "A settings file this run cannot read or write is a notice too, never a failure, because the fetch has already happened: `Could not pin the session hook in <path>: <reason>`. The `/terum-skills` manual is compared against the bundled copy rendered in this machine's own spelling, so a manual placed by a different copy counts as outdated and is rewritten with `Updated your /terum-skills manual for this CLI.`"
+    "pattern": "A settings file this run cannot read or write is a notice too, never a failure, because the fetch has already happened: `Could not pin the session hook in <path>: <reason>`. Each placed skill is compared against the bundled copy rendered in this machine's own spelling, so a copy placed by a different copy of the CLI counts as outdated and is rewritten with `Updated your terum-skills skills for this CLI.`"
   },
   {
     "file": "docs/reference/cli.md",
@@ -6145,7 +6217,7 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "file": "docs/reference/cli.md",
     "line": 1143,
     "policy": "prose",
-    "pattern": "What it does: removes terum-skills from this machine after one confirmation whose detail is a full inventory. It writes a record of your config to `~/.terum/skills/backups/uninstall.<stamp>.json`, removes the session hook, the managed `/terum-skills` Claude Code skill, and the edit hook (its settings entry first, then the script), then tears down every configured team in a loop, deletes `config.json`, removes `run/app.json` and `run/latest-version.json`, deletes the macOS app bundle on darwin only, removes `app/`, and then tries to `rmdir` `run/`, `cache/`, `teams/`, `quarantine/` and the store root. A directory that is not empty is kept and reported, with one exception: a non-empty store root is kept silently. Since `backups/` is written on every run, that is the case you will always hit, so `~/.terum/skills` itself survives without a line saying so. Anything at the wrapper or edit-hook path that is not ours is named and left alone. The session-hook entry is matched by its command naming `terum-skills`, so an entry pinned to a version goes as readily as the `@latest` one older releases wrote."
+    "pattern": "What it does: removes terum-skills from this machine after one confirmation whose detail is a full inventory. It writes a record of your config to `~/.terum/skills/backups/uninstall.<stamp>.json`, removes the session hook, the managed skills under `~/.claude/skills/` and `~/.codex/skills/`, and the edit hook (its settings entry first, then the script), then tears down every configured team in a loop, deletes `config.json`, removes `run/app.json` and `run/latest-version.json`, deletes the macOS app bundle on darwin only, removes `app/`, and then tries to `rmdir` `run/`, `cache/`, `teams/`, `quarantine/` and the store root. A directory that is not empty is kept and reported, with one exception: a non-empty store root is kept silently. Since `backups/` is written on every run, that is the case you will always hit, so `~/.terum/skills` itself survives without a line saying so. Anything at a skill or edit-hook path that is not ours is named and left alone. The session-hook entry is matched by its command naming `terum-skills`, so an entry pinned to a version goes as readily as the `@latest` one older releases wrote."
   },
   {
     "file": "docs/reference/cli.md",
@@ -6445,7 +6517,7 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "file": "docs/reference/local-state.md",
     "line": 195,
     "policy": "prose",
-    "pattern": "These are the only files terum-skills writes outside its own state root. Setup offers the two hook entries and the `/terum-skills` skill separately, each with its own question, and each can be declined. What each of them runs, and when, is summarised in [security](../../SECURITY.md)."
+    "pattern": "These are the only files terum-skills writes outside its own state root. Setup offers the two hook entries and the eight skills separately, each with its own question, and each can be declined. What each of them runs, and when, is summarised in [security](../../SECURITY.md)."
   },
   {
     "file": "docs/reference/local-state.md",
@@ -6491,27 +6563,21 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
   },
   {
     "file": "docs/reference/local-state.md",
-    "line": 239,
-    "policy": "prose",
-    "pattern": "### ~/.claude/skills/terum-skills/"
-  },
-  {
-    "file": "docs/reference/local-state.md",
     "line": 241,
     "policy": "fixed",
-    "pattern": "The `/terum-skills` Claude Code skill, a single `SKILL.md` written from the copy bundled in the package with one substitution: every `npx -y terum-skills@latest` in the bundled text becomes this machine's own spelling, by the same rule as the hook entry above. Its managed marker is two fields in its own frontmatter: `name: terum-skills` and `metadata.managed-by: terum-skills`. Anything else at that path, including a symbolic link, a file, a folder with no `SKILL.md`, or a different skill, is judged foreign: it is named and never written to or removed."
+    "pattern": "The eight skills terum-skills places for Claude Code and, when `~/.codex` exists (`CODEX_HOME` moves it), for Codex: `eval`, `eval-report`, `list-skills`, `search-skills`, `skill-info`, `skill-status`, `sync-skills` and `terum-skills`. Each is a single `SKILL.md` written from the copy bundled in the package with one substitution: every `npx -y terum-skills@latest` in the bundled text becomes this machine's own spelling, by the same rule as the hook entry above. Its managed marker is two fields in its own frontmatter: the skill's `name` and `metadata.managed-by: terum-skills`. Anything else at one of those paths, including a symbolic link, a file, a folder with no `SKILL.md`, or a different skill, is judged foreign: it is named and never written to or removed."
   },
   {
     "file": "docs/reference/local-state.md",
     "line": 243,
     "policy": "prose",
-    "pattern": "It tells Claude Code how to run terum-skills on your behalf: that the Bash tool has no TTY, to invoke the CLI in that one spelling and no other, which verbs it may run in-session, which verbs it must hand to your terminal because they ask questions, and what an eval costs."
+    "pattern": "The `terum-skills` manual among them tells the agent how to run terum-skills on your behalf: that the shell tool has no TTY, to invoke the CLI in that one spelling and no other, which verbs it may run in-session, which verbs it must hand to your terminal because they ask questions, and what an eval costs. The other seven each wrap one verb with `--format md` and show its board."
   },
   {
     "file": "docs/reference/local-state.md",
     "line": 245,
     "policy": "prose",
-    "pattern": "A copy of terum-skills' own that this CLI has moved past is refreshed without a second question, both by `setup` and by `sync --hook` at every session start. The comparison is against the bundled text already rendered in this copy's spelling, so a manual placed by a different release counts as outdated and is rewritten. A copy that is absent is never installed by anything but `setup`, because absent means you said no."
+    "pattern": "A copy of terum-skills' own that this CLI has moved past is refreshed without a second question, both by `setup` and by `sync --hook` at every session start. The comparison is against the bundled text already rendered in this copy's spelling, so a copy placed by a different release counts as outdated and is rewritten. A root holding none of Terum's copies is left alone by everything but `setup`, because that means you said no; a root that holds some receives the ones that are missing."
   },
   {
     "file": "docs/reference/local-state.md",
@@ -6581,12 +6647,6 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
   },
   {
     "file": "docs/reference/local-state.md",
-    "line": 298,
-    "policy": "prose",
-    "pattern": "- `~/.claude/skills/terum-skills/`, but only a copy carrying the managed marker"
-  },
-  {
-    "file": "docs/reference/local-state.md",
     "line": 299,
     "policy": "prose",
     "pattern": "- the PostToolUse entry and then `~/.terum/skills/hooks/terum-skills-edit.mjs`, in that order, so an entry never names a deleted script"
@@ -6607,7 +6667,7 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "file": "docs/reference/local-state.md",
     "line": 329,
     "policy": "prose",
-    "pattern": "It does not remove: the `/terum-skills` Claude Code skill, the edit hook, the quarantine, the backups, the local eval runs, the usage archive, the eval queue, the desktop app, or anything in the team repository. Your membership stands until an admin runs `team remove <handle>`."
+    "pattern": "It does not remove: the placed terum-skills skills, the edit hook, the quarantine, the backups, the local eval runs, the usage archive, the eval queue, the desktop app, or anything in the team repository. Your membership stands until an admin runs `team remove <handle>`."
   },
   {
     "file": "docs/reference/platforms.md",
@@ -6775,7 +6835,7 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "file": "docs/reference/platforms.md",
     "line": 177,
     "policy": "prose",
-    "pattern": "`setup` skips its app step entirely on both, so the wizard creates or joins the team in the terminal rather than handing off to the app. Everything else is identical: publish, install, eval, sync, the team repository, the session hook, the `/terum-skills` Claude Code skill, and the edit hook all work exactly as they do elsewhere."
+    "pattern": "`setup` skips its app step entirely on both, so the wizard creates or joins the team in the terminal rather than handing off to the app. Everything else is identical: publish, install, eval, sync, the team repository, the session hook, the eight skills for Claude Code and Codex, and the edit hook all work exactly as they do elsewhere."
   },
   {
     "file": "docs/reference/platforms.md",

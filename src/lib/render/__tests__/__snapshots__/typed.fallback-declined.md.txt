@@ -1,0 +1,11 @@
+## prune
+
+```
+quarantine/notes-2026-09-01
+```
+
+> ❌ Delete 2 quarantined items? (not interactive) (declined)
+
+--- stderr ---
+Delete 2 quarantined items? (not interactive)
+--- exit 1 ---

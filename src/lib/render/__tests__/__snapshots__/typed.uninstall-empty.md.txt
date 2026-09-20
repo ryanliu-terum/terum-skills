@@ -1,0 +1,4 @@
+## Uninstall
+**Nothing was placed on this machine.**
+
+**Next:** `/list-skills --local`

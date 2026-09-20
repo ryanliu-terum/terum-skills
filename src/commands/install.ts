@@ -40,7 +40,7 @@ export interface InstallArgs extends WithForm {
   home?: string;
   /** Where the §8 hook offer writes when a three-part ref bootstraps a fresh machine (test knob). */
   hook?: HookOptions;
-  /** Where that bootstrap offers the bundled /terum-skills Claude Code skill (test knob). */
+  /** Where that bootstrap offers the bundled terum-skills skills (test knob). */
   wrapper?: WrapperOptions;
   editHook?: Partial<EditHookOptions>;
   /** Injectable retry clock for deterministic recovery tests; authorization remains command-owned. */

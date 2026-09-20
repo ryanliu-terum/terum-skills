@@ -192,7 +192,7 @@ One more lock lives in the system temporary directory, because it protects a des
 
 ## Claude Code files
 
-These are the only files terum-skills writes outside its own state root. Setup offers the two hook entries and the `/terum-skills` skill separately, each with its own question, and each can be declined. What each of them runs, and when, is summarised in [security](../../SECURITY.md).
+These are the only files terum-skills writes outside its own state root. Setup offers the two hook entries and the eight skills separately, each with its own question, and each can be declined. What each of them runs, and when, is summarised in [security](../../SECURITY.md).
 
 ### ~/.claude/settings.json
 
@@ -236,13 +236,13 @@ terum-skills refuses to edit this file at all when it is not valid JSON, or when
 
 This file also holds `skillOverrides` for Global skills. See below.
 
-### ~/.claude/skills/terum-skills/
+### ~/.claude/skills/<name>/ and ~/.codex/skills/<name>/
 
-The `/terum-skills` Claude Code skill, a single `SKILL.md` written from the copy bundled in the package with one substitution: every `npx -y terum-skills@latest` in the bundled text becomes this machine's own spelling, by the same rule as the hook entry above. Its managed marker is two fields in its own frontmatter: `name: terum-skills` and `metadata.managed-by: terum-skills`. Anything else at that path, including a symbolic link, a file, a folder with no `SKILL.md`, or a different skill, is judged foreign: it is named and never written to or removed.
+The eight skills terum-skills places for Claude Code and, when `~/.codex` exists (`CODEX_HOME` moves it), for Codex: `eval`, `eval-report`, `list-skills`, `search-skills`, `skill-info`, `skill-status`, `sync-skills` and `terum-skills`. Each is a single `SKILL.md` written from the copy bundled in the package with one substitution: every `npx -y terum-skills@latest` in the bundled text becomes this machine's own spelling, by the same rule as the hook entry above. Its managed marker is two fields in its own frontmatter: the skill's `name` and `metadata.managed-by: terum-skills`. Anything else at one of those paths, including a symbolic link, a file, a folder with no `SKILL.md`, or a different skill, is judged foreign: it is named and never written to or removed.
 
-It tells Claude Code how to run terum-skills on your behalf: that the Bash tool has no TTY, to invoke the CLI in that one spelling and no other, which verbs it may run in-session, which verbs it must hand to your terminal because they ask questions, and what an eval costs.
+The `terum-skills` manual among them tells the agent how to run terum-skills on your behalf: that the shell tool has no TTY, to invoke the CLI in that one spelling and no other, which verbs it may run in-session, which verbs it must hand to your terminal because they ask questions, and what an eval costs. The other seven each wrap one verb with `--format md` and show its board.
 
-A copy of terum-skills' own that this CLI has moved past is refreshed without a second question, both by `setup` and by `sync --hook` at every session start. The comparison is against the bundled text already rendered in this copy's spelling, so a manual placed by a different release counts as outdated and is rewritten. A copy that is absent is never installed by anything but `setup`, because absent means you said no.
+A copy of terum-skills' own that this CLI has moved past is refreshed without a second question, both by `setup` and by `sync --hook` at every session start. The comparison is against the bundled text already rendered in this copy's spelling, so a copy placed by a different release counts as outdated and is rewritten. A root holding none of Terum's copies is left alone by everything but `setup`, because that means you said no; a root that holds some receives the ones that are missing.
 
 The discovery scan also refuses this folder by name, so it can never be published as a team skill.
 
@@ -295,7 +295,7 @@ The app needs `~/.terum/skills/run/app.json` to drive the CLI. Run `app` once on
 It removes:
 
 - the SessionStart hook entry from `~/.claude/settings.json`
-- `~/.claude/skills/terum-skills/`, but only a copy carrying the managed marker
+- the eight skill folders under `~/.claude/skills/` and `~/.codex/skills/`, but only copies carrying the managed marker
 - the PostToolUse entry and then `~/.terum/skills/hooks/terum-skills-edit.mjs`, in that order, so an entry never names a deleted script
 - every configured team, one at a time: every placed skill folder, the clone, `cache/<team>`, that team's run artifacts, and its `config.json` entry
 - `~/.terum/skills/config.json`
@@ -326,4 +326,4 @@ If the config file is kept because something is still configured, the run fails 
 
 It removes every skill folder placed from that team (quarantining any whose bytes have drifted), the clone (quarantining it instead if it holds uncommitted or unpushed work), `cache/<team>`, that team's `run/` stamp and stale-lock leftovers, and the team's entry and pending operations in `config.json`. When it was the last team on the machine it also clears `approvals` and removes the session hook.
 
-It does not remove: the `/terum-skills` Claude Code skill, the edit hook, the quarantine, the backups, the local eval runs, the usage archive, the eval queue, the desktop app, or anything in the team repository. Your membership stands until an admin runs `team remove <handle>`.
+It does not remove: the placed terum-skills skills, the edit hook, the quarantine, the backups, the local eval runs, the usage archive, the eval queue, the desktop app, or anything in the team repository. Your membership stands until an admin runs `team remove <handle>`.

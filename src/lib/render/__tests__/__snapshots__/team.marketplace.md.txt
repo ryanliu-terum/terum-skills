@@ -1,0 +1,30 @@
+## Marketplace — acme
+**3 skills · 3 members · 2 projects · PASS 1 · NEUTRAL 1 · FAIL 0 · not evaluated 1**
+
+### Skills
+
+| Skill | Desc | Author | Category | Ver | Installs | Eval | Updated |
+|---|---|---|---|---|---:|---|---|
+| deploy-check | Use this when a deploy needs a checklist. | Mira Chen | ops | Version 2 | 2 ▲ | ● NEUTRAL ±0% (6/8 scored) | 8d ago |
+| tdd | Red, green, refactor. | Seed | engineering | Version 2 | 1 | ✓ PASS +67% (Version 1) | 9d ago |
+| diagnose | Narrow a failure to one cause before changing anything. | Ravi Patel | debugging | Version 1 | 0 | ⚠ invalid receipt | 10d ago |
+
+### People
+
+| Handle | Name | Role | Installed | Authored | Local skills (self-reported) |
+|---|---|---|---:|---:|---:|
+| @mira | Mira Chen | — | 2 | 1 | 3 |
+| @seed | Seed | Platform | 1 | 1 | 4 |
+| @ravi | Ravi Patel | Debugging | 0 | 1 | — |
+
+### Projects
+
+| Project | Skills | Members | Remotes |
+|---|---:|---:|---|
+| terum | 1 | 1 | github.com/acme/terum |
+| Global | 1 | 0 | — |
+
+**Notes**
+- diagnose: schema-invalid receipt <ROOT>/state/teams/acme/evals/33333333-3333-4333-8333-333333333333/v1/20260903T100000Z.json: invalid JSON.
+
+**Next:** `/skill-info deploy-check` · `/eval diagnose` · `/terum-skills install diagnose`

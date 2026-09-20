@@ -1,0 +1,17 @@
+Project terum
+
+  remotes: github.com/acme/terum
+  members: @seed
+
+Skills
+╭───────┬───────────┬──────────┬─────────────────────────╮
+│ Skill │ Ver       │ Installs │ Eval                    │
+├───────┼───────────┼──────────┼─────────────────────────┤
+│ tdd   │ Version 2 │        1 │ ✓ PASS +67% (Version 1) │
+╰───────┴───────────┴──────────┴─────────────────────────╯
+(columns not shown at this width: Desc, Author, Category, Updated)
+
+Notes
+  • diagnose: schema-invalid receipt <ROOT>/state/teams/acme/evals/33333333-3333-4333-8333-333333333333/v1/20260903T100000Z.json: invalid JSON.
+
+Next: /terum-skills install project terum

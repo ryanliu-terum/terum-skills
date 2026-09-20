@@ -1,0 +1,41 @@
+[1mdeploy-check — Version 2 (2 versions)[0m
+
+  Use this when a deploy needs a checklist. Walks rollback, canary and smoke steps.
+
+  id:          11111111-1111-4111-8111-111111111111
+  author:      Mira Chen <mira@example.com>
+  category:    ops
+  endorsement: project: Global
+  grants:      none
+  installs:    2
+  updated:     8d ago
+  latest:      Version 2
+  eval:        ● NEUTRAL ±0% · 2W 2L 2T (n=6) · p=0.031 · partial 6/8 · sonnet k=1 · @seed · 8d ago
+
+[1mInstalled by[0m
+╭────────┬───────────┬────────┬─────────╮
+│ [1mHandle[0m │ [1mVersion  [0m │ [1mScope [0m │ [1mSince  [0m │
+├────────┼───────────┼────────┼─────────┤
+│ @seed  │ Version 1 │ global │ 24d ago │
+│ @mira  │ Version 1 │ global │ 19d ago │
+╰────────┴───────────┴────────┴─────────╯
+
+[1mYour copy[0m
+  state:                     placed Version 1
+  path:                      ~/.claude/skills/deploy-check
+  health:                    [32m✓ unchanged or untracked[0m
+  local eval:                ✗ FAIL −50% · 1W 4L 1T (n=6) · p=0.031 · complete · sonnet k=1 · @seed · 1d ago
+  team eval for these bytes: ✓ PASS +33% · 4W 2L 0T (n=6) · p=0.031 · complete · sonnet k=1 · @mira · 12d ago
+
+[1mBody preview[0m
+  # Deploy check
+  
+  1. Confirm the rollback path.
+  2. Canary one host.
+  3. Smoke test.
+  4. Watch the alerts for ten minutes.
+
+[1mNotes[0m
+  • acme/diagnose: unreadable receipt v1/20260903T100000Z.json; not considered.
+
+[1mNext:[0m [36m/eval deploy-check[0m · [36m/eval-report deploy-check[0m

@@ -1,0 +1,11 @@
+## Eval queue
+**2 queued**
+
+### Queued
+
+| Skill | Team | Digest | Window | Queued | Last error |
+|---|---|---|---|---|---|
+| tdd | acme | `bbbbbbbbbbbb` | overnight | today | — |
+| notes | acme | `bbbbbbbbbbbb` | overnight | today | not signed in |
+
+**Next:** `/eval --drain`

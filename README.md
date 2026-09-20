@@ -65,7 +65,7 @@ We're interested in collaborators, and just as much in feedback and the things y
 
 Two more things worth knowing:
 
-- Setup offers a `/terum-skills` skill for Claude Code, so Claude can run these commands for you inside a session, and a session-start hook that keeps the team repo fetched.
+- Setup offers eight skills for Claude Code and Codex (`list-skills`, `skill-info`, `search-skills`, `eval`, `eval-report`, `skill-status`, `sync-skills`, and `terum-skills` for any other verb), so either assistant can run these commands for you inside a session and show the result as a board, and a session-start hook that keeps the team repo fetched.
 - The desktop app is a window onto the CLI. Every verb works from the terminal without it.
 
 ## How evaluation works
@@ -137,16 +137,36 @@ Every verb runs as `npx -y terum-skills@latest <verb>`. The ones you'll type by 
 | Team | `setup [<org>/<repo>]` · `login` · `status` · `invite <github-login>…` · `profile` · `team create [name]` · `team join <target>` · `team leave <name>` · `team move <target>` · `team remove <handle>` · `team migrate` · `team workflow-update` · `team project create [name]` · `team project delete [name]` |
 | Library | `ls` · `ls --local` · `ls member <handle>` · `ls project <name>` · `search <term>` · `project add [path]` · `project remove <path>` · `project rename <path>` · `project list` · `reconcile` · `skill move <path>` · `skill copy <path>` · `skill rename <path>` · `skill delete <path>` · `skill fix <path>` · `skill category <path>` · `skill enable <path>` · `skill disable <path>` · `prune` |
 | Sharing | `publish <ref>` · `unpublish <skill>` · `install <ref>` · `uninstall-skill <ref>` · `sync` |
-| Evals | `validate <path\|name>` · `eval <skill…>` · `eval-report <skill>` · `usage [skill]` · `misses [skill]` |
+| Evals | `validate <path\|name>` · `eval <skill…>` · `eval-report [skill]` · `usage [skill]` · `misses [skill]` |
 | Machine | `app` · `app-update` · `update` · `uninstall` · `serve` (for programs, needs `--frames`) |
+
+</details>
+
+<details>
+<summary>Skills for Claude Code and Codex</summary>
+
+Setup places eight skills at `~/.claude/skills/<name>/` for Claude Code and `~/.codex/skills/<name>/` for Codex (when `~/.codex` exists), so either assistant can run terum-skills for you inside a session and show the result as a Markdown board. They ship inside the npm package; re-running `npx -y terum-skills@latest setup` after an update refreshes them, and the session hook refreshes or adds them on a machine that already holds one. Invoke them as `/name` in Claude Code and `$name` in Codex: Each placed copy names the copy of the CLI that placed it, never `@latest`. Uninstall removes the copies it placed; a folder at one of those names that is not the bundled skill is left alone.
+
+| Skill | What it runs |
+|---|---|
+| `list-skills [--local\|--team]` | `ls --local --format md` and `ls --format md` — your Library and the team Marketplace |
+| `skill-info <name>` | `ls skill <name> --format md`, then `eval-report <name> --format md` for a team skill |
+| `search-skills <term>` | `search <term> --format md` |
+| `eval <skill> [flags]` | `eval <skill> --format md`, after confirming the cost with you |
+| `eval-report <skill>` | `eval-report <skill> --format md` |
+| `skill-status` | `status --format md`, then `update --format md` |
+| `sync-skills` | `sync --format md` |
+| `terum-skills <verb …>` | any verb with `--format md`; the verbs that ask a question are handed to your terminal |
 
 </details>
 
 `npx -y terum-skills@latest --help` lists the verbs, and `<verb> --help` their options; the full reference is [docs/reference/cli.md](docs/reference/cli.md). Programs drive the CLI with `--frames`, one JSON object per line; see [docs/frame-protocol.md](docs/frame-protocol.md).
 
+**Boards.** Every command above takes `--format <plain|md|pretty|json|auto>` (default `plain`, the output the tables describe). `--format md` renders the result as a Markdown board — the form the shipped Claude Code and Codex skills ask for — `pretty` draws box tables with colour for a terminal, `json` writes one document (`{ verb, ok, exitCode, error?, declined?, refused?, value?, lines }`), and `auto` picks `pretty` on a TTY and `md` otherwise. `--rows <n|all>` caps table rows (default 25), `--width <n>` sets a pretty board's width, `--host <claude|codex|terminal>` phrases the board's **Next** line, `--no-color` drops ANSI. The flags go anywhere before `--`; they are refused with `--frames`, `serve`, and `sync --hook`, whose stdout is spoken for. `ls skill <name>` shows one skill whole, and `ls skill`, `eval-report` and `validate` accept a unique prefix; `eval` takes an exact or case-insensitive name; each of the four, run inside a Library skill folder, needs no name at all (`validate` also accepts any skill folder by path). A usage error (unknown verb, missing argument, bad option value) under any `--format` writes nothing to stdout — one stderr message and exit 1, nothing runs; a reader that sees exit 1 with empty stdout reads stderr.
+
 ## Updating and uninstalling
 
-Updates are yours to take. The session hook and the `/terum-skills` skill run the copy of the CLI that set them up: the bare `terum-skills` binary when that copy is a global install the CLI found on your PATH on macOS or Linux, otherwise `npx -y terum-skills@<version>` pinned to that release. Nothing fetches a newer CLI at session start. `update` prints the newest advertised release and the exact command that updates *this* copy; after updating, re-run `setup` and the hook and skill move with it. The desktop app asks GitHub for a new release once a day, downloads it, and installs it when you quit, overnight, or when you press Install now, whichever you chose in Settings ▸ Updates; every download must match its published checksum and carry a build attestation from this repository's release workflow. `npx -y terum-skills@latest uninstall` removes your team from this machine (placed skills, the local clone, the hooks, the Claude Code skill, and on macOS the app bundle) and keeps your backups, quarantine, and local eval runs. On Windows, remove the app from Settings ▸ Apps.
+Updates are yours to take. The session hook and the eight skills setup places run the copy of the CLI that set them up: the bare `terum-skills` binary when that copy is a global install the CLI found on your PATH on macOS or Linux, otherwise `npx -y terum-skills@<version>` pinned to that release. Nothing fetches a newer CLI at session start. `update` prints the newest advertised release and the exact command that updates *this* copy; after updating, re-run `setup` and the hook and skill move with it. The desktop app asks GitHub for a new release once a day, downloads it, and installs it when you quit, overnight, or when you press Install now, whichever you chose in Settings ▸ Updates; every download must match its published checksum and carry a build attestation from this repository's release workflow. `npx -y terum-skills@latest uninstall` removes your team from this machine (placed skills, the local clone, the hooks, the Claude Code skill, and on macOS the app bundle) and keeps your backups, quarantine, and local eval runs. On Windows, remove the app from Settings ▸ Apps.
 
 ## Security
 

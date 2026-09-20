@@ -1,0 +1,51 @@
+## Eval — deploy-check
+**✓ PASS +33% · 4W 2L 0T (n=6) · p=0.031 · partial 4/6**
+
+### Why
+
+The candidate answered every case with the checklist; the baseline skipped the rollback step twice.
+
+### Skipped (environment)
+
+audit — missing docker
+
+### Comparisons
+
+| Comparison | W | L | T | Lift | p | Record |
+|---|---:|---:|---:|---|---|---|
+| candidate-vs-baseline | 4 | 2 | 0 | +33% | 0.031 | `WWWWLL` |
+
+### Arm scores
+
+| Label | Bar |
+|---|---|
+| candidate | ████████░░ 0.80 |
+| baseline | █████░░░░░ 0.50 |
+
+### Efficiency
+
+| Arm | Turns | Time | Cost |
+|---|---:|---|---|
+| candidate | 6.5 | 30.0s | $0.40 |
+| baseline | 5.0 | 20.0s | $0.30 |
+
+### Cost, over the costlier arm
+
+| Label | Bar |
+|---|---|
+| candidate | ██████████ $0.40 |
+| baseline | ███████░░░ $0.30 |
+
+### Run
+
+- **run dir:** `~/.terum/skills/evals/local/aaaa/20260913T110000Z`
+- **receipt:** `~/.terum/skills/evals/local/aaaa/20260913T110000Z/receipt.json`
+- **claude code:** 2.1.0
+- **execution:** ⚠ partial
+- **team:** acme
+- **published to:** —
+
+**Notes**
+- The eval is complete and saved locally, but publishing its receipt failed: origin refused the push
+
+**Next:** `/terum-skills publish deploy-check` · `/eval-report deploy-check`

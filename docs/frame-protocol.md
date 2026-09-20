@@ -20,6 +20,8 @@ One per line, in this order: `hello` once, then any number of `print` and `ask`,
 
 The process exit code matches `result.exitCode`. The failure line is also written to stderr, exactly as without the flag, so a shell that only watches the exit code and stderr still works.
 
+`--format` (the Markdown / terminal / JSON boards of `README.md`) and `--frames` are exclusive: a run given both ends in one `result` frame with the error `--frames is already a machine format; drop --format.` and exit 1. `serve` refuses `--format` on stderr too (`serve answers over --frames; drop --format.`). A usage error (unknown verb, missing argument, bad option value) under any `--format` writes nothing to stdout — one stderr message and exit 1, nothing runs; a reader that sees exit 1 with empty stdout reads stderr.
+
 ## Frames the shell writes (stdin)
 
 | Frame | Shape | Meaning |
@@ -224,6 +226,8 @@ viewer's own; a `localEval` without `mine` comes from an older CLI and should ke
 seeded copy carries a version and names its runner, an own run carries none).
 Team `ls` includes `people` with automatic `installed` records and curated `profile` entries.
 
+`ls` also carries `viewer: { handle, team }` on every team read and, on `ls member`, `ls project` and `ls skill`, a `selection` (`{ kind: 'member', handle }`, `{ kind: 'project', name }`, `{ kind: 'skill', name, source: 'team' | 'library' }`); `ls skill <name>` is the one-skill read — `skills` holds the team record (or nothing), `local` the Library row (or nothing), `projects` only the lists holding it. `member` gained `displayName`, per-install `name`/`version`, and `profile`; `installedBy` rows gained `version`. Additive; protocol stays 1.
+
 Each team skill's `latestVersion` is its highest `v<N>` folder; `versionCount` counts versions.
 The `receipt` limb contains one receipt's display facts, `{ run_id, verdict, execution_status,
 expected_rows, scored_rows, comparisons, arm_scores, provenance: { model, k, cc_version, timestamp,
@@ -398,6 +402,8 @@ These are additive result fields; protocol stays 1.
 - `history`: schema-valid committed receipts across version directories, sorted by numeric version descending, then `run_id` descending, as `{ version, run_id, verdict, execution_status, model, cc_version, runner_handle, timestamp, comparison, committed: true }` rows. `runner_handle` and `timestamp` come verbatim from provenance; `comparison` is the receipt's `candidate-vs-baseline` comparison (`win`, `loss`, `tie`, `net_lift`, `sign_p`), or null.
 - `localRuns`: merged from the current local folder’s digest-keyed store and legacy per-team run trees; only directories containing `run.jsonl` are included, newest first, as `{ run_id, run_dir, execution_status, committed, receipt }` rows. `run_dir` is absolute; `receipt` is the schema-valid local `receipt.json` with an absolute `path`, or null. Status comes from that receipt or is `unknown`; `committed` indicates a matching run ID in history. No statistics are derived from the log.
 
+`eval`'s own result (`EvalResult`) gained `report: { aggregate, triggers }` — the numbers `renderReport` prints, as data — and `receiptPath` on a completed run; `eval --drain` gained `outcomes: { skill, team?, ok, error? }[]`, one per attempted item in queue order. `validate` gained `directory`, the folder it checked. Additive; protocol stays 1.
+
 `sync [--team <team>]` fetches and resets the disposable clone under its writer lock and records
 a fetch stamp. It neither places skills nor replays pending work. See `f-sync` for the result
 shape and per-team failures. Over frames it emits hello and result; there is no separate refresh verb.
@@ -543,11 +549,13 @@ appended after any `GIT_CONFIG_*` pairs the caller passed.
 There are two carve-outs from "nothing on this machine is changed", and neither is reachable over
 frames.
 
-`--hook` is the session-start entry and must never be driven over frames (rule 2). It replaces two
-files of Terum's own when this CLI has moved past them: the bundled `/terum-skills` manual, and
-`~/.terum/skills/hooks/terum-skills-edit.mjs`. Each rewrite is reported as a notice
-(`Updated your /terum-skills manual for this CLI.`, `Updated your terum-skills edit hook for this
-CLI.`). A copy that is absent, because the person declined it, or foreign is left alone.
+`--hook` is the session-start entry and must never be driven over frames (rule 2). It touches only
+files of Terum's own when this CLI has moved past them: in a skills root that already holds one of
+Terum's bundled skills (`~/.claude/skills/<name>`, `~/.codex/skills/<name>`) it replaces an outdated
+copy and adds a missing one, and it replaces `~/.terum/skills/hooks/terum-skills-edit.mjs`. Each
+rewrite is reported as a notice (`Updated your terum-skills skills for this CLI.`, `Updated your
+terum-skills edit hook for this CLI.`). A foreign copy, or an edit hook that is absent because the
+person declined it, is left alone.
 
 An interactive terminal `sync` may also offer to follow a team repository that has gone, and an
 accepted offer runs `team move --yes`, which removes and re-places every placed skill. The offer is

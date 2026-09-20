@@ -1,0 +1,7 @@
+## Project added
+**Added <HOME>/work/terum to your library.**
+
+- **path:** `~/work/terum`
+- **label:** terum
+
+**Next:** `/list-skills --local`

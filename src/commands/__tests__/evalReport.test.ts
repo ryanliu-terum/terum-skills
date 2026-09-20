@@ -129,6 +129,22 @@ describe('eval-report offline read model', () => {
     expect(await run({ ref: 'sample', config: store, runner }, new ScriptedPrompter())).toMatchObject({ ok: true, value: { latest: null, latestState: 'none', fallbackFrom: null, history: [], versions: { evaluated: null } } });
     expect(await run({ ref: 'missing', config: store, runner }, new ScriptedPrompter())).toEqual({ ok: false, error: 'No skill named or identified by missing exists in team team.' });
   });
+
+  it('autofills the skill through the ladder and keeps the miss sentence', async () => {
+    const { store, runner } = await setup();
+    const io = new ScriptedPrompter();
+    expect(await run({ ref: 'SAMP', config: store, runner }, io)).toMatchObject({ ok: true, value: { skill: { name: 'sample' } } });
+    expect(io.lines).toEqual(['Resolved: "SAMP" → sample (unique prefix)']);
+    expect(await run({ ref: 'zzz', config: store, runner }, new ScriptedPrompter())).toEqual({ ok: false, error: 'No skill named or identified by zzz exists in team team.' });
+    const home = await temporaryDirectory();
+    const inside = join(home, '.claude', 'skills', 'sample', 'deep'); await mkdir(inside, { recursive: true });
+    await writeFile(join(home, '.claude', 'skills', 'sample', 'SKILL.md'), skill);
+    const bare = await run({ config: store, runner, home, cwd: inside }, new ScriptedPrompter());
+    expect(bare).toMatchObject({ ok: true, value: { skill: { name: 'sample' } } });
+    expect(await run({ config: store, runner, home, cwd: home }, new ScriptedPrompter())).toEqual({ ok: false, error: 'Name a skill; the working directory is not inside a library skill folder.' });
+    await mkdir(join(home, '.claude', 'skills', 'only-local'), { recursive: true }); await writeFile(join(home, '.claude', 'skills', 'only-local', 'SKILL.md'), '---\nname: only-local\ndescription: x\n---\n');
+    expect(await run({ ref: 'only-local', config: store, runner, home }, new ScriptedPrompter())).toEqual({ ok: false, error: 'No skill named or identified by only-local exists in team team.' });
+  });
 });
 
  it('carries the baseline comparison and provenance verbatim in history', async () => {

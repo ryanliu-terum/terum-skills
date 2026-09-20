@@ -1,0 +1,14 @@
+{
+  "verb": "prune",
+  "ok": false,
+  "exitCode": 1,
+  "error": "Delete 2 quarantined items? (not interactive)",
+  "declined": true,
+  "lines": [
+    "quarantine/notes-2026-09-01"
+  ]
+}
+
+--- stderr ---
+Delete 2 quarantined items? (not interactive)
+--- exit 1 ---

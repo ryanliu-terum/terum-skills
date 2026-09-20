@@ -1,0 +1,85 @@
+{
+  "verb": "eval",
+  "ok": true,
+  "exitCode": 0,
+  "value": {
+    "team": "acme",
+    "id": "11111111-1111-4111-8111-111111111111",
+    "name": "deploy-check",
+    "runDir": "<HOME>/.terum/skills/evals/local/aaaa/20260913T110000Z",
+    "ccVersion": "2.1.0",
+    "executionStatus": "complete",
+    "receiptPath": "<HOME>/.terum/skills/evals/local/aaaa/20260913T110000Z/receipt.json",
+    "report": {
+      "aggregate": {
+        "verdict": "PASS",
+        "attribution": "The candidate answered every case with the checklist; the baseline skipped the rollback step twice.",
+        "execution_status": "complete",
+        "expected_rows": 6,
+        "scored_rows": 6,
+        "comparisons": {
+          "candidate-vs-baseline": {
+            "win": 4,
+            "loss": 2,
+            "tie": 0,
+            "net_lift": 0.3333333333333333,
+            "sign_p": 0.03125
+          }
+        },
+        "arm_scores": {
+          "candidate": 0.8,
+          "baseline": 0.5
+        },
+        "efficiency": {
+          "candidate": {
+            "turns": 6.5,
+            "duration_ms": 30000,
+            "cost_usd": 0.4
+          },
+          "baseline": {
+            "turns": 5,
+            "duration_ms": 20000,
+            "cost_usd": 0.3
+          }
+        },
+        "environment_skips": {
+          "audit": [
+            "docker"
+          ]
+        }
+      },
+      "triggers": {
+        "kind": "triggers",
+        "skill": "deploy-check",
+        "rows": [
+          {
+            "prompt": "ship it",
+            "expected": true,
+            "fired": false,
+            "selected": [],
+            "correct": false
+          }
+        ],
+        "recall": 0.8,
+        "precision": 1,
+        "tp": 4,
+        "fn": 1,
+        "fp": 0,
+        "tn": 5
+      }
+    },
+    "publishedTo": "v2"
+  },
+  "lines": [
+    "warning HYG6 SKILL.md: description is long",
+    "verdict: PASS",
+    "why: The candidate answered every case with the checklist; the baseline skipped the rollback step twice.",
+    "skipped (environment): audit — missing docker",
+    "candidate-vs-baseline: 4W 2L 0T",
+    "arm scores: candidate 0.80 · baseline 0.50",
+    "triggers: recall=0.80 precision=1.00 (tp=4 fn=1 fp=0 tn=5)",
+    "  MISS: \"ship it\"",
+    "efficiency: candidate 6.5 turns · 30.0s · $0.40 | baseline 5.0 turns · 20.0s · $0.30",
+    "Published this receipt to acme for Version 2 of deploy-check."
+  ]
+}

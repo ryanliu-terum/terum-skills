@@ -1,0 +1,7 @@
+ls
+
+✗ No skill named ghost.
+
+--- stderr ---
+No skill named ghost.
+--- exit 1 ---

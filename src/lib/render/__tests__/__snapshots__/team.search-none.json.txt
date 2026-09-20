@@ -1,0 +1,10 @@
+{
+  "verb": "search",
+  "ok": true,
+  "exitCode": 0,
+  "value": [],
+  "lines": [
+    "acme may be stale; run `npx -y terum-skills@latest sync`.",
+    "No skills found."
+  ]
+}

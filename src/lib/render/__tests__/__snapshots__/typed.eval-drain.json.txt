@@ -1,0 +1,59 @@
+{
+  "verb": "eval",
+  "ok": false,
+  "exitCode": 1,
+  "error": "1 queued evals failed; they remain queued.",
+  "value": {
+    "items": [
+      {
+        "skill": "notes",
+        "path": "<HOME>/.claude/skills/notes",
+        "contentHash": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "requestedAt": "2026-09-12T22:00:00Z",
+        "window": "overnight",
+        "team": "acme",
+        "lastError": "probe failed"
+      }
+    ],
+    "attempted": 2,
+    "completed": 1,
+    "failures": [
+      {
+        "item": {
+          "skill": "notes",
+          "path": "<HOME>/.claude/skills/notes",
+          "contentHash": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "requestedAt": "2026-09-12T22:00:00Z",
+          "window": "overnight",
+          "team": "acme"
+        },
+        "error": "probe failed"
+      }
+    ],
+    "outcomes": [
+      {
+        "skill": "tdd",
+        "team": "acme",
+        "ok": true
+      },
+      {
+        "skill": "notes",
+        "team": "acme",
+        "ok": false,
+        "error": "probe failed"
+      }
+    ]
+  },
+  "lines": [
+    "Evaluating 2 skills, 4 at a time…",
+    "── tdd ──",
+    "verdict: PASS",
+    "✓ tdd",
+    "✗ notes: probe failed",
+    "Evaluated 1 of 2; 1 failed."
+  ]
+}
+
+--- stderr ---
+1 queued evals failed; they remain queued.
+--- exit 1 ---

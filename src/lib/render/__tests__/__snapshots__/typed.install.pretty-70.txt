@@ -1,0 +1,14 @@
+Install
+1 skill placed
+
+╭──────────┬───────────┬───────────────────────────────┬──────────╮
+│ Id       │ Version   │ Path                          │ Profiled │
+├──────────┼───────────┼───────────────────────────────┼──────────┤
+│ 11111111 │ Version 2 │ ~/.claude/skills/deploy-check │ — no     │
+╰──────────┴───────────┴───────────────────────────────┴──────────╯
+(columns not shown at this width: Team)
+
+Notes
+  • Your copy is kept at <HOME>/.claude/old-skills/deploy-check.
+
+Next: /list-skills --local

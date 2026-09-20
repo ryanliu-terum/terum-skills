@@ -1,0 +1,25 @@
+{
+  "verb": "project list",
+  "ok": true,
+  "exitCode": 0,
+  "value": {
+    "projects": [
+      {
+        "path": "<HOME>/work/terum",
+        "label": "terum",
+        "rootState": "scanned",
+        "skillFolders": 2
+      },
+      {
+        "path": "<HOME>/work/gone",
+        "label": "gone",
+        "rootState": "absent",
+        "skillFolders": 0
+      }
+    ]
+  },
+  "lines": [
+    "terum — <HOME>/work/terum; scanned; 2 skill folders",
+    "gone — <HOME>/work/gone; absent; 0 skill folders"
+  ]
+}

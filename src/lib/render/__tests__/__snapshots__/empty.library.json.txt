@@ -1,0 +1,32 @@
+{
+  "verb": "ls",
+  "ok": true,
+  "exitCode": 0,
+  "value": {
+    "roster": [],
+    "skills": [],
+    "problems": [],
+    "local": [
+      {
+        "root": "<HOME>/.claude/skills",
+        "scope": "global",
+        "registered": false,
+        "rootState": "absent",
+        "label": "Global",
+        "remote": null,
+        "counts": {
+          "skillFolders": 0,
+          "connectable": 0
+        },
+        "rows": [],
+        "notOffered": [],
+        "problems": []
+      }
+    ]
+  },
+  "lines": [
+    "Local Claude Code skills (<HOME>/.claude/skills; global):",
+    "  none (<HOME>/.claude/skills does not exist)",
+    "  0 skill folders (0 connectable)"
+  ]
+}

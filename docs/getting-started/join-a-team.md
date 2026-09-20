@@ -12,7 +12,7 @@ npx -y terum-skills@latest setup <org>/<repo>
 npx -y terum-skills@latest team join <org>/<repo>
 ```
 
-`team join` still ends with one offer of the session-start hook, after the join itself is durable. It never offers the `/terum-skills` skill or the edit hook; only `setup` does.
+`team join` still ends with one offer of the session-start hook, after the join itself is durable. It never offers the eight skills or the edit hook; only `setup` does.
 
 `<org>/<repo>` is the GitHub form: it is the only form that can accept an invitation through GitHub's API. Any other git URL is joined with your ambient git credentials and no invitation step, even when it happens to point at github.com.
 

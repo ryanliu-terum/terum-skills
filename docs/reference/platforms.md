@@ -174,7 +174,7 @@ The desktop app runs on the Windows side of this machine, not inside WSL. Instal
 
 WSL is detected by reading `/proc/version` for `microsoft`, which is only read on Linux.
 
-`setup` skips its app step entirely on both, so the wizard creates or joins the team in the terminal rather than handing off to the app. Everything else is identical: publish, install, eval, sync, the team repository, the session hook, the `/terum-skills` Claude Code skill, and the edit hook all work exactly as they do elsewhere.
+`setup` skips its app step entirely on both, so the wizard creates or joins the team in the terminal rather than handing off to the app. Everything else is identical: publish, install, eval, sync, the team repository, the session hook, the eight skills for Claude Code and Codex, and the edit hook all work exactly as they do elsewhere.
 
 If you work in WSL but want the app, install terum-skills on the Windows side and run `app` from a Windows terminal. Note that the two sides have separate state: `~/.terum/skills` inside WSL and `%USERPROFILE%\.terum\skills` on Windows are different machines as far as the product is concerned.
 

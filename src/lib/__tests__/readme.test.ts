@@ -283,9 +283,9 @@ it('lists every install record oldest first, including archived members and two 
   ] }, data.people[1]!];
   expect(installCounts(people).get(ID_A)).toBe(2);
   expect(installersById(people).get(ID_A)).toEqual([
-    { handle: 'amy', displayName: 'Amy', scope: { kind: 'project', project: 'app' }, since: '2026-09-01' },
-    { handle: 'amy', displayName: 'Amy', scope: { kind: 'global' }, since: '2026-09-04' },
-    { handle: 'bea', displayName: 'Bea', scope: { kind: 'global' }, since: '2026-09-04' },
+    { handle: 'amy', displayName: 'Amy', scope: { kind: 'project', project: 'app' }, since: '2026-09-01', version: null },
+    { handle: 'amy', displayName: 'Amy', scope: { kind: 'global' }, since: '2026-09-04', version: null },
+    { handle: 'bea', displayName: 'Bea', scope: { kind: 'global' }, since: '2026-09-04', version: null },
   ]);
 });
 it.each([['2026-09-04T10:22:33-07:00\n', '2026-09-04T10:22:33-07:00'], ['', '—']])('latestChange returns a committed date or an empty-history dash', async (stdout, expected) => {

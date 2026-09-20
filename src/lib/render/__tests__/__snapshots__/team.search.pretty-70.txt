@@ -1,0 +1,14 @@
+Search "deploy" · category ops
+1 hit
+
+╭──────────────┬───────────┬──────────╮
+│ Skill        │ Ver       │ Installs │
+├──────────────┼───────────┼──────────┤
+│ deploy-check │ Version 2 │        2 │
+╰──────────────┴───────────┴──────────╯
+(columns not shown at this width: Desc, Author, Category, Updated)
+
+Notes
+  • acme may be stale; run `npx -y terum-skills@latest sync`.
+
+Next: /skill-info deploy-check · /terum-skills install deploy-check

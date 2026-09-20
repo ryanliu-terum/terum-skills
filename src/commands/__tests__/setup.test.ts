@@ -17,7 +17,7 @@ import { COMMUNITY_URL } from '../../lib/community.js';
 import { createConfigStore } from '../../lib/config.js';
 import { failure, success } from '../../lib/result.js';
 import { offerHook } from '../../lib/hook.js';
-import { bareTeam, cloneWithIdentity, exists, fakeGh, git, mappedRunner, person, pushFromSeed, NonInteractivePrompter, ScriptedPrompter, temporaryDirectory, wrapperFor, editHookFor, wrapRunner } from '../../lib/__tests__/fixtures.js';
+import { bareTeam, bundledNames, CANONICAL_SKILLS, cloneWithIdentity, exists, fakeGh, git, mappedRunner, person, pushFromSeed, NonInteractivePrompter, ScriptedPrompter, temporaryDirectory, wrapperFor, editHookFor, wrapRunner } from '../../lib/__tests__/fixtures.js';
 import { seedPending, pendingReceipt, pendingSkill, measuredReceipt } from './pending-eval-fixtures.js';
 import { Prompter, PromptClosedError } from '../../lib/prompt.js';
 import type { EvalArgs } from '../eval.js';
@@ -28,13 +28,15 @@ import { APP_OFFER, APP_QUESTION } from '../app.js';
 const hookFor = (root: string) => ({ settingsFile: join(root, 'settings.json'), backupDir: join(root, 'backups') });
 const githubRemote = (owner: string, repository: string) => `https://github.com/${owner}/${repository}.git`;
 /**
- * Wrapper options for the cases that are not about the wrapper: a bundled source that cannot exist, so
- * `offerWrapper` reports 'unavailable', prints one line and asks nothing. Explicit because the default source
- * (BUNDLED_WRAPPER) is resolved from the package root, so whether it exists depends on whether this checkout
- * happens to have been built — a fixture must never depend on that. `skillsRoot` is left to
- * defaultWrapperOptions(home): an unavailable source is reported before anything reads it.
+ * Wrapper options for the cases that are not about the skills: a bundle folder that cannot exist, so
+ * `offerWrapper` reports 'unavailable', prints one line and asks nothing. Explicit because the default
+ * bundle (BUNDLED_SKILLS) is resolved from the package root, so whether it exists depends on whether
+ * this checkout happens to have been built — a fixture must never depend on that. `roots` is left to
+ * defaultWrapperOptions(home): an unavailable bundle is reported before anything reads them.
  */
-const noBundledWrapper = { source: join(tmpdir(), `terum-skills-unbundled-${randomUUID()}`, 'SKILL.md') };
+const noBundledWrapper = { bundle: join(tmpdir(), `terum-skills-unbundled-${randomUUID()}`) };
+/** The first-install question for a home without ~/.codex: the Claude root alone, every bundled name. */
+const skillsQuestion = async (home: string) => `Install the terum-skills skills for Claude Code so it can run terum-skills for you? (writes ${join(home, '.claude', 'skills')}/{${(await bundledNames()).join(', ')}})`;
 /** The same trick for the edit hook, for the same reason: an unavailable bundled source reports, prints one line and asks nothing. */
 const noBundledEditHook = { source: join(tmpdir(), `terum-skills-unbundled-${randomUUID()}`, 'terum-skills-edit.mjs') };
 
@@ -160,7 +162,7 @@ describe('setup (§6.1)', () => {
     const result = await run(args, io);
     expect.soft(io.asked).toContain('Invite teammates by inputting their GitHub usernames (comma or space separated; blank to skip)');
     expect.soft(io.askedAbout('GitHub logins to invite')).toBe(false);
-    expect.soft(io.lines).toContain('This wizard helps you create a team, join one, invite teammates, and offer the session hook, the /terum-skills Claude Code skill and a reminder to publish a skill after Claude edits one; re-run it any time to continue, and leave the invitation question blank to skip it.');
+    expect.soft(io.lines).toContain('This wizard helps you create a team, join one, invite teammates, and offer the session hook and the terum-skills skills for Claude Code and Codex and a reminder to publish a skill after Claude edits one; re-run it any time to continue, and leave the invitation question blank to skip it.');
     expect(result.ok).toBe(true);
   });
 
@@ -402,12 +404,12 @@ describe('setup (§6.1)', () => {
       'Invite teammates by inputting their GitHub usernames (comma or space separated; blank to skip)',
       PROJECTS_QUESTION,
       `Install the Claude Code session-start hook so team skills sync automatically? (edits ${hookFor(root).settingsFile})`,
-      `Install the /terum-skills Claude Code skill so Claude can run terum-skills for you? (writes ${join(home, '.claude', 'skills', 'terum-skills')})`,
+      await skillsQuestion(home),
       `Remind Claude Code to publish a skill after it edits one? (installs ${join(root, 'state', 'hooks', 'terum-skills-edit.mjs')} and a Write/Edit hook in ${hookFor(root).settingsFile})`,
     ]);
     expect(io.lines).toEqual(expect.arrayContaining([
       'Welcome to terum-skills.', "Your team's skills live in one private git repository the team controls; each member installs what they want and publishes local skills explicitly.",
-      'This wizard helps you create a team, join one, invite teammates, and offer the session hook, the /terum-skills Claude Code skill and a reminder to publish a skill after Claude edits one; re-run it any time to continue, and leave the invitation question blank to skip it.',
+      'This wizard helps you create a team, join one, invite teammates, and offer the session hook and the terum-skills skills for Claude Code and Codex and a reminder to publish a skill after Claude edits one; re-run it any time to continue, and leave the invitation question blank to skip it.',
       'Creating a new team creates a private GitHub repository under your account.',
       'GitHub: gh is logged in.', 'Next, from any terminal:',
       '  npx -y terum-skills@latest install alpha/<skill>   — install a shared skill (add @<version> to pin it)',
@@ -423,8 +425,9 @@ describe('setup (§6.1)', () => {
     expect(io.lines).toContain('  npx -y terum-skills@latest eval <skill>             — evaluate a shared skill locally before publishing');
     expect(runner.calls.filter((call) => call.command === 'gh' && call.args.join(' ').includes('collaborators/')).map((call) => call.args.at(-1))).toEqual(['repos/alice/alpha-repo/collaborators/bob', 'repos/alice/alpha-repo/collaborators/carol']);
     expect(JSON.parse(await readFile(hookFor(root).settingsFile, 'utf8')).hooks.SessionStart).toHaveLength(1);
-    expect(await readFile(join(home, '.claude', 'skills', 'terum-skills', 'SKILL.md'), 'utf8')).toBe(await readFile(wrapperFor(home).source, 'utf8'));
-    expect(io.lines).toContain(`Installed the /terum-skills Claude Code skill at ${join(home, '.claude', 'skills', 'terum-skills')}.`);
+    for (const name of await bundledNames()) expect(await readFile(join(home, '.claude', 'skills', name, 'SKILL.md'), 'utf8')).toBe(await readFile(join(CANONICAL_SKILLS, name, 'SKILL.md'), 'utf8'));
+    expect(io.lines).toContain(`No ${join(home, '.codex')} on this machine; Codex skills skipped.`);
+    expect(io.lines).toContain(`Installed the terum-skills skills at ${join(home, '.claude', 'skills')}: ${(await bundledNames()).join(', ')}.`);
     // D20 deleted setup's `actions` step, whose only body offered `connect`, so onboarding now
     // uploads nothing. `skills/` still holds the scaffold's own `.gitkeep` (team.ts writes it), so
     // pinning the exact listing is what proves no local skill was published.
@@ -485,7 +488,7 @@ describe('setup (§6.1)', () => {
     if (!result.ok) throw new Error(result.error);
     expect(result.value.steps).toEqual({ welcome: 'skipped', app: 'skipped', github: 'done', team: 'done', invite: 'skipped', projects: 'skipped', existing: 'skipped', evals: 'skipped', community: 'skipped', hook: 'done', wrapper: 'done', editHook: 'done', done: 'skipped' });
     expect(io.countAsked('Install the Claude Code session-start hook')).toBe(1);
-    expect(io.countAsked('Install the /terum-skills Claude Code skill')).toBe(1);
+    expect(io.countAsked('Install the terum-skills skills')).toBe(1);
     expect(io.countAsked('Remind Claude Code to publish a skill after it edits one?')).toBe(1);
     expect(await exists(join(root, 'state', 'hooks', 'terum-skills-edit.mjs'))).toBe(true);
     expect(await exists(join(home, '.claude', 'skills', 'terum-skills', 'SKILL.md'))).toBe(true);
@@ -532,8 +535,7 @@ describe('setup (§6.1)', () => {
     expect([...io.asked, ...joinedIo.asked]).toEqual(expect.arrayContaining([
       `Install the Claude Code session-start hook so team skills sync automatically? (edits ${hookFor(root).settingsFile})`,
       `Install the Claude Code session-start hook so team skills sync automatically? (edits ${hookFor(joinRoot).settingsFile})`,
-      `Install the /terum-skills Claude Code skill so Claude can run terum-skills for you? (writes ${join(home, '.claude', 'skills', 'terum-skills')})`,
-      `Install the /terum-skills Claude Code skill so Claude can run terum-skills for you? (writes ${join(joinHome, '.claude', 'skills', 'terum-skills')})`,
+      await skillsQuestion(home), await skillsQuestion(joinHome),
     ]));
   });
 
@@ -559,7 +561,7 @@ describe('setup (§6.1)', () => {
       `Install the Claude Code session-start hook so team skills sync automatically? (edits ${hookFor(root).settingsFile})`,
     ]);
     expect(result.value.steps).toMatchObject({ invite: 'skipped', community: 'printed', wrapper: 'skipped' });
-    expect(io.lines.join('\n')).toContain('The /terum-skills Claude Code skill is not bundled in this copy of terum-skills');
+    expect(io.lines.join('\n')).toContain('The terum-skills skills are not bundled in this copy of terum-skills');
     expect(COMMUNITY_URL).toBe('https://discord.gg/8tnRrxRM3Z');
     expect(io.lines).toContain(`Feedback and requests: ${COMMUNITY_URL}`);
     expect(io.lines.join('\n')).not.toMatch(/\bui\b/i);
