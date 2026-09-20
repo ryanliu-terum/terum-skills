@@ -43,6 +43,10 @@ export interface EvalArgs extends WithForm {
   /** Queue-only: reuse a receipt found after refresh, before any paid work. */
   skipReceipted?: boolean;
   k?: number;
+  /** IE6 §1: the rival skill ref. Its presence is what enters head-to-head mode. */
+  vs?: string;
+  /** IE6 §3.1: a human-written shared brief, skipping derivation and the confirm gate. */
+  brief?: string;
   triggersOnly?: boolean;
   executionOnly?: boolean;
   case?: string;
@@ -111,10 +115,29 @@ export function missingSkillFolder(ref: string): string {
 export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResult>> {
   try {
     if (args.triggersOnly && args.executionOnly) return failure('--triggers-only and --execution-only cannot be used together.');
+    // IE6 §1.2 — every head-to-head refusal is checked before any agent call. The spec's list was
+    // written against the team-clone model; --working/--save/--gen no longer exist, and the flags
+    // below are their equivalents on the local-folder model (§6.3).
+    const headToHead = args.vs !== undefined;
+    if (headToHead) {
+      if (args.commit) return failure('head-to-head runs are never committed: a receipt pins one skill id and one content digest.');
+      if (args.case !== undefined) return failure('--vs cannot be combined with --case: a named case is an authored assertion belonging to one skill.');
+      if (args.triggersOnly) return failure('--vs cannot be combined with --triggers-only: trigger evals are per-skill, and head-to-head is execution only.');
+      // Cases come from the shared brief, so --no-gen would leave the run with zero cases — and a
+      // zero-row expectation reports `complete` (engine §7.1), a clean report over no evidence.
+      if (args.noGen) return failure('--vs cannot be combined with --no-gen: head-to-head cases are generated from the shared brief, so --no-gen would run zero cases.');
+      // The queue exists to produce receipts; a head-to-head never lands one.
+      if (args.expectedVersion !== undefined || args.skipReceipted) return failure('head-to-head runs are not queueable: the queue exists to land receipts, and this mode never commits one.');
+      if (args.brief === undefined && !io.interactive) {
+        return failure('A head-to-head needs a shared task brief confirmed by a human. This channel cannot ask, so write the brief yourself and pass --brief <path>.');
+      }
+    }
     // Default k=1 (spec rev 18; Ajay, 2026-09-10) — overrides the 2026-09-07 "keep default k=3"
     // ruling (Terum 5aa9a4b2) on cost: k=3 -> k=1 takes a 3-case run from ~$4.40 to ~$1.50 measured.
     // A receipt you intend to gate on wants --k 3 or more; §16.6 carries the noise caveat.
-    const k = args.k ?? 1;
+    // IE6 §7: the comparison is the noisier quantity and reps are the cheapest mitigation, so
+    // head-to-head keeps its own default rather than inheriting the k=1 cost default.
+    const k = args.k ?? (headToHead ? 5 : 1);
     if (!Number.isInteger(k) || k < 1) return failure('--k must be a positive integer.');
     const store = args.config ?? createConfigStore();
     const runner = args.runner ?? systemRunner;
@@ -150,6 +173,19 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
     // scan's own detail against the path — the miss above is reserved for a name no root holds.
     const unusable = unusableSkillFolder(local);
     if (unusable !== undefined) return failure(unusable);
+    // IE6 §1: the rival resolves the same way the candidate does. The spec said "the rival is
+    // always a committed version" against the old team-clone model; on the local-folder model
+    // (§6.3) neither side is a committed tree, so both are Library folders and the run records
+    // each one's content digest instead.
+    let rival: { name: string; dir: string; id: string | null; digest?: string } | undefined;
+    if (args.vs !== undefined) {
+      const rivalMatch = await resolveLibrarySkill(args.home ?? homedir(), config, store.root, args.vs);
+      if (rivalMatch === undefined) return failure(missingSkillFolder(args.vs));
+      const rivalUnusable = unusableSkillFolder(rivalMatch);
+      if (rivalUnusable !== undefined) return failure(rivalUnusable);
+      if (resolve(rivalMatch.path) === resolve(local.path)) return failure(`--vs ${args.vs} resolves to the same folder as ${args.ref ?? local.name}; a head-to-head needs two different skills.`);
+      rival = { name: rivalMatch.name, dir: rivalMatch.path, id: null };
+    }
     // Best-effort, never a gate: a folder the team has never seen is still evaluable (§6.3).
     // By the FOLDER's name, not the ref: a path ref would never match a team skill, and the incumbent arm
     // would then silently treat a published skill as one the team has never seen.
@@ -192,6 +228,19 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
         const newest = already[already.length - 1]!;
         io.print(`Already evaluated these exact bytes of ${local.name}.`);
         return success({ team: teamName, id: skillId, name: local.name, runDir: '', ccVersion: newest.receipt.provenance.cc_version, executionStatus: newest.receipt.execution_status, alreadyEvaluated: true });
+      }
+    }
+    // §1: the rival passes the same hygiene gate as the candidate; a refusal names which of the
+    // two folders failed, since "Hygiene failed for X" alone is ambiguous with two skills in play.
+    if (rival !== undefined) {
+      const rivalFiles = await sourceFiles(rival.dir);
+      rival.digest = skillContentDigest(rivalFiles.files);
+      try {
+        reportHygieneWarnings((line) => io.print(line), assessHygiene(rival.name, rivalFiles, team?.policy.skill_license ?? null, false, true, undefined, 0));
+      } catch (error) {
+        if (!(error instanceof HygieneRefused)) throw error;
+        reportHygieneWarnings((line) => io.print(line), error.assessment);
+        return failure(`Hygiene failed for the rival skill ${rival.name}:\n${error.message}`);
       }
     }
     const dependencies = await dependencyPlan(candidateDir);
@@ -335,13 +384,18 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
       }
       // §6.5: no clone, no team, no id, no receipted version — every one of them means NO incumbent
       // and a single-arm run, exactly as eval-engine §7.1 already names it.
-      const incumbent = clone === null || skillId === null ? undefined : await incumbentDir(clone, local.name, await listVersions(clone, local.name), skillId, evaluatedDigest);
-      const opponents = incumbent === undefined ? 1 : 2;
+      // IE6 §2.1: the incumbent arm is skipped entirely in head-to-head — not materialized, and
+      // candidate-vs-incumbent is not produced. Opponents are baseline and rival.
+      const incumbent = rival !== undefined || clone === null || skillId === null
+        ? undefined
+        : await incumbentDir(clone, local.name, await listVersions(clone, local.name), skillId, evaluatedDigest);
+      const opponents = rival !== undefined || incumbent !== undefined ? 2 : 1;
       // IE6 §2: one arm table for both runners; identity travels with the tree.
       const armTable: Partial<Record<Arm, ArmSpec>> = {
         baseline: null,
         candidate: { name: local.name, dir: candidateDir },
         ...(incumbent === undefined ? {} : { incumbent: { name: local.name, dir: incumbent } }),
+        ...(rival === undefined ? {} : { rival: { name: rival.name, dir: rival.dir } }),
       };
       // Includes every selected authored case before requirement probes or setup failures.
       expectedRows = (selected.length + (suite === undefined ? 0 : suite.value.cases.length)) * k * opponents;
