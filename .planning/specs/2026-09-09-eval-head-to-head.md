@@ -1,6 +1,9 @@
 # Eval head-to-head — two skills, one brief, three arms (IE6)
 
-**Status:** DRAFT rev 1 (Ryan, 2026-09-09).
+**Status:** DRAFT rev 2 (Ryan, 2026-09-19). Rev 2 folds in the four blocker resolutions
+from `.planning/decisions/2026-09-19-eval-head-to-head-blockers-decision-walk.md` — D1 judge
+rubrics, D2 the `scored:` line, D3 the supplied-brief check, D4 the comparison-row format —
+plus six non-blocking findings from the same review. Rev 1 was never built.
 
 Adds a head-to-head execution mode to the `eval` verb: two different skills scored
 against each other on one neutrally-derived case set, in one run, with no winner label.
@@ -18,7 +21,8 @@ run. The ban on ranking surfaces survives intact and is enforced here by §5.
 `record_override` could not be used — the endpoint rejected both the surfaced
 `decision_id` and its note id ("receipt is missing, not yours, or expired") and
 `check_decision` returns no `receipt_id` field — so the ruling was recorded as a
-decision instead. Someone should reconcile that with Terum.
+decision instead. Someone should reconcile that with Terum — still unreconciled as of
+rev 2 (2026-09-19).
 
 **Governing contracts (unchanged by this spec):**
 - Engine spec (`2026-09-04-eval-engine.md` rev 16): case schema §5.1, receipt schema
@@ -27,37 +31,54 @@ decision instead. Someone should reconcile that with Terum.
 - Eval-gen spec (`2026-09-07-eval-gen.md` rev 2): the generator is the only model
   orchestration outside `agent.ts`; generation never runs in CI.
 
-**Measurement caveat, kept in front of the reader.** The determinism probe
-(`2026-09-04-eval-determinism-probe.md`) found arm scores reproduce (r = 0.97) while
-the *difference* between them does not (r = 0.35), and per-skill ranking is
-uncorrelated across reruns (ρ −0.07 to −0.22). Everything in §5 follows from that:
-this mode prints the two numbers that reproduce and refuses to print the one that
-does not.
+**Measurement caveat, kept in front of the reader.** Two separate studies, and rev 2
+splits the citation because rev 1 attributed both to one of them:
+
+- The SkillEvaluator test–retest
+  (`.planning/research/2026-09-03-phase-3-eval-share-research.md` §4) found per-skill lift
+  correlating at only r = 0.35 across identical runs, while the **without-skill** arm
+  correlated at r = 0.97. The same analysis measured the *with-skill* arm moving ~0.08
+  between identical runs, against ~0.083 for lift.
+- The determinism probe (`.planning/research/2026-09-04-eval-determinism-probe.md`) found
+  per-skill ranking uncorrelated across reruns (ρ −0.07 to −0.22).
+
+The honest statement is narrower than rev 1's. Arm scores correlate far better *across a
+set of skills* than their difference does, but a single with-skill arm score — which is
+what both `candidate` and `rival` are — moves about as much as lift does in absolute
+terms; the r = 0.97 vs r = 0.35 gap is substantially a dynamic-range effect across
+fourteen skills. §5's refusals follow from the **ranking** result (ρ ≈ 0), not from a
+claim that the two printed numbers are stable. The mitigations are k = 5 and the paired
+W/L/T record with its sign test (§4), not the arm scores.
 
 ## 1. Behavior
 
 `terum-skills eval <skill> --vs <other-skill>` enters head-to-head mode. Both refs
 resolve through the existing `findSkill` path in the same team; both trees are
-materialized and hygiene-checked exactly as the candidate is today.
+materialized at their head tree in the refreshed clone (`resolveVersion`, as the candidate
+is) and hygiene-checked exactly as the candidate is today. A hygiene refusal on either
+tree fails the run, and the message names which of the two failed.
 
 The run then proceeds in five steps, of which only the third is new work:
 
-1. **Derive a shared task brief.** A new generation mode reads both `SKILL.md` files
-   and both file listings and returns a short plain-prose description of the job the
-   two skills are competing to do — naming neither of them (§3.1). It lands in the run
-   tree as `brief.md`.
+1. **Derive a shared task brief.** A new generation mode reads both `SKILL.md` files and
+   both file listings — aliased to `Skill 1` / `Skill 2` in an order drawn from the run's
+   seeded RNG, never A-first and never by name (§3.1) — and returns a short plain-prose
+   description of the job the two skills are competing to do, naming neither of them. It
+   lands in the run tree as `brief.md`.
 2. **Human reads and edits it.** The brief is printed with its path, then one
    `io.confirm("Use this brief?")`. **Yes** → continue. **No** → the command stops,
    telling the reader to edit `brief.md` and re-run with `--brief <path>`. This is the
    whole neutrality guarantee: the brief is the only thing the case generator sees, and
    a human signed off on its text.
-3. **Generate cases from the brief alone.** Neither `SKILL.md` enters the
-   case-generation prompt (§3.2). This is the structural difference from today's
-   generator, which is deliberately seeded with the candidate's own skill text.
+3. **Generate cases from the brief alone.** Five of them, each carrying a judge rubric
+   also derived from the brief (§3.2). Neither `SKILL.md` enters the case-generation
+   prompt. This is the structural difference from today's generator, which is
+   deliberately seeded with the candidate's own skill text.
 4. **Run three arms** over those cases, k reps each: `baseline` (nothing staged),
    `candidate` (skill A), `rival` (skill B).
-5. **Report arm scores side by side**, plus the paired comparison records, with **no
-   verdict band and no winner label** (§5). Nothing is committed.
+5. **Report arm scores side by side**, plus the paired comparison records with their sign
+   test and an always-present `scored:` line, with **no verdict band and no winner label**
+   (§4, §5). Nothing is committed.
 
 ### 1.1 Flags
 
@@ -77,8 +98,15 @@ The run then proceeds in five steps, of which only the third is new work:
   (`--vs` implies `--execution-only`; passing it explicitly is accepted.)
 - `--vs` naming the same skill id as `<skill>` → refused.
 - `--vs` with a skill outside the selected team → refused by `findSkill` as today.
-- Non-interactive channel without `--brief` → refused (`PromptClosedError` is not the
-  right failure; the message must name `--brief`).
+- `--vs` + `--no-gen` → refused: head-to-head cases come from the brief, so `--no-gen`
+  leaves the run with zero cases — and `expectedRows === 0` reports `complete` by engine
+  §7.1, i.e. a clean-looking report over no evidence. (`--gen` is implied by `--vs` and is
+  accepted as a no-op, like `--execution-only`.)
+- Non-interactive channel without `--brief` → refused. Detect it by reading
+  `Prompter.interactive` (`prompt.ts:15`) before any agent call, **not** by catching the
+  throw from `createBoardSink` (`render/sink.ts:39`): `PromptClosedError` is not the right
+  failure and the message must name `--brief`. This is the common path, not an edge case —
+  every `--format md` invocation and the desktop eval host arrive non-interactive.
 - `--working` continues to apply to `<skill>` only; the rival is always a committed
   version. Mixing an uncommitted working tree into both sides of a comparison makes the
   result unreproducible, and only one source can be `--working` anyway.
@@ -127,7 +155,9 @@ The opponent loop gains `rival`, keeping `candidate` on the left:
 
 - `candidate-vs-baseline` — does A help at all?
 - `candidate-vs-rival` — the paired head-to-head.
-- (`candidate-vs-incumbent` is not produced in this mode; the incumbent arm is skipped.)
+- (`candidate-vs-incumbent` is not produced in this mode; the incumbent arm is skipped.
+  `materializeIncumbent` (`eval.ts:178`) is not called at all — no incumbent tree is
+  materialized, and `opponents` is fixed at 2 rather than derived from its result.)
 
 "Does B help?" is read off `arm_scores.rival` vs `arm_scores.baseline`, which is the
 D29-sanctioned display form. A `rival-vs-baseline` comparison row is deliberately **not**
@@ -139,33 +169,70 @@ emitted: it would invite a lift-vs-lift subtraction, which is the r = 0.35 quant
 
 ### 3.1 `deriveBrief`
 
-New export. Prompt receives both `SKILL.md` files and both file listings; returns JSON
-`{"brief": "..."}`. Validation, in the existing `askWithValidation` three-attempt
-correction loop:
+New export. The prompt receives both `SKILL.md` files and both file listings, **aliased to
+`Skill 1` / `Skill 2` in an order drawn from the run's seeded RNG** (`makeRng(0)`, already
+threaded through `runCase`). Rev 1 fed them A-then-B by name: §7.5 swaps A/B orderings for
+the judge precisely because position bias was a top-two noise source in the 2026-09-04
+probe, and the deriver is the one place the two skills are read side by side — its output
+seeds every case, so a fixed order is a systematic tilt in every rep. Aliasing also makes
+the model far less likely to emit either name, which is the check below.
 
-- non-empty, ≤ 1,500 characters;
-- **must not contain either skill's name** (case-insensitive, token match). A brief that
-  names a tool is describing the tool, not the job. This is a cheap, deterministic
-  neutrality check and it is the reason the correction loop exists here.
+Returns JSON `{"brief": "..."}`. Validation, in the existing `askWithValidation`
+three-attempt correction loop: non-empty, ≤ 1,500 characters, and `checkBriefNeutrality`.
+
+`checkBriefNeutrality(brief, names)` is a **standalone pure function**, not logic buried in
+the correction loop, because the supplied-brief path calls it too and must not pay a model
+round-trip. It returns `refuse` / `warn` / `ok`:
+
+- a name that is hyphenated or splits into two or more tokens (`live-trigger-monitoring`)
+  → **refuse** on a hit. A brief containing that string is describing the tool, not the job.
+- a single-token name → **warn** and continue. This project's own skills are named `search`,
+  `eval`, `install`, `sync`, `ls`, `run`; a `search`-vs-`ls` head-to-head cannot be described
+  in prose that never uses the word "search", and a hard refusal there burns three attempts
+  and fails the run. No dictionary and no word list — the rule is hyphen-or-token-count, so
+  it stays deterministic and has nothing to maintain.
 
 Output is written to `<runDir>/brief.md` with the same provenance header the other
 generated assets carry (`# generated by terum-skills eval-gen — review before trusting`
 plus model/engine/timestamp).
 
-`--brief <path>` reads the file and skips derivation, the neutrality check, and the
-confirm gate — a human wrote it, so it is neutral by assumption.
+`--brief <path>` reads the file and skips derivation and the confirm gate, but **not the
+checks**: the 1,500-character cap and `checkBriefNeutrality` both run, and a hit on a
+multi-token name refuses outright, since there is no correction loop to recover on this
+path. Rev 1 skipped them on the grounds that a human wrote the file — but §1.2 makes
+`--brief` mandatory without a terminal, and that is the path the desktop eval host and
+every `--format md` skill take, so "a human signed it" was covering the common case rather
+than the edge case. The confirm gate remains the primary guarantee where a human is
+present; the deterministic check is what remains where one is not.
 
 ### 3.2 Brief-seeded cases
 
-`GenerateOptions` gains an optional `brief?: string`. When present, `context()` returns
-the brief **alone** — no `SKILL.md`, no file listing. `casePrompt`'s instructions are
-otherwise unchanged, including the exactly-three-cases rule, the bucket taxonomy, the
-at-least-one-adversarial rule, and the check whitelist
-(`transcript_mentions`, `command_matching`, `no_command_matching`, `file_exists`,
-`file_absent` — never `command_succeeds`).
+`GenerateOptions` gains an optional `brief?: string`. When present, `context()` returns the
+brief **alone** — no `SKILL.md`, no file listing.
 
-Raise the count to **five cases** in this mode: three is too thin a denominator for a
-comparison anyone will act on, and the cases are cheaper here than the arms.
+Two things change in `casePrompt` for this mode. Rev 1 stated the first of them twice and
+contradictorily ("including the exactly-three-cases rule", then "raise the count to five");
+the count is **five**.
+
+1. **Five cases, not three.** Three is too thin a denominator for a comparison anyone will
+   act on, and the cases are cheaper here than the arms. The count becomes a parameter:
+   `validateCases` (`generate.ts:94`) hardcodes `supplied.length !== 3` and the prompt
+   string (`generate.ts:123`) says "exactly three" — both read the mode's count.
+2. **Every case carries a `judge` rubric**, 2–4 sentences, derived from the brief alone and
+   never from either `SKILL.md`. Without one the mode cannot discriminate at all:
+   `decide()` (`execution.ts:325`) returns `checks-equal-no-judge` whenever the two arms'
+   all-checks-passed booleans match, and two competent skills on the same task pass the same
+   checks. Against the empty baseline checks discriminate fine — the arm with no skill fails
+   the skill-shaped ones — which is why this has never bitten before. Note that **no case
+   file in this project carries a rubric today**, so §7.5's judge chain runs against a live
+   model here for the first time; that is a known, accepted risk, taken because the
+   alternative is a 75-agent-run exit gate that returns 25 ties. The rubric passes
+   `checkBriefNeutrality` (§3.1) like the brief does, inside the same three-attempt
+   correction loop.
+
+Everything else is unchanged: the bucket taxonomy, the at-least-one-adversarial rule, and
+the check whitelist (`transcript_mentions`, `command_matching`, `no_command_matching`,
+`file_exists`, `file_absent` — never `command_succeeds`).
 
 The eval-gen spec's accepted circularity risk is *removed*, not merely mitigated, in
 this mode — the generator never sees either skill's text. The brief-derivation step
@@ -176,25 +243,56 @@ inherits it instead, which is exactly why a human signs the brief.
 `renderReport` gains a head-to-head mode. It prints:
 
 ```
-head-to-head: <A> vs <B> — 5 cases · k=5 · no verdict (see below)
+head-to-head: <A> vs <B> — 5 cases · k=5
+scored: 50/50 rows
 arm scores: candidate 0.82 · rival 0.71 · baseline 0.61
-candidate-vs-baseline: 14W 6L 5T
-candidate-vs-rival: 11W 9L 5T
+candidate-vs-baseline: 14W 6L 5T over 25 comparisons, sign test p=0.115
+candidate-vs-rival:    11W 9L 5T over 25 comparisons, sign test p=0.824
 efficiency: candidate 6.2 turns · 41.3s · $0.38 | rival 7.1 turns · 52.9s · $0.44 | baseline ...
 brief: <runDir>/brief.md (human-confirmed)
-note: arm scores reproduce across runs; the gap between them does not. This is
+note: arm scores correlate across skills better than their difference does, but a
+      single with-skill arm still moves ~0.08 between identical runs. This is
       evidence about two skills on one task brief, not a ranking.
 ```
 
 - **No `verdict:` line.** `aggregate` currently derives the band from
   `candidate-vs-baseline` unconditionally (`results.ts:84–85`); in head-to-head mode
   `verdict` is `null` and the renderer omits the line rather than printing `NEUTRAL`.
+  `Aggregate.verdict` therefore widens to `Verdict | null`. The §5.3 receipt schema
+  (`receipt.ts:56`, `z.enum(['PASS','NEUTRAL','FAIL'])`) stays **frozen and unchanged** —
+  head-to-head never commits, and what guarantees that is §1.2's runtime refusal, not the
+  type. Do not widen the receipt for symmetry.
+- **An always-present `scored: <n>/<m> rows` line**, greyed when
+  `execution_status !== 'complete'`. Today the partial marker is a suffix on the verdict
+  line (`results.ts:130–133`), so removing that line removes the warning with it: a run
+  where a third of the matrix died would print three clean-looking arm scores and say
+  nothing. Rev 1's "greying behaves exactly as today" could not be implemented literally.
+  Stating the denominator on every run rather than only broken ones is engine §5.3's
+  no-coercion rule — "unscored holes stay visible, never averaged into a clean-looking
+  number" — applied where the band used to carry it.
+- **Comparison rows carry the sign test, not net lift.** `11W 9L 5T over 25 comparisons,
+  sign test p=0.824`, from a sibling formatter beside `summarize()` (`stats.ts:48`). The
+  W/L/T record alone reads to a human as a win; run the sample above through `signTest` and
+  `candidate-vs-rival` is p = 0.824 while `candidate-vs-baseline` is p = 0.115 — neither
+  distinguishable from a coin flip at 25 rows. Once the verdict band is gone the p-value is
+  the reader's only calibration. The net-lift percentage is dropped because it is the one
+  quotable cross-skill number this mode could emit; `net_lift` and `sign_p` both stay on
+  `ComparisonSummary` and in the run tree, so nothing is lost to later analysis.
+- **Arm order is candidate · rival · baseline, imposed explicitly.** `renderReport`
+  iterates `Object.entries(arm_scores)` in insertion order, which is `armDirs` order and
+  therefore baseline-first (`results.ts:138`); §7.5's fixed order is real work, not a no-op.
+- **No `why:` line in this mode.** `attributionLine` (`results.ts:104`) reads only
+  `candidate-vs-baseline` rows, so under a head-to-head headline it would read as if it
+  described the head-to-head.
 - **No winner language anywhere** — not in the report, not in the run tree, not in the
   exit code.
-- `execution_status` and the unscored-hole greying behave exactly as today.
+- `execution_status` and the unscored-hole accounting behave exactly as today; only where
+  the warning is *printed* changes.
 - Run tree is written as usual under `evals/<team>/<skill-id>/<run-id>/`, keyed on A's
   id, with `_meta` gaining `mode: "head-to-head"`, `rival_skill_id`, `rival_skill_name`,
-  `rival_version`, and `brief_source: "derived" | "supplied"`.
+  `rival_version` (the rival's head tree in the refreshed clone), `brief_source:
+  "derived" | "supplied"`, and `brief_order` — which of the two was `Skill 1` in the
+  derivation prompt (§3.1), without which the seeded order is unauditable.
 
 ## 5. What this spec deliberately does not do
 
@@ -224,10 +322,14 @@ note: arm scores reproduce across runs; the gap between them does not. This is
   `--vs` resolution and all of §1.2's refusals. *Exit:* a head-to-head run over an
   authored case set produces both comparisons and three arm scores.
 - **HH3 — brief derivation and brief-seeded generation.** §3 in full, plus the confirm
-  gate. *Exit:* `brief.md` lands, names neither skill, and a declined confirm stops the
-  run with the re-run instruction.
-- **HH4 — report mode.** §4. *Exit:* no verdict line, no winner language, the caveat
-  note present.
+  gate. *Exit:* `brief.md` lands, names neither skill, and a declined confirm stops the run
+  with the re-run instruction; five cases generate, each carrying a rubric; a supplied
+  `--brief` naming a multi-token skill is refused with no model call; the derivation
+  prompt's skill order varies with the seed.
+- **HH4 — report mode.** §4. *Exit:* no verdict line, no `why:` line, no winner language;
+  `scored: n/m rows` present on a complete run and greyed on a partial one; comparison rows
+  carry the sign test and no net-lift percentage; arms print candidate · rival · baseline;
+  the caveat note present.
 
 **Overall exit:** a real head-to-head run between two genuinely similar shared skills,
 reviewed by a human who agrees the brief is fair to both.
@@ -242,7 +344,17 @@ reviewed by a human who agrees the brief is fair to both.
 4. **`--working` applies to the primary skill only** (§1.2).
 5. **Arm order in the report is candidate · rival · baseline**, fixed, never sorted by
    score — sorting is the ranking surface D29 bans.
+6. **Every generated case carries a 2–4 sentence judge rubric** (§3.2), derived from the
+   brief alone.
+7. **The brief checks apply to supplied briefs too** — the 1,500-character cap and
+   `checkBriefNeutrality`, refusing on multi-token names and warning on single-token ones
+   (§3.1).
+8. **Comparison rows print the sign test, never net lift** (§4).
+9. **The derivation prompt's skill order is seeded, not fixed** (§3.1), and recorded in
+   `_meta.brief_order`.
 
 **Cost, for the record, not as a decider:** 5 cases × k=5 × 3 arms = 75 agent runs per
-head-to-head, plus judge calls on check-ties, plus two generation calls. Roughly double
-a standard `eval` run.
+head-to-head, plus two generation calls, plus judge calls on check-ties — which in this
+mode actually fire, since §3.2's rubrics are what make that path reachable at all. Each
+judge call is double-asked with a position swap; engine §7.5 calls them "the cheap half of
+a comparison." Roughly double a standard `eval` run.
