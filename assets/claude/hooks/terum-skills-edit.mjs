@@ -60,7 +60,7 @@ function main() {
     placement
       ? `That folder is an installed copy${version === null ? '' : ` of ${version}`} from team ${placement.team}; the edit is local to this machine until it is published as a new version.`
       : 'The edit is local to this machine: teammates see the published version until a new one is published.',
-    `To share it: npx -y terum-skills@latest publish ${name} — it asks questions, so it needs a real terminal; prepare the command for the user rather than running it here.`,
+    `To share it: run npx -y terum-skills@latest publish ${name} here through Bash once the user agrees; it rewrites the folder's managed frontmatter and writes an immutable version to team main. Its only question is a confirm when the latest local eval of these bytes failed, which refuses without a terminal before anything is written; hand the command to a terminal only then.`,
     `To check the change first: npx -y terum-skills@latest eval ${name} (paid agent runs — confirm with the user before starting one).`,
     'Shown once per skill per session by the terum-skills edit hook.',
   ];
