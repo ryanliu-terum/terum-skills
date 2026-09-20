@@ -20,6 +20,8 @@ const PLACEHOLDER = /(["']?)(?:\$\{(\w+)\}|\$(\w+)|<[\w.-]+>)\1\/$/;
 /** Write errors that mean the sandbox already holds the path: the case's seeds and the staged skill win. */
 const OCCUPIED = new Set(['EEXIST', 'ENOTDIR', 'EISDIR']);
 export const DEPENDENCY_CAP_BYTES = 20 * 1024 * 1024;
+/** The most entries the answer-key walk visits; past it the walk stops and every named script travels alone. */
+export const ANSWER_KEY_ENTRY_CAP = 10_000;
 
 export interface DependencyEntry {
   /**
@@ -44,8 +46,9 @@ export interface DependencyPlan {
   /**
    * Repo-relative paths `stageDependencies` copies, each once, ancestors first: a staged script's
    * parent directory, or the script alone when that directory is the repo root, a `.claude`
-   * directory, or would carry the skill folder, the real target of its `evals/` or `fixtures/`, or
-   * `.claude/skills` (§6.1: never the skill's own folder, its answer key, or an ancestor of either).
+   * directory, or would carry the skill folder, any path its `evals/` or `fixtures/` reaches
+   * (through links too), or `.claude/skills` (§6.1: never the skill's own folder, its answer key, or
+   * an ancestor of either). Every script travels alone when the answer-key walk could not finish.
    */
   copies: string[];
   /** Every directory and file `stageDependencies` writes for `copies`, parents first; the cap summed exactly these bytes. */
@@ -55,8 +58,9 @@ export interface DependencyPlan {
 export interface HeavyScan { heavy: boolean; evidence: string; }
 
 /**
- * Real paths every staged path is measured against. `keys` holds the real paths of the skill's
- * `evals/` and `fixtures/` (the answer key): either may be a link out of the skill folder.
+ * Real paths every staged path is measured against. `keys` holds the real paths the runner can read
+ * through the skill's `evals/` and `fixtures/` (the answer key; see `answerKey`): either may be a
+ * link out of the skill folder, and so may anything beneath them.
  */
 interface Fence { root: string; skill: string; installed: string; keys: string[]; }
 
@@ -69,6 +73,9 @@ interface Named { to: string; from: string; bytes: number; dev: number; ino: num
 const exists = async (path: string): Promise<boolean> => lstat(path).then(() => true, () => false);
 const isFile = async (path: string): Promise<boolean> => stat(path).then((info) => info.isFile(), () => false);
 const readable = async (path: string): Promise<boolean> => access(path, constants.R_OK).then(() => true, () => false);
+/** A directory the eval may pass through, whether or not it may list it. */
+const searchable = async (path: string): Promise<boolean> =>
+  (await stat(path).then((info) => info.isDirectory(), () => false)) && access(path, constants.X_OK).then(() => true, () => false);
 /** A directory's entries in name order, or null when it cannot be listed (an unreadable directory is left out, never thrown). */
 const listing = async (dir: string): Promise<Dirent[] | null> => readdir(dir, { withFileTypes: true }).then((entries) => entries.sort(byName), () => null);
 /** `path` is `root` itself or lies beneath it. */
@@ -95,10 +102,70 @@ async function real(path: string): Promise<string> {
   }
 }
 
+/** The paths no other path in the set lies beneath: a key inside another key adds nothing to the fence. */
+function outermost(paths: Set<string>): string[] {
+  return [...paths].filter((path) => {
+    for (let at = path; at !== dirname(at);) {
+      at = dirname(at);
+      if (paths.has(at)) return false;
+    }
+    return true;
+  }).sort();
+}
+
+/**
+ * The real paths the runner can read through the skill's `evals/` and `fixtures/` (the answer key):
+ * each of the two, and the real target of every link beneath them, file or directory. A directory
+ * link is followed; each real directory is listed once, so chains and loops end. No file is read:
+ * only names, types and real paths. An entry that cannot be resolved or listed is skipped, never
+ * thrown. An entry reached through a followed link lies inside that link's real target, which is
+ * already a key. `complete` is false when the walk passes `ANSWER_KEY_ENTRY_CAP` entries or meets
+ * a directory the eval may search but not list: a link beneath either could lead anywhere unseen.
+ */
+async function answerKey(skillDir: string): Promise<{ keys: string[]; complete: boolean }> {
+  const found = new Set<string>();
+  const queue: string[] = [];
+  for (const name of ['evals', 'fixtures']) {
+    const path = join(skillDir, name);
+    if (!(await exists(path))) continue;
+    found.add(await real(path));
+    queue.push(path);
+  }
+  const listed = new Set<string>();
+  let visited = 0;
+  let complete = true;
+  for (let next = 0; next < queue.length; next += 1) {
+    const dir = await realpath(queue[next]!).catch(() => null);
+    if (dir === null || listed.has(dir)) continue;
+    listed.add(dir);
+    const children = await listing(dir);
+    if (children === null) {
+      // A runner that knows a name beneath a searchable directory still reaches it.
+      if (await searchable(dir)) complete = false;
+      continue;
+    }
+    for (const entry of children) {
+      visited += 1;
+      if (visited > ANSWER_KEY_ENTRY_CAP) return { keys: outermost(found), complete: false };
+      const path = join(dir, entry.name);
+      if (entry.isSymbolicLink()) {
+        // A dangling or unresolvable link leads nowhere the runner can read.
+        const target = await realpath(path).catch(() => null);
+        if (target === null) continue;
+        found.add(target);
+        if (await stat(path).then((info) => info.isDirectory(), () => false)) queue.push(target);
+      } else if (entry.isDirectory()) {
+        queue.push(path);
+      }
+    }
+  }
+  return { keys: outermost(found), complete };
+}
+
 /**
  * A real path staging never reads: the skill folder, anything in it, or an ancestor of it; the same
- * for the real targets of its `evals/` and `fixtures/`, and for `<root>/.claude/skills`, each of
- * which may be a link; a `.claude/skills` tree or `.git` anywhere
+ * for every answer-key path (`answerKey`), and for `<root>/.claude/skills`, each of which may be
+ * a link; a `.claude/skills` tree or `.git` anywhere
  * (measured from the repo root when the path is inside it); and the repo root or an ancestor.
  * `node_modules` is not fenced by real path: a harness that links `.claude/workflows` into an
  * installed package, in the repository or under a global npm prefix, is the skill's method. A token
@@ -178,10 +245,9 @@ export async function dependencyPlan(skillDir: string, cwd = process.cwd()): Pro
   // The names skill staging may put this skill under: `.claude/skills/<name>/…` is its own file.
   const names = new Set([basename(resolve(skillDir)), ...(typeof declared === 'string' ? [declared] : [])].map(folded));
   const skill = await real(skillDir);
-  // The answer key may be a link whose real target lies outside the skill folder.
-  const keys: string[] = [];
-  for (const name of ['evals', 'fixtures']) if (await exists(join(skillDir, name))) keys.push(await real(join(skillDir, name)));
-  const fence: Fence | null = root === null ? null : { root: await real(root), skill, installed: await real(join(root, '.claude', 'skills')), keys };
+  // The answer key, or anything beneath it, may be a link whose real target lies outside the skill folder.
+  const answer = root === null ? { keys: [], complete: true } : await answerKey(skillDir);
+  const fence: Fence | null = root === null ? null : { root: await real(root), skill, installed: await real(join(root, '.claude', 'skills')), keys: answer.keys };
   const found: { token: string; copy: string; source: string }[] = [];
   /** Every named script, keyed by its folded repo-relative path. */
   const named = new Map<string, Named>();
@@ -209,8 +275,9 @@ export async function dependencyPlan(skillDir: string, cwd = process.cwd()): Pro
     const parent = dirname(candidate);
     const parentReal = await real(parent);
     // The script travels alone when its directory is the repo root, a `.claude` directory (settings,
-    // notes and skills live there), or would carry the skill folder, its answer key or `.claude/skills`.
-    const alone = parent === root || claudeDir(parent) || claudeDir(parentReal) || inside(parent, resolve(skillDir)) || fenced(fence!, parentReal);
+    // notes and skills live there), or would carry the skill folder, its answer key or `.claude/skills`;
+    // and always when the answer-key walk could not finish, since any directory might carry the key.
+    const alone = !answer.complete || parent === root || claudeDir(parent) || claudeDir(parentReal) || inside(parent, resolve(skillDir)) || fenced(fence!, parentReal);
     const to = relative(root!, candidate);
     named.set(folded(to), { to, from: target, bytes: info.size, dev: info.dev, ino: info.ino });
     found.push({ token, copy: alone ? to : relative(root!, parent), source: alone ? target : parentReal });

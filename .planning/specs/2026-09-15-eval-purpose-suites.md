@@ -412,9 +412,10 @@ staging, and another skill's files are not this skill's method); and a script wh
 **real** path, resolved from the repo root, lies in the skill folder, a
 `.claude/skills` tree or `.git`, so `.claude/skills/<self>/run.sh`, a global skill
 under a git-tracked HOME, and a link into a skill are all caught. The real paths of
-the skill's `evals/` and `fixtures/` are fenced like the skill folder, since either
-may be a link out of it: a script inside one is never kept, and a script whose
-directory would carry one travels alone (see Stage). The folder copy
+the skill's `evals/` and `fixtures/`, and of every link beneath them (directory links
+followed to any depth), are fenced like the skill folder, since any of them may lead
+out of it: a script inside one is never kept, and a script whose directory would carry
+one travels alone (see Stage). The folder copy
 already carries a token that resolves to a file inside the skill folder, or that
 names `.claude/skills/<this skill>/<file>` for a file the folder has (except under
 `evals/` and `fixtures/`, which never travel). A script token that resolves nowhere,
@@ -440,11 +441,16 @@ incumbent's SKILL.md with the candidate's. Rev 2 staged any existing path, and t
 **parent directory** (workflow engines import sibling helpers; non-script siblings
 travel with them), and a directory shared by two scripts is copied once. The script
 travels alone when that directory is the repo root, any `.claude` directory (settings,
-notes and skills live there), or would carry the skill folder or `.claude/skills`,
-judged by path and by real path (`./build.sh`, `.claude/statusline.js`, a script
-beside a skill folder). Always excluded from a copy, at any depth: `node_modules`,
-`.git` and `__tests__` directories, anything landing in a `.claude/skills` tree, and
-`.claude/settings*.json`. The copy writes only regular files and directories, never a
+notes and skills live there), or would carry the skill folder, the real target of the
+skill's `evals/` or `fixtures/` (or of any link inside them, followed to any depth),
+or `.claude/skills`, judged by path and by real path (`./build.sh`,
+`.claude/statusline.js`, a script beside a skill folder). The walk that finds those
+link targets reads names and real paths only, never file contents, lists each real
+directory once (so chains and loops end), and skips what it cannot resolve or list;
+when it passes 10,000 entries, or meets a directory beneath the answer key that the
+eval may search but not list, every kept script travels alone. Always excluded from a
+copy, at any depth: `node_modules`, `.git` and `__tests__` directories, anything
+landing in a `.claude/skills` tree, and `.claude/settings*.json`. The copy writes only regular files and directories, never a
 link: `fs.cp` would write a link as an absolute path into the live repository. A link
 beneath a copied directory is not copied or followed, and an entry the eval cannot
 read is left out. A script or
@@ -570,10 +576,13 @@ file shape, proven by one real run.
 7. Dependency staging (§6.1, rev 3): repo root = `.git` ancestor of the skill folder,
    else of the cwd; only named script files are staged, each with its parent
    directory, siblings included (the script alone when that directory is the repo
-   root, a `.claude` directory, or would carry the skill folder or `.claude/skills`);
-   never the skill folder or an ancestor of it, a `.claude/skills` tree, `.git`, or
-   `.claude/settings*.json` (all at any depth), a link beneath a copied directory
-   (not followed), or a data path the SKILL.md names; the copy never overwrites a seeded
+   root, a `.claude` directory, or would carry the skill folder, the answer key or
+   `.claude/skills`; every script alone when the answer-key walk stops at 10,000
+   entries or at a directory it may search but not list); never the skill folder or an ancestor of it, the answer key (the real
+   targets of `evals/` and `fixtures/` and of every link inside them) or an ancestor
+   of it, a `.claude/skills` tree, `.git`, or `.claude/settings*.json` (all at any
+   depth), a link beneath a copied directory (neither copied nor followed), or a data
+   path the SKILL.md names; the copy never overwrites a seeded
    file; 20 MB cap on the real bytes copied; candidate and incumbent arms only; HYG8
    is warning tier.
 8. `spawns_agents`, `staged_dependencies`, `missing_dependencies` recorded in
