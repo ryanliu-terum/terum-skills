@@ -103,10 +103,13 @@ The run then proceeds in five steps, of which only the third is new work:
   §7.1, i.e. a clean-looking report over no evidence. (`--gen` is implied by `--vs` and is
   accepted as a no-op, like `--execution-only`.)
 - Non-interactive channel without `--brief` → refused. Detect it by reading
-  `Prompter.interactive` (`prompt.ts:15`) before any agent call, **not** by catching the
-  throw from `createBoardSink` (`render/sink.ts:39`): `PromptClosedError` is not the right
-  failure and the message must name `--brief`. This is the common path, not an edge case —
-  every `--format md` invocation and the desktop eval host arrive non-interactive.
+  `Prompter.interactive` (`prompt.ts:15`) before any agent call, **not** by catching a
+  `PromptClosedError` out of `io.confirm`: that is the wrong failure, and the message must
+  name `--brief`. On this branch non-interactive means piped stdin — `terminalPrompter`
+  resolves `interactive` from `input.isTTY` (`prompt.ts:61`) and `src/index.ts:51` is the
+  only construction site. The board sink on `feat/bulk-write-batching`
+  (`createBoardSink`, `interactive: false`) will make this the *common* path rather than a
+  scripted edge case once that lands; the refusal is written to hold either way.
 - `--working` continues to apply to `<skill>` only; the rival is always a committed
   version. Mixing an uncommitted working tree into both sides of a comparison makes the
   result unreproducible, and only one source can be `--working` anyway.
@@ -200,9 +203,10 @@ plus model/engine/timestamp).
 checks**: the 1,500-character cap and `checkBriefNeutrality` both run, and a hit on a
 multi-token name refuses outright, since there is no correction loop to recover on this
 path. Rev 1 skipped them on the grounds that a human wrote the file — but §1.2 makes
-`--brief` mandatory without a terminal, and that is the path the desktop eval host and
-every `--format md` skill take, so "a human signed it" was covering the common case rather
-than the edge case. The confirm gate remains the primary guarantee where a human is
+`--brief` mandatory without a terminal, and a file path handed to a scripted run is not a
+signature. That gap widens once the `--format md` board sink lands (see §1.2): every such
+invocation is non-interactive by construction, so "a human signed it" would then be
+covering the common case rather than the edge case. The confirm gate remains the primary guarantee where a human is
 present; the deterministic check is what remains where one is not.
 
 ### 3.2 Brief-seeded cases
