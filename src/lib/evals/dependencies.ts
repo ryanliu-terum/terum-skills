@@ -4,15 +4,15 @@
  * skill names is the task's input, which belongs in a case's `files`/`fixture` — staging it would
  * hand the candidate an input the bare agent never gets (North Star: "on the same input").
  */
-import { constants } from 'node:fs';
-import { copyFile, lstat, mkdir, readFile, readdir, realpath, stat } from 'node:fs/promises';
+import { constants, type Dirent } from 'node:fs';
+import { access, copyFile, lstat, mkdir, readFile, readdir, realpath, stat } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { decodeText, hygieneFrontmatter } from './hygiene.js';
 
 const TOKEN = /[\w.-]+(?:\/[\w.-]+)+/g;
 /** Directories a copy never descends into. Names compare without case: APFS is case-insensitive. */
 const EXCLUDED = new Set(['node_modules', '.git', '__tests__']);
-/** A path through either of these is never a skill's method: it is neither staged nor reported missing. */
+/** A token spelled through either of these is never a skill's method: it is neither staged nor reported missing. */
 const NEVER = new Set(['node_modules', '.git']);
 const SCRIPT = new Set(['.js', '.mjs', '.cjs', '.ts', '.sh', '.py']);
 /** `${VAR}/`, `$VAR/`, `"$VAR"/` or `<placeholder>/` right before a token: the prefix stands for the repo root. */
@@ -22,7 +22,10 @@ const OCCUPIED = new Set(['EEXIST', 'ENOTDIR', 'EISDIR']);
 export const DEPENDENCY_CAP_BYTES = 20 * 1024 * 1024;
 
 export interface DependencyEntry {
-  /** The real path read. A link is always resolved first, so no arm is handed a link into the repository. */
+  /**
+   * The real path read. A named script or copy root that is a link is read through its real target;
+   * a link beneath a copy root is never read, so no arm is handed a link into the repository.
+   */
   from: string;
   /** The sandbox-relative path written. */
   to: string;
@@ -54,8 +57,17 @@ export interface HeavyScan { heavy: boolean; evidence: string; }
 /** Real paths every staged path is measured against. */
 interface Fence { root: string; skill: string; installed: string; }
 
+/**
+ * A named script as `dependencyPlan` resolved it: the one link a copy's walk still reads through.
+ * `to` is its repo-relative path; `dev`/`ino` identify its real target.
+ */
+interface Named { to: string; from: string; bytes: number; dev: number; ino: number; }
+
 const exists = async (path: string): Promise<boolean> => lstat(path).then(() => true, () => false);
 const isFile = async (path: string): Promise<boolean> => stat(path).then((info) => info.isFile(), () => false);
+const readable = async (path: string): Promise<boolean> => access(path, constants.R_OK).then(() => true, () => false);
+/** A directory's entries in name order, or null when it cannot be listed (an unreadable directory is left out, never thrown). */
+const listing = async (dir: string): Promise<Dirent[] | null> => readdir(dir, { withFileTypes: true }).then((entries) => entries.sort(byName), () => null);
 /** `path` is `root` itself or lies beneath it. */
 const inside = (root: string, path: string): boolean => {
   const rel = relative(root, path);
@@ -65,6 +77,7 @@ const folded = (part: string): string => part.toLowerCase();
 /** The segments pass through a `.claude/skills` tree, at any depth. */
 const skillsTree = (parts: string[]): boolean => parts.some((part, index) => folded(part) === '.claude' && folded(parts[index + 1] ?? '') === 'skills');
 const neverTree = (parts: string[]): boolean => parts.some((part) => NEVER.has(folded(part)));
+const gitTree = (parts: string[]): boolean => parts.some((part) => folded(part) === '.git');
 const claudeDir = (path: string): boolean => folded(basename(path)) === '.claude';
 const byName = (a: { name: string }, b: { name: string }): number => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
 
@@ -81,12 +94,15 @@ async function real(path: string): Promise<string> {
 
 /**
  * A real path staging never reads: the skill folder, anything in it, or an ancestor of it; the same
- * for `<root>/.claude/skills`, which may be a link; a `.claude/skills` tree, `.git` or `node_modules`
- * anywhere (measured from the repo root when the path is inside it); and the repo root or an ancestor.
+ * for `<root>/.claude/skills`, which may be a link; a `.claude/skills` tree or `.git` anywhere
+ * (measured from the repo root when the path is inside it); and the repo root or an ancestor.
+ * `node_modules` is not fenced by real path: a harness that links `.claude/workflows` into an
+ * installed package, in the repository or under a global npm prefix, is the skill's method. A token
+ * spelled through `node_modules` and a `node_modules` beneath a copy root stay out.
  */
 function fenced(fence: Fence, path: string): boolean {
   const parts = (inside(fence.root, path) ? relative(fence.root, path) : path).split(sep);
-  return neverTree(parts) || skillsTree(parts) || inside(path, fence.root)
+  return gitTree(parts) || skillsTree(parts) || inside(path, fence.root)
     || inside(fence.skill, path) || inside(path, fence.skill)
     || inside(fence.installed, path) || inside(path, fence.installed);
 }
@@ -159,6 +175,8 @@ export async function dependencyPlan(skillDir: string, cwd = process.cwd()): Pro
   const skill = await real(skillDir);
   const fence: Fence | null = root === null ? null : { root: await real(root), skill, installed: await real(join(root, '.claude', 'skills')) };
   const found: { token: string; copy: string; source: string }[] = [];
+  /** Every named script, keyed by its folded repo-relative path. */
+  const named = new Map<string, Named>();
   const missing: string[] = [];
   const tokens = [...scriptTokens(skillBody(text))].sort(([, a], [, b]) => (a < b ? -1 : a > b ? 1 : 0));
   for (const [key, token] of tokens) {
@@ -178,12 +196,16 @@ export async function dependencyPlan(skillDir: string, cwd = process.cwd()): Pro
     // skill under a HOME-rooted repo, and a link into a skill or `.git` are all refused.
     const target = await real(candidate);
     if (fenced(fence!, target)) continue;
+    // A script the eval cannot read cannot travel: the same honest `missing` result, never a throw.
+    if (!(await readable(target))) { missing.push(token); continue; }
     const parent = dirname(candidate);
     const parentReal = await real(parent);
     // The script travels alone when its directory is the repo root, a `.claude` directory (settings,
     // notes and skills live there), or would carry the skill folder or `.claude/skills`.
     const alone = parent === root || claudeDir(parent) || claudeDir(parentReal) || inside(parent, resolve(skillDir)) || fenced(fence!, parentReal);
-    found.push({ token, copy: relative(root!, alone ? candidate : parent), source: alone ? target : parentReal });
+    const to = relative(root!, candidate);
+    named.set(folded(to), { to, from: target, bytes: info.size, dev: info.dev, ino: info.ino });
+    found.push({ token, copy: alone ? to : relative(root!, parent), source: alone ? target : parentReal });
   }
 
   // The cap counts what the copy will write: each distinct copy root once, ancestors first, a root
@@ -197,7 +219,7 @@ export async function dependencyPlan(skillDir: string, cwd = process.cwd()): Pro
   let total = 0;
   for (const [copy, from] of [...roots].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) {
     if (landed.has(copy)) { bytesOf.set(copy, 0); continue; }
-    const listed = await copyEntries(fence!, from, copy);
+    const listed = await copyEntries(fence!, from, copy, named);
     const bytes = listed.reduce((sum, entry) => sum + entry.bytes, 0);
     bytesOf.set(copy, bytes);
     if (total + bytes > DEPENDENCY_CAP_BYTES) continue;
@@ -213,35 +235,53 @@ export async function dependencyPlan(skillDir: string, cwd = process.cwd()): Pro
 }
 
 /**
- * Everything one copy root writes, parents first. Beneath the root: no `node_modules`, `.git` or
- * `__tests__`; nothing landing in a `.claude/skills` tree or on `.claude/settings*.json`; and every
- * link followed to its real target, which must pass the fence and must not loop back up the walk.
- * `fs.cp` would instead write the link, rewritten to an absolute path into the live repository.
+ * Everything one copy root writes, parents first. The root itself may be a link's real target
+ * (`dependencyPlan` resolved it). Beneath the root: no `node_modules`, `.git` or `__tests__`; nothing
+ * landing in a `.claude/skills` tree or on `.claude/settings*.json`; nothing the fence refuses;
+ * nothing the eval cannot read (left out, never thrown); and no link, which is neither copied nor
+ * followed (§6.1): a link can lead anywhere, a `.claude` directory or an unreadable one included,
+ * under a harmless name. The one link read through is a named script itself, from the real target
+ * `dependencyPlan` already fenced. Only regular files and directories are written; `fs.cp` would
+ * instead write each link, rewritten to an absolute path into the live repository.
  */
-async function copyEntries(fence: Fence, source: string, copy: string): Promise<DependencyEntry[]> {
+async function copyEntries(fence: Fence, source: string, copy: string, named: Map<string, Named>): Promise<DependencyEntry[]> {
   const info = await stat(source).catch(() => null);
   if (info === null) return [];
   if (!info.isDirectory()) return info.isFile() ? [{ from: source, to: copy, directory: false, bytes: info.size }] : [];
   const out: DependencyEntry[] = [{ from: source, to: copy, directory: true, bytes: 0 }];
-  const walk = async (dir: string, landing: string, open: string[]): Promise<void> => {
-    for (const entry of (await readdir(dir, { withFileTypes: true })).sort(byName)) {
+  const scriptAt = (to: string): Named | undefined => named.get(folded(to));
+  const walk = async (dir: string, landing: string, entries: Dirent[]): Promise<void> => {
+    for (const entry of entries) {
       if (EXCLUDED.has(folded(entry.name))) continue;
+      const from = join(dir, entry.name);
       const to = join(landing, entry.name);
-      if (landingRefused(to)) continue;
-      const from = entry.isSymbolicLink() ? await realpath(join(dir, entry.name)).catch(() => null) : join(dir, entry.name);
-      if (from === null || fenced(fence, from)) continue;
-      const target = await stat(from).catch(() => null);
-      if (target?.isDirectory()) {
-        // A link to this directory or one above it would copy forever.
-        if (open.some((ancestor) => inside(from, ancestor))) continue;
+      if (landingRefused(to) || fenced(fence, from)) continue;
+      if (entry.isSymbolicLink()) {
+        const script = scriptAt(to);
+        const target = script === undefined ? null : await stat(from).catch(() => null);
+        if (script !== undefined && target !== null && target.dev === script.dev && target.ino === script.ino) {
+          out.push({ from: script.from, to, directory: false, bytes: script.bytes });
+        }
+      } else if (entry.isDirectory()) {
+        const children = await listing(from);
+        if (children === null) continue;
         out.push({ from, to, directory: true, bytes: 0 });
-        await walk(from, to, [...open, from]);
-      } else if (target?.isFile()) {
-        out.push({ from, to, directory: false, bytes: target.size });
+        await walk(from, to, children);
+      } else if (entry.isFile()) {
+        const file = await stat(from).catch(() => null);
+        if (file?.isFile() && await readable(from)) out.push({ from, to, directory: false, bytes: file.size });
       }
     }
   };
-  await walk(source, copy, [source]);
+  const top = await listing(source);
+  if (top !== null) {
+    await walk(source, copy, top);
+  } else {
+    // A directory the eval may search but not list still hands over the scripts named in it.
+    for (const script of named.values()) {
+      if (folded(dirname(script.to)) === folded(copy)) out.push({ from: script.from, to: join(copy, basename(script.to)), directory: false, bytes: script.bytes });
+    }
+  }
   return out;
 }
 

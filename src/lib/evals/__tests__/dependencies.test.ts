@@ -344,7 +344,7 @@ describe('dependency staging never hands an arm the skill, its answer key, or th
   });
 });
 
-describe('a copy never follows a link past the fence, and never writes a link (ยง6.1 rev 3)', () => {
+describe('a copy never follows or writes a link beneath a copied directory (ยง6.1 rev 3)', () => {
   it('a skills alias inside a staged directory does not hand the arm the answer key', async () => {
     const { root, skill } = await harnessRepo('Run .agents/sync.js first.');
     await put(join(root, '.agents', 'sync.js'), 'export {};');
@@ -357,7 +357,7 @@ describe('a copy never follows a link past the fence, and never writes a link (ย
     expect(await linksIn(sandbox)).toEqual([]);
   });
 
-  it('links into the skill, its answer key, .git, the repo root or a loop are left out; safe links arrive as real files', async () => {
+  it('no link beneath a copied directory is copied or followed, wherever it points', async () => {
     const { root, skill } = await harnessRepo('node tools/run.js');
     await put(join(root, 'tools', 'run.js'), 'export {};');
     await put(join(root, 'shared', 'lib.js'), 'export const lib = true;');
@@ -368,12 +368,51 @@ describe('a copy never follows a link past the fence, and never writes a link (ย
     await link('.', join(root, 'tools', 'loop'));
     await link('../shared/lib.js', join(root, 'tools', 'lib.js'));
     await link('../shared', join(root, 'tools', 'shared'));
+    await link('../.claude/settings.json', join(root, 'tools', 'config.json'));
     const plan = await dependencyPlan(skill, root);
     expect(plan).toMatchObject({ staged: ['tools/run.js'], copies: ['tools'] });
+    expect(plan.entries.map((entry) => entry.to)).toEqual(['tools', join('tools', 'run.js')]);
     const sandbox = await seed(root, skill, plan);
-    for (const name of ['self', 'key.yaml', 'git', 'up', 'loop']) expect(existsSync(join(sandbox, 'tools', name))).toBe(false);
-    expect(await readFile(join(sandbox, 'tools', 'lib.js'), 'utf8')).toBe('export const lib = true;');
-    expect(await readFile(join(sandbox, 'tools', 'shared', 'lib.js'), 'utf8')).toBe('export const lib = true;');
+    expect(existsSync(join(sandbox, 'tools', 'run.js'))).toBe(true);
+    for (const name of ['self', 'key.yaml', 'git', 'up', 'loop', 'lib.js', 'shared', 'config.json']) expect(existsSync(join(sandbox, 'tools', name))).toBe(false);
+    expect(await linksIn(sandbox)).toEqual([]);
+  });
+
+  it('with a symlinked .claude/skills, a link to .claude inside a copy root brings nothing from .claude (C4)', async () => {
+    const { root } = await harnessRepo('');
+    // `.claude/skills` becomes a link, so `.claude` is no longer an ancestor of its real path.
+    const shared = await tmp('dependency-shared-skills-');
+    await rm(join(root, '.claude', 'skills'), { recursive: true });
+    await put(join(shared, 'state', 'SKILL.md'), '---\nname: state\ndescription: useful\n---\nnode tools/run.js');
+    await put(join(shared, 'state', 'evals', 'cases.yaml'), 'answer: key');
+    await link(shared, join(root, '.claude', 'skills'));
+    await put(join(root, 'tools', 'run.js'), 'export {};');
+    await link('../.claude', join(root, 'tools', 'claude'));
+    const skill = join(root, '.claude', 'skills', 'state');
+    const plan = await dependencyPlan(skill, root);
+    expect(plan).toMatchObject({ staged: ['tools/run.js'], copies: ['tools'] });
+    expect(plan.entries.filter((entry) => entry.to.startsWith(join('tools', 'claude')))).toEqual([]);
+    const sandbox = await seed(root, skill, plan);
+    expect(existsSync(join(sandbox, 'tools', 'run.js'))).toBe(true);
+    expect(existsSync(join(sandbox, 'tools', 'claude'))).toBe(false);
+    for (const path of [['.claude', 'handoff.md'], ['.claude', 'settings.json'], ['.claude', 'statusline.js']]) expect(existsSync(join(sandbox, ...path))).toBe(false);
+    expect(await linksIn(sandbox)).toEqual([]);
+  });
+
+  it('a named script that is a link in a directory an outer copy already wrote still arrives as a file', async () => {
+    const { root, skill } = await harnessRepo('node tools/run.js, then tools/sub/engine.js');
+    const outside = await tmp('dependency-dotfiles-');
+    await put(join(outside, 'engine.js'), 'export const engine = "outside";');
+    await put(join(root, 'tools', 'run.js'), 'export {};');
+    await put(join(root, 'tools', 'sub', 'helper.js'), 'export {};');
+    await link(join(outside, 'engine.js'), join(root, 'tools', 'sub', 'engine.js'));
+    await link(join(outside, 'engine.js'), join(root, 'tools', 'sub', 'alias.js'));
+    const plan = await dependencyPlan(skill, root);
+    expect(plan).toMatchObject({ staged: ['tools/run.js', 'tools/sub/engine.js'], copies: ['tools'] });
+    const sandbox = await seed(root, skill, plan);
+    expect(await readFile(join(sandbox, 'tools', 'sub', 'engine.js'), 'utf8')).toBe('export const engine = "outside";');
+    expect(existsSync(join(sandbox, 'tools', 'sub', 'helper.js'))).toBe(true);
+    expect(existsSync(join(sandbox, 'tools', 'sub', 'alias.js'))).toBe(false);
     expect(await linksIn(sandbox)).toEqual([]);
   });
 
@@ -420,7 +459,147 @@ describe('a copy never follows a link past the fence, and never writes a link (ย
   });
 });
 
+/** Permission bits mean nothing to root, so the unreadable-entry tests skip there. */
+const asRoot = process.getuid?.() === 0;
+
+/** Runs `body` with each path at its mode, then restores 0755 so the temporary roots can be removed. */
+async function locked<T>(paths: [string, number][], body: () => Promise<T>): Promise<T> {
+  try {
+    for (const [path, mode] of paths) await chmod(path, mode);
+    return await body();
+  } finally {
+    for (const [path] of paths) await chmod(path, 0o755).catch(() => undefined);
+  }
+}
+
+describe('an entry the eval cannot read is left out, never thrown (ยง6.1 rev 3)', () => {
+  it.skipIf(asRoot)('a link to an unreadable directory beneath a copy root is left out, and the plan resolves (C2)', async () => {
+    const { root, skill } = await harnessRepo('node tools/run.js');
+    await put(join(root, 'tools', 'run.js'), 'export {};');
+    await put(join(root, 'private', 'secret.js'), 'export {};');
+    await link('../private', join(root, 'tools', 'locked'));
+    await locked([[join(root, 'private'), 0o000]], async () => {
+      const plan = await dependencyPlan(skill, root);
+      expect(plan).toMatchObject({ staged: ['tools/run.js'], missing: [], skipped: [], copies: ['tools'] });
+      expect(plan.entries.map((entry) => entry.to)).toEqual(['tools', join('tools', 'run.js')]);
+      const sandbox = await seed(root, skill, plan);
+      expect(existsSync(join(sandbox, 'tools', 'run.js'))).toBe(true);
+      expect(existsSync(join(sandbox, 'tools', 'locked'))).toBe(false);
+      expect(await linksIn(sandbox)).toEqual([]);
+    });
+  });
+
+  it.skipIf(asRoot)('an unreadable directory or file beneath a copy root is left out, and the plan resolves (G1)', async () => {
+    const { root, skill } = await harnessRepo('node tools/run.js');
+    await put(join(root, 'tools', 'run.js'), 'export {};');
+    await put(join(root, 'tools', 'helper.js'), 'export {};');
+    await put(join(root, 'tools', 'locked', 'inner.js'), 'export {};');
+    await put(join(root, 'tools', 'sealed.js'), 'export {};');
+    await locked([[join(root, 'tools', 'locked'), 0o000], [join(root, 'tools', 'sealed.js'), 0o000]], async () => {
+      const plan = await dependencyPlan(skill, root);
+      expect(plan).toMatchObject({ staged: ['tools/run.js'], missing: [], skipped: [], copies: ['tools'] });
+      expect(plan.entries.map((entry) => entry.to)).toEqual(['tools', join('tools', 'helper.js'), join('tools', 'run.js')]);
+      const sandbox = await seed(root, skill, plan);
+      expect(existsSync(join(sandbox, 'tools', 'run.js'))).toBe(true);
+      expect(existsSync(join(sandbox, 'tools', 'helper.js'))).toBe(true);
+      expect(existsSync(join(sandbox, 'tools', 'locked'))).toBe(false);
+      expect(existsSync(join(sandbox, 'tools', 'sealed.js'))).toBe(false);
+    });
+  });
+
+  it.skipIf(asRoot)('a named script the eval cannot read is reported missing, and staging does not throw', async () => {
+    const { root, skill } = await harnessRepo('node tools/run.js');
+    await put(join(root, 'tools', 'run.js'), 'export {};');
+    await put(join(root, 'tools', 'helper.js'), 'export {};');
+    await locked([[join(root, 'tools', 'run.js'), 0o000]], async () => {
+      const plan = await dependencyPlan(skill, root);
+      expect(plan).toMatchObject({ staged: [], missing: ['tools/run.js'], skipped: [], copies: [] });
+      const sandbox = await seed(root, skill, plan);
+      expect(existsSync(join(sandbox, 'tools'))).toBe(false);
+    });
+  });
+
+  it.skipIf(asRoot)('a named script in a directory the eval may search but not list still travels, alone', async () => {
+    const { root, skill } = await harnessRepo('node tools/run.js');
+    await put(join(root, 'tools', 'run.js'), 'export {};');
+    await put(join(root, 'tools', 'helper.js'), 'export {};');
+    await locked([[join(root, 'tools'), 0o111]], async () => {
+      const plan = await dependencyPlan(skill, root);
+      expect(plan).toMatchObject({ staged: ['tools/run.js'], missing: [], skipped: [], copies: ['tools'] });
+      const sandbox = await seed(root, skill, plan);
+      expect(await readFile(join(sandbox, 'tools', 'run.js'), 'utf8')).toBe('export {};');
+      expect(existsSync(join(sandbox, 'tools', 'helper.js'))).toBe(false);
+    });
+  });
+});
+
+describe("a harness linked into node_modules is the skill's method (ยง6.1 rev 3, C1)", () => {
+  it.each([
+    ['inside the repository', (at: { root: string; prefix: string }) => join(at.root, 'node_modules', '@org', 'harness')],
+    ['under a global npm prefix', (at: { root: string; prefix: string }) => join(at.prefix, 'lib', 'node_modules', '@org', 'harness')],
+  ])("a .claude/workflows link into node_modules %s is staged, without the package's own node_modules", async (_label, packageDir) => {
+    const { root, skill } = await harnessRepo('Workflow({ scriptPath: ".claude/workflows/engine.js" })');
+    const pkg = packageDir({ root, prefix: await tmp('dependency-prefix-') });
+    await put(join(pkg, 'workflows', 'engine.js'), 'export const engine = "harness";');
+    await put(join(pkg, 'workflows', 'helper.js'), 'export const helper = true;');
+    await put(join(pkg, 'workflows', 'node_modules', 'dep', 'index.js'), 'export {};');
+    await rm(join(root, '.claude', 'workflows'), { recursive: true });
+    await link(join(pkg, 'workflows'), join(root, '.claude', 'workflows'));
+    const plan = await dependencyPlan(skill, root);
+    expect(plan).toMatchObject({ staged: ['.claude/workflows/engine.js'], missing: [], skipped: [], copies: ['.claude/workflows'] });
+    const sandbox = await seed(root, skill, plan);
+    expect(await readFile(join(sandbox, '.claude', 'workflows', 'engine.js'), 'utf8')).toBe('export const engine = "harness";');
+    expect(await readFile(join(sandbox, '.claude', 'workflows', 'helper.js'), 'utf8')).toBe('export const helper = true;');
+    expect(existsSync(join(sandbox, '.claude', 'workflows', 'node_modules'))).toBe(false);
+    expect(existsSync(join(sandbox, '.claude', 'settings.json'))).toBe(false);
+    expect(await linksIn(sandbox)).toEqual([]);
+  });
+
+  it('a named script that is itself a link into node_modules is staged as a file, with its own directory', async () => {
+    const { root, skill } = await harnessRepo('node tools/engine.js');
+    await put(join(root, 'node_modules', 'pkg', 'engine.js'), 'export const engine = "package";');
+    await put(join(root, 'node_modules', 'pkg', 'other.js'), 'export {};');
+    await put(join(root, 'tools', 'helper.js'), 'export {};');
+    await link('../node_modules/pkg/engine.js', join(root, 'tools', 'engine.js'));
+    const plan = await dependencyPlan(skill, root);
+    expect(plan).toMatchObject({ staged: ['tools/engine.js'], missing: [], copies: ['tools'] });
+    const sandbox = await seed(root, skill, plan);
+    expect(await readFile(join(sandbox, 'tools', 'engine.js'), 'utf8')).toBe('export const engine = "package";');
+    expect(existsSync(join(sandbox, 'tools', 'helper.js'))).toBe(true);
+    expect(existsSync(join(sandbox, 'node_modules'))).toBe(false);
+    expect(await linksIn(sandbox)).toEqual([]);
+  });
+
+  it('a named script or workflow directory whose real path is under .git is still refused', async () => {
+    const { root, skill } = await harnessRepo('node tools/hook.sh, then Workflow({ scriptPath: ".claude/workflows/pre-push.sh" })');
+    await link('../.git/hooks/pre-push.sh', join(root, 'tools', 'hook.sh'));
+    await rm(join(root, '.claude', 'workflows'), { recursive: true });
+    await link('../.git/hooks', join(root, '.claude', 'workflows'));
+    const plan = await dependencyPlan(skill, root);
+    expect(plan).toMatchObject({ staged: [], missing: [], copies: [] });
+    const sandbox = await seed(root, skill, plan);
+    expect(existsSync(join(sandbox, 'tools'))).toBe(false);
+    expect(existsSync(join(sandbox, '.claude', 'workflows'))).toBe(false);
+  });
+});
+
 describe('every .claude tree is fenced, at any depth and in any spelling (ยง6.1 rev 3)', () => {
+  it('a skill outside .claude by path, behind a .claude/skills link, stages a .claude script alone (C3)', async () => {
+    const { root, skill } = await sourceRepo('Run .claude/statusline.js; it reads .claude/handoff.md and .claude/settings.json.');
+    await link('../skills-src', join(root, '.claude', 'skills'));
+    await put(join(root, '.claude', 'statusline.js'), 'export {};');
+    await put(join(root, '.claude', 'handoff.md'), 'handoff notes');
+    await put(join(root, '.claude', 'settings.json'), '{"hooks":{}}');
+    const plan = await dependencyPlan(skill, root);
+    expect(plan).toMatchObject({ staged: ['.claude/statusline.js'], missing: [], skipped: [], copies: ['.claude/statusline.js'] });
+    const sandbox = await arm(root, 'goal', skill, plan);
+    expect(existsSync(join(sandbox, '.claude', 'statusline.js'))).toBe(true);
+    for (const path of [['.claude', 'handoff.md'], ['.claude', 'settings.json'], ['.claude', 'skills', 'goal', 'evals']]) {
+      expect(existsSync(join(sandbox, ...path))).toBe(false);
+    }
+    expect(await linksIn(sandbox)).toEqual([]);
+  });
+
   it('with a symlinked .claude/skills, a script directly under .claude still travels alone', async () => {
     const root = await tmp('dependency-linked-skills-');
     const shared = await tmp('dependency-shared-skills-');
