@@ -4,7 +4,7 @@
  * skill names is the task's input, which belongs in a case's `files`/`fixture` — staging it would
  * hand the candidate an input the bare agent never gets (North Star: "on the same input").
  */
-import { constants, type Dirent } from 'node:fs';
+import { constants, type Dirent, type Stats } from 'node:fs';
 import { access, copyFile, lstat, mkdir, readFile, readdir, realpath, stat } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { decodeText, hygieneFrontmatter } from './hygiene.js';
@@ -12,16 +12,28 @@ import { decodeText, hygieneFrontmatter } from './hygiene.js';
 const TOKEN = /[\w.-]+(?:\/[\w.-]+)+/g;
 /** Directories a copy never descends into. Names compare without case: APFS is case-insensitive. */
 const EXCLUDED = new Set(['node_modules', '.git', '__tests__']);
-/** A token spelled through either of these is never a skill's method: it is neither staged nor reported missing. */
-const NEVER = new Set(['node_modules', '.git']);
+/**
+ * A token spelled through `node_modules` is never a skill's method: it is neither staged nor reported
+ * missing. A token spelled through `.git` is not either; `dependencyPlan` withholds it when it exists.
+ */
+const NEVER = new Set(['node_modules']);
 const SCRIPT = new Set(['.js', '.mjs', '.cjs', '.ts', '.sh', '.py']);
 /** `${VAR}/`, `$VAR/`, `"$VAR"/` or `<placeholder>/` right before a token: the prefix stands for the repo root. */
 const PLACEHOLDER = /(["']?)(?:\$\{(\w+)\}|\$(\w+)|<[\w.-]+>)\1\/$/;
 /** Write errors that mean the sandbox already holds the path: the case's seeds and the staged skill win. */
 const OCCUPIED = new Set(['EEXIST', 'ENOTDIR', 'EISDIR']);
 export const DEPENDENCY_CAP_BYTES = 20 * 1024 * 1024;
-/** The most entries the answer-key walk visits; past it the walk stops and every named script travels alone. */
-export const ANSWER_KEY_ENTRY_CAP = 10_000;
+/** The most entries the identity walk (`answerKey`) visits; past it the plan stages nothing. */
+export const ANSWER_KEY_ENTRY_CAP = 200_000;
+
+/** Why a named script that exists is withheld (§6.1); each reads after "not staged: ". */
+const WITHHELD = {
+  key: "it is part of this skill's answer key (evals/ or fixtures/)",
+  own: "it is one of this skill's own files",
+  git: 'it lies in .git',
+  skills: 'it lies in a .claude/skills tree',
+  root: 'it lies at or above the repository root',
+} as const;
 
 export interface DependencyEntry {
   /**
@@ -44,11 +56,23 @@ export interface DependencyPlan {
   /** One warning for each otherwise-valid script the cap leaves out; `bytes` is what staging it would copy. */
   skipped: { path: string; bytes: number }[];
   /**
+   * Named scripts that exist but a fence refuses (§6.1), with the reason: one of the skill's own
+   * files or its answer key (by path, or by file identity through any link or spelling), a
+   * `.claude/skills` tree, `.git`, or the repo root or above. Neither staged nor missing.
+   */
+  withheld: { path: string; reason: string }[];
+  /**
+   * Set when the identity walk could not finish (past `ANSWER_KEY_ENTRY_CAP` entries, or at a
+   * directory the eval may search but not list): it says why, and the plan stages nothing, since a
+   * file the walk never saw could be the answer key. Absent when the walk finished or never ran.
+   */
+  incomplete?: string;
+  /**
    * Repo-relative paths `stageDependencies` copies, each once, ancestors first: a staged script's
    * parent directory, or the script alone when that directory is the repo root, a `.claude`
-   * directory, or would carry the skill folder, any path its `evals/` or `fixtures/` reaches
-   * (through links too), or `.claude/skills` (§6.1: never the skill's own folder, its answer key, or
-   * an ancestor of either). Every script travels alone when the answer-key walk could not finish.
+   * directory, or would carry the skill folder or `.claude/skills` (§6.1: never the skill's own
+   * folder or an ancestor of it). A copy leaves out every file and directory of the skill folder
+   * and of its answer key, by file identity.
    */
   copies: string[];
   /** Every directory and file `stageDependencies` writes for `copies`, parents first; the cap summed exactly these bytes. */
@@ -57,12 +81,15 @@ export interface DependencyPlan {
 
 export interface HeavyScan { heavy: boolean; evidence: string; }
 
+/** Real paths every staged path is measured against: where things are, not what they are. */
+interface Fence { root: string; skill: string; installed: string; }
+
 /**
- * Real paths every staged path is measured against. `keys` holds the real paths the runner can read
- * through the skill's `evals/` and `fixtures/` (the answer key; see `answerKey`): either may be a
- * link out of the skill folder, and so may anything beneath them.
+ * The files and directories no arm may receive, keyed by `dev:ino` so every spelling of a path, a
+ * link and a hard link are one entry, each with its `WITHHELD` reason; `incomplete` says why the walk
+ * could not finish (see `answerKey`).
  */
-interface Fence { root: string; skill: string; installed: string; keys: string[]; }
+interface Identity { ids: Map<string, string>; incomplete?: string; }
 
 /**
  * A named script as `dependencyPlan` resolved it: the one link a copy's walk still reads through.
@@ -102,82 +129,90 @@ async function real(path: string): Promise<string> {
   }
 }
 
-/** The paths no other path in the set lies beneath: a key inside another key adds nothing to the fence. */
-function outermost(paths: Set<string>): string[] {
-  return [...paths].filter((path) => {
-    for (let at = path; at !== dirname(at);) {
-      at = dirname(at);
-      if (paths.has(at)) return false;
-    }
-    return true;
-  }).sort();
+/** A file's identity: every spelling of its path, every link to it and every hard link share it. */
+const idOf = (info: Stats): string => `${info.dev}:${info.ino}`;
+
+/** Where a path leads, links followed: its stats, `null` when nowhere the eval can read, 'blind' when its name is too long to resolve. */
+async function look(path: string): Promise<Stats | null | 'blind'> {
+  return stat(path).catch((error: NodeJS.ErrnoException) => (error.code === 'ENAMETOOLONG' ? 'blind' : null));
 }
 
 /**
- * The real paths the runner can read through the skill's `evals/` and `fixtures/` (the answer key):
- * each of the two, and the real target of every link beneath them, file or directory. A directory
- * link is followed; each real directory is listed once, so chains and loops end. No file is read:
- * only names, types and real paths. An entry that cannot be resolved or listed is skipped, never
- * thrown. An entry reached through a followed link lies inside that link's real target, which is
- * already a key. `complete` is false when the walk passes `ANSWER_KEY_ENTRY_CAP` entries or meets
- * a directory the eval may search but not list: a link beneath either could lead anywhere unseen.
+ * The identity (`dev:ino`) of every regular file and directory an arm must never receive. First
+ * the answer key, which is anything the runner can read under the skill's `evals/` and `fixtures/`:
+ * links there, to files and to directories, are followed to any depth, since the runner reads
+ * through them. Then everything that physically lies in the skill folder, links not followed: a
+ * repository directory the skill folder links to is not the skill's own. Each directory is listed
+ * once by identity, so chains and loops end, and is listed under its real path, so paths never grow
+ * along a chain. No file is read: only names, types, identities and real paths. An entry the eval
+ * cannot reach (a dangling link, a directory it may not search) is skipped, never thrown. The walk
+ * is incomplete past `cap` entries, at a directory the eval may search but not list (a runner that
+ * knows a name inside still reaches it), or at a path too long to resolve here; a directory the
+ * eval may not search at all hides nothing it could reach.
  */
-async function answerKey(skillDir: string): Promise<{ keys: string[]; complete: boolean }> {
-  const found = new Set<string>();
-  const queue: string[] = [];
-  for (const name of ['evals', 'fixtures']) {
-    const path = join(skillDir, name);
-    if (!(await exists(path))) continue;
-    found.add(await real(path));
-    queue.push(path);
-  }
+async function answerKey(skillDir: string, cap: number): Promise<Identity> {
+  const ids = new Map<string, string>();
   const listed = new Set<string>();
   let visited = 0;
-  let complete = true;
-  for (let next = 0; next < queue.length; next += 1) {
-    const dir = await realpath(queue[next]!).catch(() => null);
-    if (dir === null || listed.has(dir)) continue;
-    listed.add(dir);
-    const children = await listing(dir);
-    if (children === null) {
-      // A runner that knows a name beneath a searchable directory still reaches it.
-      if (await searchable(dir)) complete = false;
-      continue;
-    }
-    for (const entry of children) {
-      visited += 1;
-      if (visited > ANSWER_KEY_ENTRY_CAP) return { keys: outermost(found), complete: false };
-      const path = join(dir, entry.name);
-      if (entry.isSymbolicLink()) {
-        // A dangling or unresolvable link leads nowhere the runner can read.
-        const target = await realpath(path).catch(() => null);
-        if (target === null) continue;
-        found.add(target);
-        if (await stat(path).then((info) => info.isDirectory(), () => false)) queue.push(target);
-      } else if (entry.isDirectory()) {
-        queue.push(path);
+  const starts = [
+    { start: join(skillDir, 'evals'), reason: WITHHELD.key, follow: true },
+    { start: join(skillDir, 'fixtures'), reason: WITHHELD.key, follow: true },
+    { start: skillDir, reason: WITHHELD.own, follow: false },
+  ];
+  for (const { start, reason, follow } of starts) {
+    const unseen = (why: string): Identity => ({ ids, incomplete: `could not finish reading ${start} (${why})` });
+    const queue = [start];
+    for (let next = 0; next < queue.length; next += 1) {
+      const path = queue[next]!;
+      const info = await look(path);
+      if (info === 'blind') return unseen(`a path too long to resolve: ${path}`);
+      if (info === null) continue;
+      const id = idOf(info);
+      if (info.isFile()) {
+        if (!ids.has(id)) ids.set(id, reason);
+        continue;
+      }
+      if (!info.isDirectory() || listed.has(id)) continue;
+      listed.add(id);
+      if (!ids.has(id)) ids.set(id, reason);
+      const dir = await realpath(path).catch(() => null);
+      const children = dir === null ? null : await listing(dir);
+      if (children === null) {
+        // A runner that knows a name beneath a directory it may search still reaches it.
+        if (await searchable(dir ?? path)) return unseen(`search-only directory ${dir ?? path}`);
+        continue;
+      }
+      for (const entry of children) {
+        visited += 1;
+        if (visited > cap) return unseen(`more than ${cap.toLocaleString('en-US')} entries`);
+        if (follow || !entry.isSymbolicLink()) queue.push(join(dir!, entry.name));
       }
     }
   }
-  return { keys: outermost(found), complete };
+  return { ids };
 }
 
 /**
- * A real path staging never reads: the skill folder, anything in it, or an ancestor of it; the same
- * for every answer-key path (`answerKey`), and for `<root>/.claude/skills`, each of which may be
- * a link; a `.claude/skills` tree or `.git` anywhere
- * (measured from the repo root when the path is inside it); and the repo root or an ancestor.
- * `node_modules` is not fenced by real path: a harness that links `.claude/workflows` into an
- * installed package, in the repository or under a global npm prefix, is the skill's method. A token
- * spelled through `node_modules` and a `node_modules` beneath a copy root stay out.
+ * Why staging never reads a real path, or null: `.git` or a `.claude/skills` tree anywhere
+ * (measured from the repo root when the path is inside it); the skill folder, anything in it, or
+ * an ancestor of it; `<root>/.claude/skills`, which may be a link, or an ancestor of it; and the
+ * repo root or an ancestor. These fences are about where a path is; `answerKey` catches what a
+ * file is, whatever its path. `node_modules` is not fenced by real path: a harness that links
+ * `.claude/workflows` into an installed package, in the repository or under a global npm prefix,
+ * is the skill's method. A token spelled through `node_modules` and a `node_modules` beneath a copy
+ * root stay out.
  */
-function fenced(fence: Fence, path: string): boolean {
+function refusal(fence: Fence, path: string): string | null {
   const parts = (inside(fence.root, path) ? relative(fence.root, path) : path).split(sep);
-  return gitTree(parts) || skillsTree(parts) || inside(path, fence.root)
-    || inside(fence.skill, path) || inside(path, fence.skill)
-    || inside(fence.installed, path) || inside(path, fence.installed)
-    || fence.keys.some((key) => inside(key, path) || inside(path, key));
+  if (gitTree(parts)) return WITHHELD.git;
+  if (inside(fence.skill, path)) return ['evals', 'fixtures'].includes(folded(relative(fence.skill, path).split(sep)[0]!)) ? WITHHELD.key : WITHHELD.own;
+  if (inside(path, fence.skill)) return WITHHELD.own;
+  if (skillsTree(parts) || inside(fence.installed, path) || inside(path, fence.installed)) return WITHHELD.skills;
+  if (inside(path, fence.root)) return WITHHELD.root;
+  return null;
 }
+
+const fenced = (fence: Fence, path: string): boolean => refusal(fence, path) !== null;
 
 /** A sandbox-relative path no dependency copy writes: a `.claude/skills` tree or a `.claude/settings*.json`, at any depth. */
 function landingRefused(landing: string): boolean {
@@ -235,53 +270,70 @@ function scriptTokens(body: string): Map<string, string> {
   return tokens;
 }
 
-/** Resolve the immutable, run-wide dependency plan once before any arm sandbox is made. */
-export async function dependencyPlan(skillDir: string, cwd = process.cwd()): Promise<DependencyPlan> {
+/**
+ * Resolve the immutable, run-wide dependency plan once before any arm sandbox is made. `entryCap`
+ * bounds the identity walk (`answerKey`); callers leave it at `ANSWER_KEY_ENTRY_CAP`.
+ */
+export async function dependencyPlan(skillDir: string, cwd = process.cwd(), entryCap = ANSWER_KEY_ENTRY_CAP): Promise<DependencyPlan> {
   const skillFile = join(skillDir, 'SKILL.md');
   const source = await lstat(skillFile).then(async () => readFile(skillFile), () => Buffer.alloc(0));
   const text = decodeText(source) ?? '';
   const root = await repoRootFor(skillDir, cwd);
-  const declared = (hygieneFrontmatter(source) as { name?: unknown } | null | undefined)?.name;
-  // The names skill staging may put this skill under: `.claude/skills/<name>/…` is its own file.
-  const names = new Set([basename(resolve(skillDir)), ...(typeof declared === 'string' ? [declared] : [])].map(folded));
-  const skill = await real(skillDir);
-  // The answer key, or anything beneath it, may be a link whose real target lies outside the skill folder.
-  const answer = root === null ? { keys: [], complete: true } : await answerKey(skillDir);
-  const fence: Fence | null = root === null ? null : { root: await real(root), skill, installed: await real(join(root, '.claude', 'skills')), keys: answer.keys };
   const found: { token: string; copy: string; source: string }[] = [];
   /** Every named script, keyed by its folded repo-relative path. */
   const named = new Map<string, Named>();
   const missing: string[] = [];
+  const withheld: { path: string; reason: string }[] = [];
   const tokens = [...scriptTokens(skillBody(text))].sort(([, a], [, b]) => (a < b ? -1 : a > b ? 1 : 0));
+  // A SKILL.md that names no script has nothing to stage and nothing to fence.
+  if (tokens.length === 0) return { repoRoot: root, staged: [], missing, skipped: [], withheld, copies: [], entries: [] };
+  const declared = (hygieneFrontmatter(source) as { name?: unknown } | null | undefined)?.name;
+  // The names skill staging may put this skill under: `.claude/skills/<name>/…` is its own file.
+  const names = new Set([basename(resolve(skillDir)), ...(typeof declared === 'string' ? [declared] : [])].map(folded));
+  const skill = await real(skillDir);
+  const fence: Fence | null = root === null ? null : { root: await real(root), skill, installed: await real(join(root, '.claude', 'skills')) };
+  // Walked once, and only when a script gets past the path fences.
+  let walked: Promise<Identity> | undefined;
+  const identity = (): Promise<Identity> => (walked ??= answerKey(skillDir, entryCap));
   for (const [key, token] of tokens) {
+    const segments = key.split('/');
+    if (gitTree(segments)) {
+      // Spelled through `.git`: never the skill's method and never missing, but worth naming when it exists.
+      if (root !== null && await isFile(resolve(root, key))) withheld.push({ path: token, reason: WITHHELD.git });
+      continue;
+    }
     const local = resolve(skillDir, key);
     // Already carried by the skill folder copy (evals/ and fixtures/ stay out on purpose).
     if (await isFile(local) && inside(skill, await real(local))) continue;
-    const segments = key.split('/');
     const own = segments.length > 3 && folded(segments[0]!) === '.claude' && folded(segments[1]!) === 'skills' && names.has(folded(segments[2]!));
     if (own && await isFile(join(skillDir, ...segments.slice(3)))) continue;
     const candidate = root === null ? null : resolve(root, key);
     const info = candidate === null ? null : await stat(candidate).catch(() => null);
     // A script that resolves nowhere, a dangling link included, is the honest `missing` result.
     if (candidate === null || info === null) { missing.push(token); continue; }
+    if (!info.isFile()) continue;
     // A `.claude/skills` tree at any depth belongs to skill staging or to another skill.
-    if (!info.isFile() || skillsTree(segments)) continue;
+    if (skillsTree(segments)) { withheld.push({ path: token, reason: WITHHELD.skills }); continue; }
     // Tested on the repo-resolved real path, so a self reference by its repository path, a global
     // skill under a HOME-rooted repo, and a link into a skill or `.git` are all refused.
     const target = await real(candidate);
-    if (fenced(fence!, target)) continue;
+    const refused = refusal(fence!, target) ?? (await identity()).ids.get(idOf(info));
+    if (refused !== undefined) { withheld.push({ path: token, reason: refused }); continue; }
     // A script the eval cannot read cannot travel: the same honest `missing` result, never a throw.
     if (!(await readable(target))) { missing.push(token); continue; }
     const parent = dirname(candidate);
     const parentReal = await real(parent);
     // The script travels alone when its directory is the repo root, a `.claude` directory (settings,
-    // notes and skills live there), or would carry the skill folder, its answer key or `.claude/skills`;
-    // and always when the answer-key walk could not finish, since any directory might carry the key.
-    const alone = !answer.complete || parent === root || claudeDir(parent) || claudeDir(parentReal) || inside(parent, resolve(skillDir)) || fenced(fence!, parentReal);
+    // notes and skills live there), or would carry the skill folder or `.claude/skills`.
+    const alone = parent === root || claudeDir(parent) || claudeDir(parentReal) || inside(parent, resolve(skillDir)) || fenced(fence!, parentReal);
     const to = relative(root!, candidate);
     named.set(folded(to), { to, from: target, bytes: info.size, dev: info.dev, ino: info.ino });
     found.push({ token, copy: alone ? to : relative(root!, parent), source: alone ? target : parentReal });
   }
+  if (found.length === 0) return { repoRoot: root, staged: [], missing, skipped: [], withheld, copies: [], entries: [] };
+  const { ids, incomplete } = await identity();
+  // A file the walk never saw may be the answer key, so nothing travels (ruling d31ae2da).
+  if (incomplete !== undefined) return { repoRoot: root, staged: [], missing, skipped: [], withheld, incomplete, copies: [], entries: [] };
 
   // The cap counts what the copy will write: each distinct copy root once, ancestors first, a root
   // the kept copies already wrote free.
@@ -294,7 +346,7 @@ export async function dependencyPlan(skillDir: string, cwd = process.cwd()): Pro
   let total = 0;
   for (const [copy, from] of [...roots].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) {
     if (landed.has(copy)) { bytesOf.set(copy, 0); continue; }
-    const listed = await copyEntries(fence!, from, copy, named);
+    const listed = await copyEntries(fence!, ids, from, copy, named);
     const bytes = listed.reduce((sum, entry) => sum + entry.bytes, 0);
     bytesOf.set(copy, bytes);
     if (total + bytes > DEPENDENCY_CAP_BYTES) continue;
@@ -306,23 +358,26 @@ export async function dependencyPlan(skillDir: string, cwd = process.cwd()): Pro
   for (const { token, copy } of found) {
     if (landed.has(copy)) staged.push(token); else skipped.push({ path: token, bytes: bytesOf.get(copy) ?? 0 });
   }
-  return { repoRoot: root, staged, missing, skipped, copies, entries };
+  return { repoRoot: root, staged, missing, skipped, withheld, copies, entries };
 }
 
 /**
  * Everything one copy root writes, parents first. The root itself may be a link's real target
  * (`dependencyPlan` resolved it). Beneath the root: no `node_modules`, `.git` or `__tests__`; nothing
- * landing in a `.claude/skills` tree or on `.claude/settings*.json`; nothing the fence refuses;
- * nothing the eval cannot read (left out, never thrown); and no link, which is neither copied nor
- * followed (§6.1): a link can lead anywhere, a `.claude` directory or an unreadable one included,
- * under a harmless name. The one link read through is a named script itself, from the real target
- * `dependencyPlan` already fenced. Only regular files and directories are written; `fs.cp` would
- * instead write each link, rewritten to an absolute path into the live repository.
+ * landing in a `.claude/skills` tree or on `.claude/settings*.json`; nothing the fence refuses; no
+ * file or directory whose identity is in `ids` (the skill folder and its answer key, whatever the
+ * path: the directory around such a file still copies, with its other files); nothing the eval
+ * cannot read (left out, never thrown); and no link, which is neither copied nor followed (§6.1): a
+ * link can lead anywhere, a `.claude` directory or an unreadable one included, under a harmless
+ * name. The one link read through is a named script itself, from the real target `dependencyPlan`
+ * already fenced. Only regular files and directories are written; `fs.cp` would instead write each
+ * link, rewritten to an absolute path into the live repository. Every entry costs a fixed number of
+ * calls and set lookups, so a copy is linear in what it visits.
  */
-async function copyEntries(fence: Fence, source: string, copy: string, named: Map<string, Named>): Promise<DependencyEntry[]> {
+async function copyEntries(fence: Fence, ids: Map<string, string>, source: string, copy: string, named: Map<string, Named>): Promise<DependencyEntry[]> {
   const info = await stat(source).catch(() => null);
   if (info === null) return [];
-  if (!info.isDirectory()) return info.isFile() ? [{ from: source, to: copy, directory: false, bytes: info.size }] : [];
+  if (!info.isDirectory()) return info.isFile() && !ids.has(idOf(info)) ? [{ from: source, to: copy, directory: false, bytes: info.size }] : [];
   const out: DependencyEntry[] = [{ from: source, to: copy, directory: true, bytes: 0 }];
   const scriptAt = (to: string): Named | undefined => named.get(folded(to));
   const walk = async (dir: string, landing: string, entries: Dirent[]): Promise<void> => {
@@ -338,17 +393,19 @@ async function copyEntries(fence: Fence, source: string, copy: string, named: Ma
           out.push({ from: script.from, to, directory: false, bytes: script.bytes });
         }
       } else if (entry.isDirectory()) {
-        const children = await listing(from);
+        const found = await stat(from).catch(() => null);
+        const children = found === null || ids.has(idOf(found)) ? null : await listing(from);
         if (children === null) continue;
         out.push({ from, to, directory: true, bytes: 0 });
         await walk(from, to, children);
       } else if (entry.isFile()) {
         const file = await stat(from).catch(() => null);
-        if (file?.isFile() && await readable(from)) out.push({ from, to, directory: false, bytes: file.size });
+        if (file?.isFile() && !ids.has(idOf(file)) && await readable(from)) out.push({ from, to, directory: false, bytes: file.size });
       }
     }
   };
-  const top = await listing(source);
+  // A root that is itself a skill or answer-key directory hands over only the scripts named in it.
+  const top = ids.has(idOf(info)) ? null : await listing(source);
   if (top !== null) {
     await walk(source, copy, top);
   } else {
@@ -392,9 +449,16 @@ export async function scanHeavySkill(skillDir: string, referenced?: string): Pro
  * directory path they hold as a file keeps everything beneath it out.
  */
 export async function stageDependencies(plan: DependencyPlan, sandbox: string): Promise<void> {
-  const held: string[] = [];
+  const held = new Set<string>();
+  /** The path or one of its ancestors is a directory path the sandbox already holds as a file. */
+  const underHeld = (path: string): boolean => {
+    for (let at = path; ; at = dirname(at)) {
+      if (held.has(at)) return true;
+      if (dirname(at) === at) return false;
+    }
+  };
   for (const entry of plan.entries) {
-    if (held.some((path) => inside(path, entry.to))) continue;
+    if (underHeld(entry.to)) continue;
     const target = join(sandbox, entry.to);
     try {
       if (entry.directory) {
@@ -405,7 +469,7 @@ export async function stageDependencies(plan: DependencyPlan, sandbox: string): 
       }
     } catch (error) {
       if (!OCCUPIED.has((error as NodeJS.ErrnoException).code ?? '')) throw error;
-      if (entry.directory) held.push(entry.to);
+      if (entry.directory) held.add(entry.to);
     }
   }
 }
