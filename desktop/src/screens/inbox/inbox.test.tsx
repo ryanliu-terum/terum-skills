@@ -5,6 +5,7 @@ import { Providers } from '../../app/providers';
 import { useUiStore } from '../../app/store';
 import { pickBackend } from '../../backend';
 import { design, inboxItems } from '../../backend/mock/data';
+import { createRun } from '../../backend/mock/run';
 function open(route: string) { location.hash = route; return render(<Providers><App/></Providers>); }
 beforeEach(() => { localStorage.clear(); useUiStore.setState({ railOpen: true, overviewHidden: false, theme: 'dark' }); });
 afterEach(() => { cleanup(); location.hash = ''; vi.restoreAllMocks(); });
@@ -69,4 +70,19 @@ it('describes a shared skill without a declined list or a re-offer promise', asy
   expect(pane).toHaveTextContent('records it in your people file. Your profile changes only if you say yes.');
   expect(pane).not.toHaveTextContent('declined list');
   expect(pane).not.toHaveTextContent('not be offered again');
+});
+
+it('reports a refused install as a failed install, not as a failed inbox sync', async () => {
+  // The refusal that shipped this bug: an install the CLI declines was drawn under "Couldn't sync
+  // your inbox", so the person went looking at their network instead of at a folder on their disk.
+  const refusal = '~/.claude/old-skills/secret-scan already exists; move the kept copy elsewhere before retrying.';
+  vi.spyOn(pickBackend(), 'install').mockReturnValue(createRun(async () => ({ ok: false, error: refusal })));
+  open('#/inbox');
+  fireEvent.click(await screen.findByRole('button', { name: 'Install to Global' }));
+  const alert = await screen.findByRole('alert');
+  expect(alert).toHaveTextContent("Couldn't install secret-scan");
+  expect(alert).toHaveTextContent(refusal);
+  expect(screen.queryByText("Couldn't sync your inbox")).toBeNull();
+  // The list is still there: an action that failed does not blank the screen.
+  expect(screen.getAllByTestId(/^inbox-row-/).length).toBeGreaterThan(0);
 });
