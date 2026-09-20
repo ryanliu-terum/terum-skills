@@ -227,6 +227,112 @@ function publishIntoTree(tree: MutableTree, prepared: PreparedPublish): PublishO
   return { version: identical === null ? target : null, identicalTo: identical, attached, projectAdded, assets: assetsWritten };
 }
 
+/** Everything a publish decides before it writes: category, identity, hygiene, digest, receipts, project. */
+interface PrepareContext {
+  args: PublishArgs;
+  store: ConfigStore;
+  config: Config;
+  binding: { handle?: string; remote: string };
+  teamJson: Awaited<ReturnType<typeof readTeam>>;
+  catalogue: Awaited<ReturnType<typeof skillRecords>>;
+  categoryFlag: string | undefined;
+  abort: AbortController;
+  /** A category answer already in flight for this folder, or null when none was started. */
+  earlyAsk: Promise<string | null> | null;
+  source: LocalSource;
+}
+
+/**
+ * The local half of a publish: it decides everything and writes nothing outside the caller's
+ * `writeBack`. Splitting it out is what lets a batch ask its questions once, for every skill,
+ * before any folder on disk is touched - OF-2 says a publish refused at any question leaves the
+ * folder byte-identical, and that has to hold for the batch as a whole, not just per skill.
+ */
+async function preparePublish(ctx: PrepareContext, io: Prompter): Promise<{ prepared: PreparedPublish; regression: { against: string } | null; writeBack: () => Promise<void> }> {
+  const { args, store, config, binding, teamJson, catalogue, categoryFlag, abort, earlyAsk, source } = ctx;
+  const { found, files, executable, skillMd } = source;
+  // 4. Managed fields, resolved into the IN-MEMORY SKILL.md before anything is hygiene-checked or
+  //    digested. Once written back, the category is ordinary content: subsequent publishes keep it.
+  const declared = declaredCategory(skillMd);
+  //    The flag takes the team's own spelling when it matches a team category case-insensitively —
+  //    the rule the model's answer already goes through (categorize.ts teamCategory), so
+  //    `--category Ops` lands in the one `ops` bucket. An off-list value stays as typed, trimmed:
+  //    §5 says the flag need not be on the list, and HYG7 must warn about what the user wrote.
+  let chosen: CategorySuggestion;
+  if (declared !== undefined) chosen = { category: declared, suggested: false };
+  else if (categoryFlag !== undefined) chosen = { category: teamCategory(categoryFlag, teamJson.categories) ?? categoryFlag, suggested: false };
+  else {
+    io.progress?.({ step: 'Choosing a category', current: 2, total: PUBLISH_STEPS });
+    // `undefined` means no early ask ran; `null` means one ran and the model gave nothing usable —
+    // the disclosed fallback, exactly as in-band, and never a second 20 s wait on an offline model.
+    const raw = earlyAsk === null ? undefined : await earlyAsk;
+    // An early answer counts only while it still names a category this team HAS. The fetch may have
+    // brought a list the answer has fallen off; inventing that bucket is the one thing this must not
+    // do, so the model is asked again — against the list that is now current.
+    chosen = raw !== undefined && (raw === null || teamCategory(raw, teamJson.categories) !== undefined)
+      ? resolveCategory(raw, teamJson.categories)
+      : await suggestCategory(skillMd, teamJson.categories, args.agent, abort.signal);
+  }
+  const category = chosen.category;
+  if (declared === undefined) {
+    const disclosure = categoryFlag !== undefined ? 'from --category; edit SKILL.md any time'
+      : chosen.suggested ? 'suggested from your SKILL.md; edit any time'
+      : "couldn't reach the model; edit SKILL.md any time";
+    io.print(`metadata.terum-category: ${category} (${disclosure})`);
+  }
+  // The REPOSITORY is the authority on which uuid a published name carries, not the local file.
+  // Reading the id only from the folder was wrong in both directions: `existingId` parsed through
+  // the `.strict()` `skillFrontmatterSchema`, so a published folder whose user deleted the injected
+  // `license:` line minted a FRESH uuid and orphaned every receipt, install and profile entry keyed
+  // to the old one; and a folder COPIED from another skill kept that skill's declared uuid, landing
+  // this publish's receipts in that skill's eval history.
+  const published = catalogue.find((record) => record.name === found.name);
+  const declaredId = declaredSkillId(skillMd);
+  const id = published?.id
+    // A declared id already belonging to a DIFFERENT name means a copied folder: mint instead of
+    // grafting onto that skill's identity. §5.1 step 4's "minted at v1" is exactly this case.
+    ?? (declaredId !== undefined && !catalogue.some((record) => record.id === declaredId) ? declaredId : randomUUID());
+  const author = `${config.display_name ?? binding.handle} <${config.email ?? ''}>`.trim();
+  const injected = Buffer.from(injectManagedFields(skillMd, { license: teamJson.policy.skill_license, id, author, category }));
+  files.set('SKILL.md', injected);
+
+  io.progress?.({ step: `Checking ${found.name}`, current: 3, total: PUBLISH_STEPS });
+  // 5. Hygiene on the INJECTED map, never before — `skillFrontmatterSchema` is strict and requires
+  //    the managed fields, so a never-published folder would fail HYG1 on fields publish is about
+  //    to write.
+  const dependencies = await dependencyPlan(found.path);
+  const assessment = assessHygiene(found.name, { files, executable }, teamJson.policy.skill_license, true, false, teamJson.categories, dependencies.staged.length + dependencies.skipped.length);
+  reportHygieneWarnings((line) => io.print(line), assessment);
+
+  // 6. The comparison digest, taken AFTER injection so it is post-normalization.
+  const candidate = skillContentDigest(files);
+
+  // 6a. The local regression gate (D19). Absence of a receipt never blocks; nothing moves here.
+  //     The QUESTION is the caller's: a single publish asks it here, a batch asks once for every
+  //     skill that fails, and either way it is asked before the write-back below (OF-2).
+  const local = await localReceiptsFor(store.root, candidate, line => io.print(line));
+  // D19 asks about the LATEST eval of these exact bytes. `localReceiptsFor` sorts run ids ascending
+  // and run ids are UTC stamps, so `.find(FAIL)` returned the OLDEST failure: once a run failed, no
+  // amount of passing re-runs of the same bytes could ever clear the gate again.
+  const newest = local.at(-1);
+  const failing = newest?.receipt.verdict === 'FAIL' ? newest : undefined;
+  const regression = failing && !args.allowRegression
+    ? { against: failing.receipt.version ? versionLabel(Number(failing.receipt.version.slice(1))) : 'the previous version' }
+    : null;
+
+  // 6b. `--project` is a REFUSAL, so it belongs ABOVE the write-back: a mistyped project name must
+  //     not rewrite the user's SKILL.md on a publish that never ran. There is no question here and
+  //     no default project: publish targets the MARKETPLACE, and a project is an extra list the
+  //     caller asked for by name.
+  const project = requestedProject(args, teamJson);
+
+  const prepared: PreparedPublish = { name: found.name, path: found.path, files, executable, injected, id, candidate, local, project, assessment };
+  // The write-back is the caller's to run, AFTER the last refusal (OF-2). A failure of the write
+  // that follows leaves the injected SKILL.md on disk with nothing published - the safe side of the
+  // boundary, and idempotent, because every injected field is re-derived identically next time.
+  return { prepared, regression, writeBack: async () => { await writeFile(join(found.path, 'SKILL.md'), injected); } };
+}
+
 export async function run(args: PublishArgs, io: Prompter): Promise<Result<PublishResult>> {
   // Kills the category model call on EVERY exit path, including the failing ones. Without it, a
   // `git fetch` that fails while `claude` is still answering would hold this process open on the
@@ -291,94 +397,16 @@ export async function run(args: PublishArgs, io: Prompter): Promise<Result<Publi
 
     // 1–3. The local folder, as read above while the fetch ran. Awaited HERE, after the fetch, so
     //      every refusal it holds is reported in the order it always was.
-    const { found, files, executable, skillMd } = await source;
-
-    // 4. Managed fields, resolved into the IN-MEMORY SKILL.md before anything is hygiene-checked or
-    //    digested. Once written back, the category is ordinary content: subsequent publishes keep it.
-    const declared = declaredCategory(skillMd);
-    //    The flag takes the team's own spelling when it matches a team category case-insensitively —
-    //    the rule the model's answer already goes through (categorize.ts teamCategory), so
-    //    `--category Ops` lands in the one `ops` bucket. An off-list value stays as typed, trimmed:
-    //    §5 says the flag need not be on the list, and HYG7 must warn about what the user wrote.
-    let chosen: CategorySuggestion;
-    if (declared !== undefined) chosen = { category: declared, suggested: false };
-    else if (categoryFlag !== undefined) chosen = { category: teamCategory(categoryFlag, teamJson.categories) ?? categoryFlag, suggested: false };
-    else {
-      io.progress?.({ step: 'Choosing a category', current: 2, total: PUBLISH_STEPS });
-      // `undefined` means no early ask ran; `null` means one ran and the model gave nothing usable —
-      // the disclosed fallback, exactly as in-band, and never a second 20 s wait on an offline model.
-      const raw = earlyAsk === null ? undefined : await earlyAsk;
-      // An early answer counts only while it still names a category this team HAS. The fetch may have
-      // brought a list the answer has fallen off; inventing that bucket is the one thing this must not
-      // do, so the model is asked again — against the list that is now current.
-      chosen = raw !== undefined && (raw === null || teamCategory(raw, teamJson.categories) !== undefined)
-        ? resolveCategory(raw, teamJson.categories)
-        : await suggestCategory(skillMd, teamJson.categories, args.agent, abort.signal);
+    const { prepared, regression, writeBack } = await preparePublish({ args, store, config, binding, teamJson, catalogue: await catalogPromise, categoryFlag, abort, earlyAsk, source: await source }, io);
+    if (regression && !(await io.confirm(`Your latest eval of these exact bytes failed against ${regression.against}. Publish anyway?`))) {
+      throw new CancelledError('Publish was cancelled.');
     }
-    const category = chosen.category;
-    if (declared === undefined) {
-      const disclosure = categoryFlag !== undefined ? 'from --category; edit SKILL.md any time'
-        : chosen.suggested ? 'suggested from your SKILL.md; edit any time'
-        : "couldn't reach the model; edit SKILL.md any time";
-      io.print(`metadata.terum-category: ${category} (${disclosure})`);
-    }
-    // The REPOSITORY is the authority on which uuid a published name carries, not the local file.
-    // Reading the id only from the folder was wrong in both directions: `existingId` parsed through
-    // the `.strict()` `skillFrontmatterSchema`, so a published folder whose user deleted the injected
-    // `license:` line minted a FRESH uuid and orphaned every receipt, install and profile entry keyed
-    // to the old one; and a folder COPIED from another skill kept that skill's declared uuid, landing
-    // this publish's receipts in that skill's eval history.
-    const catalogue = await catalogPromise;
-    const published = catalogue.find((record) => record.name === found.name);
-    const declaredId = declaredSkillId(skillMd);
-    const id = published?.id
-      // A declared id already belonging to a DIFFERENT name means a copied folder: mint instead of
-      // grafting onto that skill's identity. §5.1 step 4's "minted at v1" is exactly this case.
-      ?? (declaredId !== undefined && !catalogue.some((record) => record.id === declaredId) ? declaredId : randomUUID());
-    const author = `${config.display_name ?? binding.handle} <${config.email ?? ''}>`.trim();
-    const injected = Buffer.from(injectManagedFields(skillMd, { license: teamJson.policy.skill_license, id, author, category }));
-    files.set('SKILL.md', injected);
-
-    io.progress?.({ step: `Checking ${found.name}`, current: 3, total: PUBLISH_STEPS });
-    // 5. Hygiene on the INJECTED map, never before — `skillFrontmatterSchema` is strict and requires
-    //    the managed fields, so a never-published folder would fail HYG1 on fields publish is about
-    //    to write.
-    const dependencies = await dependencyPlan(found.path);
-    const assessment = assessHygiene(found.name, { files, executable }, teamJson.policy.skill_license, true, false, teamJson.categories, dependencies.staged.length + dependencies.skipped.length);
-    reportHygieneWarnings((line) => io.print(line), assessment);
-
-    // 6. The comparison digest, taken AFTER injection so it is post-normalization.
-    const candidate = skillContentDigest(files);
-
-    // 6a. The local regression gate (D19). Absence of a receipt never blocks; nothing moves here.
-    const local = await localReceiptsFor(store.root, candidate, line => io.print(line));
-    // D19 asks about the LATEST eval of these exact bytes. `localReceiptsFor` sorts run ids ascending
-    // and run ids are UTC stamps, so `.find(FAIL)` returned the OLDEST failure: once a run failed, no
-    // amount of passing re-runs of the same bytes could ever clear the gate again.
-    const newest = local.at(-1);
-    const failing = newest?.receipt.verdict === 'FAIL' ? newest : undefined;
-    if (failing && !args.allowRegression) {
-      const against = failing.receipt.version ? versionLabel(Number(failing.receipt.version.slice(1))) : 'the previous version';
-      if (!(await io.confirm(`Your latest eval of these exact bytes failed against ${against}. Publish anyway?`))) {
-        throw new CancelledError('Publish was cancelled.');
-      }
-    }
-
-    // 6b. `--project` is a REFUSAL, so it belongs ABOVE the write-back: a mistyped project name must
-    //     not rewrite the user's SKILL.md on a publish that never ran. There is no question here and
-    //     no default project: publish targets the MARKETPLACE, and a project is an extra list the
-    //     caller asked for by name.
-    const project = requestedProject(args, teamJson);
-
-    // 6c. The local write-back, AFTER the last refusal (OF-2): a publish refused at any question
-    //     leaves the folder byte-identical. A safeWrite failure after this point leaves the injected
-    //     SKILL.md on disk with nothing published — the safe side of the boundary, and idempotent,
-    //     because every injected field is re-derived identically on the next attempt.
-    await writeFile(join(found.path, 'SKILL.md'), injected);
+    await writeBack();
+    const found = { name: prepared.name, path: prepared.path };
+    const { project, id, local } = prepared;
 
     io.progress?.({ step: `Publishing ${found.name}`, current: 4, total: PUBLISH_STEPS });
     const repo = openTeamRepo(clone, binding.remote, runner);
-    const prepared: PreparedPublish = { name: found.name, path: found.path, files, executable, injected, id, candidate, local, project, assessment };
     let outcome: PublishOutcome = { version: null, identicalTo: null, attached: 0, projectAdded: false, assets: 0 };
     await repo.safeWrite((tree) => { outcome = publishIntoTree(tree, prepared); return outcome; }, {
       action: 'publish',
