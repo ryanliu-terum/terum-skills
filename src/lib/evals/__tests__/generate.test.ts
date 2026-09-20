@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { Transcript, type AgentApi } from '../agent.js';
 import { loadCase } from '../execution.js';
-import { generate } from '../generate.js';
+import { BRIEF_MAX, checkBriefNeutrality, deriveBrief, generate } from '../generate.js';
 import { parseTriggers } from '../triggers.js';
 
 const skill = '---\nname: deploy\ndescription: deploy safely\nlicense: UNLICENSED\nmetadata:\n  id: 11111111-1111-4111-8111-111111111111\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\nDeploy only after checks.';
@@ -52,5 +52,104 @@ describe('eval generation (IE5)', () => {
     expect(prompts).toHaveLength(3);
     expect(prompts[1]).toContain('previous response could not be used');
     expect(prompts[2]).toContain('exactly 5 should_trigger');
+  });
+});
+
+const rubric = 'A better answer names the specific rows that changed. It explains why each one matters.';
+const briefCase = (name: string, bucket: string, extra: Record<string, unknown> = {}) =>
+  ({ name, task: `Do the job for ${name}.`, checks: [{ transcript_mentions: 'done' }], bucket, judge: rubric, ...extra });
+const fiveCases = {
+  cases: [
+    briefCase('summarise-changes', 'explicit'),
+    briefCase('no-changes', 'negative'),
+    briefCase('partial-input', 'implicit'),
+    briefCase('ambiguous-ask', 'contextual'),
+    briefCase('hostile-input', 'adversarial'),
+  ],
+};
+const briefOpts = {
+  skill, files: ['SKILL.md'], catalog: '', model: 'sonnet', engineVersion: 'test',
+  now: new Date('2026-09-07T00:00:00Z'), cases: true as const,
+};
+
+describe('brief neutrality (§3.1)', () => {
+  it('refuses a multi-token name, warns on a single-token one, and is bounded by word edges', () => {
+    expect(checkBriefNeutrality('Audit the spec with live-trigger-monitoring.', ['live-trigger-monitoring'])).toEqual({ kind: 'refuse', name: 'live-trigger-monitoring' });
+    // `search` and `ls` are real skills here; a brief cannot describe the job without them.
+    expect(checkBriefNeutrality('Search the codebase for the failing test.', ['search'])).toEqual({ kind: 'warn', name: 'search' });
+    expect(checkBriefNeutrality('List the tools and report on false positives.', ['ls'])).toEqual({ kind: 'ok' });
+    expect(checkBriefNeutrality('Describe the job plainly.', ['search', 'codex-spec'])).toEqual({ kind: 'ok' });
+    // A refusal outranks a warning no matter which name is hit first.
+    expect(checkBriefNeutrality('Run search, then codex-spec.', ['search', 'codex-spec'])).toEqual({ kind: 'refuse', name: 'codex-spec' });
+  });
+});
+
+describe('brief derivation (§3.1)', () => {
+  const skills = [
+    { name: 'zebra-auditor', skill: '# zebra', files: ['SKILL.md'] },
+    { name: 'alpha-auditor', skill: '# alpha', files: ['SKILL.md'] },
+  ];
+
+  it('aliases both skills and orders them by name, never by argument position', async () => {
+    const prompts: string[] = [];
+    const result = await deriveBrief({ agent: agent([{ brief: 'Review a written plan and report what is wrong with it.' }], prompts), model: 'sonnet', skills });
+    expect(result).toMatchObject({ ok: true, value: { order: ['alpha-auditor', 'zebra-auditor'] } });
+    expect(prompts[0]).toContain('SKILL 1 — SKILL.md:\n# alpha');
+    expect(prompts[0]).toContain('SKILL 2 — SKILL.md:\n# zebra');
+    expect(prompts[0]).not.toContain('zebra-auditor');
+    expect(prompts[0]).not.toContain('alpha-auditor');
+  });
+
+  it('re-asks when the brief names a skill, caps its length, and reports a single-token warning', async () => {
+    const named = { brief: 'Use alpha-auditor to review the plan.' };
+    const failed = await deriveBrief({ agent: agent([named, named, named]), model: 'sonnet', skills });
+    expect(failed).toMatchObject({ ok: false, error: expect.stringContaining('--brief') });
+
+    const long = { brief: 'x'.repeat(BRIEF_MAX + 1) };
+    expect(await deriveBrief({ agent: agent([long, long, long]), model: 'sonnet', skills })).toMatchObject({ ok: false });
+
+    const warned = await deriveBrief({
+      agent: agent([{ brief: 'Search the plan for contradictions and report them.' }]),
+      model: 'sonnet', skills: [{ name: 'search', skill: '# s', files: [] }, { name: 'zebra-auditor', skill: '# z', files: [] }],
+    });
+    expect(warned).toMatchObject({ ok: true, value: { warning: 'search' } });
+  });
+});
+
+describe('brief-seeded case generation (§3.2)', () => {
+  it('sees the brief alone, asks for five cases with rubrics, and emits real newlines', async () => {
+    const prompts: string[] = [];
+    const result = await generate({ ...briefOpts, agent: agent([fiveCases], prompts), brief: 'Summarise what changed in a document.', rivalNames: ['alpha-auditor', 'zebra-auditor'] });
+    expect(result).toMatchObject({ ok: true });
+    if (!result.ok) return;
+    expect(Object.keys(result.value.cases!.files)).toHaveLength(5);
+    expect(prompts[0]).toContain('Generate exactly five');
+    expect(prompts[0]).toContain('Summarise what changed in a document.');
+    expect(prompts[0]).not.toContain('deploy safely'); // neither SKILL.md enters the prompt
+    expect(prompts[0]).not.toContain('CANDIDATE FILE LISTING');
+    // The prompt is assembled from escapes; a literal backslash-n would reach the model as text.
+    expect(prompts[0]).not.toContain(String.raw`\n`);
+    expect(prompts[0].split('\n').length).toBeGreaterThan(3);
+  });
+
+  it('rejects a brief-seeded set with three cases, a missing rubric, or a rubric naming a skill', async () => {
+    const three = { cases: fiveCases.cases.slice(0, 3) };
+    expect(await generate({ ...briefOpts, agent: agent([three, three, three]), brief: 'b', rivalNames: [] }))
+      .toMatchObject({ ok: false, error: expect.stringContaining('exactly 5 cases') });
+
+    const noRubric = { cases: fiveCases.cases.map(({ judge: _judge, ...rest }) => rest) };
+    expect(await generate({ ...briefOpts, agent: agent([noRubric, noRubric, noRubric]), brief: 'b', rivalNames: [] }))
+      .toMatchObject({ ok: false, error: expect.stringContaining("needs a 'judge' rubric") });
+
+    const named = { cases: [briefCase('summarise-changes', 'explicit', { judge: 'A better answer matches codex-spec output. It is thorough.' }), ...fiveCases.cases.slice(1)] };
+    expect(await generate({ ...briefOpts, agent: agent([named, named, named]), brief: 'b', rivalNames: ['codex-spec'] }))
+      .toMatchObject({ ok: false, error: expect.stringContaining('never a tool') });
+  });
+
+  it('still asks for three rubric-free cases outside head-to-head', async () => {
+    const prompts: string[] = [];
+    await generate({ ...briefOpts, agent: agent([validCases], prompts) });
+    expect(prompts[0]).toContain('Generate exactly three');
+    expect(prompts[0]).not.toContain('judge');
   });
 });

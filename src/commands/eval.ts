@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { ConfigStore, createConfigStore, selectTeam } from '../lib/config.js';
 import { type AgentApi, DEFAULT_MODEL, preflight as systemPreflight, systemAgent } from '../lib/evals/agent.js';
 import { type ArmSample, type ComparisonRow, loadCase, runCase } from '../lib/evals/execution.js';
-import { generate, type GeneratedAssets } from '../lib/evals/generate.js';
+import { assetHeader, checkBriefNeutrality, deriveBrief, generate, BRIEF_MAX, type GeneratedAssets } from '../lib/evals/generate.js';
 import { assessHygiene, HygieneRefused, reportHygieneWarnings } from '../lib/evals/hygiene.js';
 import { makeRng } from '../lib/evals/judge.js';
 import { buildReceipt, receiptPath } from '../lib/evals/receipt.js';
@@ -80,6 +80,11 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
       // cases — and a zero-row expectation reports `complete` (engine §7.1), i.e. a clean
       // report over no evidence.
       if (args.noGen) return failure('--vs cannot be combined with --no-gen: head-to-head cases are generated from the shared brief, so --no-gen would run zero cases.');
+      // §1.2: read the channel up front rather than letting io.confirm throw later —
+      // PromptClosedError is the wrong failure and the message must name --brief.
+      if (args.brief === undefined && !io.interactive) {
+        return failure('A head-to-head needs a shared task brief confirmed by a human. This channel cannot ask, so write the brief yourself and pass --brief <path>.');
+      }
     }
     // §7: the comparison is the noisier quantity, and reps are the cheapest mitigation.
     const k = args.k ?? (headToHead ? 5 : 3);
@@ -127,7 +132,7 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
     // §1: the rival is always a committed version — mixing an uncommitted working tree into
     // one side of a comparison makes the result unreproducible, and only one source can be
     // --working anyway. Hygiene refuses name which of the two trees failed.
-    let rival: { record: NonNullable<typeof rivalRecord>; dir: string; version: string } | undefined;
+    let rival: { record: NonNullable<typeof rivalRecord>; dir: string; version: string; files: Awaited<ReturnType<typeof sourceFiles>> } | undefined;
     if (rivalRecord) {
       const rivalVersion = await resolveVersion(clone, rivalRecord.name, undefined, runner);
       const rivalDir = await materializeVersion(store, teamName, clone, rivalRecord.name, rivalVersion, runner);
@@ -139,7 +144,7 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
         reportHygieneWarnings((line) => io.print(line), error.assessment);
         return failure(`Hygiene failed for the rival skill ${rivalRecord.name}:\n${error.message}`);
       }
-      rival = { record: rivalRecord, dir: rivalDir, version: rivalVersion };
+      rival = { record: rivalRecord, dir: rivalDir, version: rivalVersion, files: rivalFiles };
     }
 
     const model = args.model ?? DEFAULT_MODEL;
@@ -163,7 +168,49 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
     const authoredSelected = args.case === undefined ? authoredCaseFiles : authoredCaseFiles.filter((file) => file.replace(/\.ya?ml$/i, '') === args.case);
     // A named case is an authored assertion; it intentionally never causes a model call.
     if (wantsCases && args.case !== undefined && authoredSelected.length === 0) return failure(`No eval case named ${args.case} for ${record.name}.`);
-    const generateCases = wantsCases && !args.noGen && (Boolean(args.gen) || authoredCaseFiles.length === 0);
+    // §3: the brief is the whole neutrality guarantee — it is the only thing the case
+    // generator sees, and a human signs its text.
+    let brief: { text: string; source: 'derived' | 'supplied'; order: string[] } | undefined;
+    if (rival !== undefined) {
+      const names = [record.name, rival.record.name];
+      if (args.brief !== undefined) {
+        const supplied = await optionalText(resolve(args.brief));
+        if (supplied === undefined) return failure(`No brief file at ${args.brief}.`);
+        const text = supplied.trim();
+        if (!text) return failure(`The brief at ${args.brief} is empty.`);
+        if (text.length > BRIEF_MAX) return failure(`The brief at ${args.brief} is ${text.length} characters; the cap is ${BRIEF_MAX} so a human actually reads it before confirming.`);
+        // §3.1: a supplied brief is checked too. Rev 1 trusted it because "a human wrote it",
+        // but --brief is mandatory without a terminal, which is where nobody is watching.
+        const neutrality = checkBriefNeutrality(text, names);
+        if (neutrality.kind === 'refuse') return failure(`The brief at ${args.brief} names '${neutrality.name}'. A brief that names a tool is describing the tool, not the job; describe the work both skills are competing to do.`);
+        if (neutrality.kind === 'warn') io.print(`Note: the brief contains the word '${neutrality.name}', which is also a skill name here. Continuing — it reads as an ordinary word.`);
+        brief = { text, source: 'supplied', order: [...names].sort() };
+      } else {
+        const derived = await deriveBrief({
+          agent: args.agent ?? systemAgent,
+          model,
+          skills: [
+            { name: record.name, skill: candidateFiles.files.get('SKILL.md')?.toString('utf8') ?? '', files: [...candidateFiles.files.keys()].sort() },
+            { name: rival.record.name, skill: rival.files.files.get('SKILL.md')?.toString('utf8') ?? '', files: [...rival.files.files.keys()].sort() },
+          ],
+        });
+        if (!derived.ok) return failure(derived.error);
+        const briefPath = join(runDir, 'brief.md');
+        await writeFile(briefPath, assetHeader(model, packageVersion() ?? 'unknown', runAt) + derived.value.brief + '\n', 'utf8');
+        io.print('');
+        io.print(derived.value.brief);
+        io.print('');
+        io.print(`brief: ${briefPath}`);
+        if (derived.value.warning !== undefined) io.print(`Note: the brief contains the word '${derived.value.warning}', which is also a skill name here. It reads as an ordinary word — check that it does.`);
+        if (!await io.confirm('Use this brief?')) {
+          return failure(`Stopped without running. Edit ${briefPath} so it describes the job fairly to both skills, then re-run with --brief ${briefPath}.`);
+        }
+        brief = { text: derived.value.brief, source: 'derived', order: derived.value.order };
+      }
+    }
+    // §3.2: head-to-head cases always come from the brief — authored cases belong to one
+    // skill, and --no-gen is refused above.
+    const generateCases = wantsCases && (brief !== undefined || (!args.noGen && (Boolean(args.gen) || authoredCaseFiles.length === 0)));
     const generateTriggers = wantsTriggers && !args.noGen && (Boolean(args.gen) || !authoredTrigger);
     let generated: GeneratedAssets = {};
     if (generateCases || generateTriggers) {
@@ -179,6 +226,7 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
         now: runAt,
         cases: generateCases,
         triggers: generateTriggers,
+        ...(brief === undefined ? {} : { brief: brief.text, rivalNames: [record.name, rival!.record.name] }),
       });
       if (!built.ok) return failure(built.error);
       generated = built.value;
@@ -250,6 +298,14 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
       team: teamName, skill_id: record.id, skill_name: record.name, run_id: runId,
       cc_version: preflight.value.ccVersion, model, judge_model: args.judgeModel ?? model,
       expected_rows: expectedRows,
+      ...(rival === undefined ? {} : {
+        mode: 'head-to-head' as const,
+        rival_skill_id: rival.record.id,
+        rival_skill_name: rival.record.name,
+        rival_version: rival.version,
+        brief_source: brief?.source ?? 'derived',
+        brief_order: brief?.order ?? [],
+      }),
       arm_skill_lists: Object.fromEntries([...new Set(arms.map((arm) => arm.arm))].map((arm) => [arm, arms.find((sample) => sample.arm === arm)?.skill_list ?? null])),
       ...(generated.cases !== undefined || generated.triggers !== undefined ? { generated_assets: { cases: generated.cases !== undefined, triggers: generated.triggers !== undefined } } : {}),
     }, [...rows, ...arms, ...(triggers === null ? [] : [triggers])]);
