@@ -10,7 +10,7 @@ import { ConfigStore, createConfigStore, selectTeam } from '../lib/config.js';
 import type { Config } from '../lib/schema.js';
 import { localReceiptsFor, newestReceiptAt } from '../lib/evals/receipt-store.js';
 import { type AgentApi, DEFAULT_MODEL, preflight as systemPreflight, systemAgent } from '../lib/evals/agent.js';
-import { type DroppedCase, type ArmSample, type ComparisonRow, loadCase, loadSuite, runCase, runSuite } from '../lib/evals/execution.js';
+import { type Arm, type ArmSpec, type DroppedCase, type ArmSample, type ComparisonRow, loadCase, loadSuite, runCase, runSuite } from '../lib/evals/execution.js';
 import { generate, type GeneratedAssets } from '../lib/evals/generate.js';
 import { assessHygiene, exemptAuthorEmail, formatHygieneFindings, hygieneFrontmatter, HygieneRefused, inspectContent, reportHygieneWarnings } from '../lib/evals/hygiene.js';
 import { makeRng } from '../lib/evals/judge.js';
@@ -337,6 +337,12 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
       // and a single-arm run, exactly as eval-engine §7.1 already names it.
       const incumbent = clone === null || skillId === null ? undefined : await incumbentDir(clone, local.name, await listVersions(clone, local.name), skillId, evaluatedDigest);
       const opponents = incumbent === undefined ? 1 : 2;
+      // IE6 §2: one arm table for both runners; identity travels with the tree.
+      const armTable: Partial<Record<Arm, ArmSpec>> = {
+        baseline: null,
+        candidate: { name: local.name, dir: candidateDir },
+        ...(incumbent === undefined ? {} : { incumbent: { name: local.name, dir: incumbent } }),
+      };
       // Includes every selected authored case before requirement probes or setup failures.
       expectedRows = (selected.length + (suite === undefined ? 0 : suite.value.cases.length)) * k * opponents;
       for (const file of selected) {
@@ -346,7 +352,7 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
         const output = await runCase(
           { agent: args.agent ?? systemAgent, rng, model, judgeModel: args.judgeModel ?? model, log: (line) => io.print(line) },
           parsed.value,
-          { k, skillName: local.name, caseDir: casesDir, arms: { candidate: candidateDir, ...(incumbent === undefined ? {} : { incumbent }) }, scratch, transcriptDir, dependencies },
+          { k, caseDir: casesDir, arms: armTable, scratch, transcriptDir, dependencies },
         );
         rows.push(...output.rows); arms.push(...output.arms);
         if (output.skipped) environmentSkips[name] = output.skipped;
@@ -356,7 +362,7 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
         const output = await runSuite(
           { agent: args.agent ?? systemAgent, rng, model, judgeModel: args.judgeModel ?? model, log: (line) => io.print(line) },
           suite.value,
-          { k, skillName: local.name, caseDir: generated.suite === undefined ? join(candidateDir, 'evals') : generatedRoot, arms: { candidate: candidateDir, ...(incumbent === undefined ? {} : { incumbent }) }, scratch, transcriptDir, dependencies },
+          { k, caseDir: generated.suite === undefined ? join(candidateDir, 'evals') : generatedRoot, arms: armTable, scratch, transcriptDir, dependencies },
         );
         // A skipped or seed-aborted suite has no shared session, so it cannot invalidate the
         // independence of ordinary case rows. A dead agent still yields samples and did run.
