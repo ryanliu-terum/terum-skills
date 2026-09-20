@@ -28,7 +28,7 @@ npx -y terum-skills@latest setup
 - [Install and manage](guides/install-and-manage.md): installing, destinations, sync, reconcile, quarantine, the skill sub-commands.
 - [Team admin](guides/team-admin.md): roles, invitations, removal, projects, migration, non-GitHub remotes.
 - [Desktop app](guides/desktop-app.md): getting the app, every screen, settings, updates.
-- [Claude Code integration](guides/claude-code-integration.md): the `/terum-skills` skill, the session hook, the edit hook, the per-machine switch.
+- [Claude Code integration](guides/claude-code-integration.md): the eight skills for Claude Code and Codex, the session hook, the edit hook, the per-machine switch.
 
 ## Evaluating skills
 

@@ -275,13 +275,13 @@ The states are `refreshed`, `fresh`, `busy`, `unreachable`, `no-clone` and `erro
   terum-skills (<command>)` and names the `setup` to re-run after your next update. Nothing is
   installed where no entry of ours exists, and a settings file this run cannot edit is a notice, not
   a failure,
-- an outdated managed copy of the bundled `/terum-skills` skill is refreshed, printing `Updated your
-  /terum-skills manual for this CLI.`, and so is the edit hook's script, printing `Updated your
-  terum-skills edit hook for this CLI.` A copy you declined, or never saw offered, is never installed
+- the bundled skills are refreshed in a root that already holds Terum's copies, outdated ones rewritten
+  and missing ones added, printing `Updated your terum-skills skills for this CLI.`, and so is the edit
+  hook's script, printing `Updated your terum-skills edit hook for this CLI.` A copy you declined, or never saw offered, is never installed
   by the hook, and a file that is not this tool's own is never touched,
 - stdout carries only Claude Code's reload directive, so diagnostics travel as notices.
 
-The entry and the manual both name one copy of the CLI on purpose: a session start runs the release
+The entry and the placed skills all name one copy of the CLI on purpose: a session start runs the release
 you installed, never the registry's newest. [Security](../../SECURITY.md) sets out what runs on your
 machine and when.
 
