@@ -102,6 +102,23 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
     const rivalRecord = args.vs === undefined ? undefined : await findSkill(clone, teamName, args.vs);
     if (args.vs !== undefined && !rivalRecord) return failure(`No skill named or identified by ${args.vs} exists in team ${teamName}.`);
     if (rivalRecord && rivalRecord.id === record.id) return failure(`--vs ${args.vs} resolves to the same skill as ${args.ref}; a head-to-head needs two different skills.`);
+    // §1.2 / §3.1: a supplied brief is validated HERE — before hygiene, before preflight, and
+    // so before any agent call. Rejecting a brief that names a skill must not cost a run.
+    let suppliedBrief: string | undefined;
+    if (rivalRecord && args.brief !== undefined) {
+      const names = [record.name, rivalRecord.name];
+      const supplied = await optionalText(resolve(args.brief));
+      if (supplied === undefined) return failure(`No brief file at ${args.brief}.`);
+      const text = supplied.trim();
+      if (!text) return failure(`The brief at ${args.brief} is empty.`);
+      if (text.length > BRIEF_MAX) return failure(`The brief at ${args.brief} is ${text.length} characters; the cap is ${BRIEF_MAX} so a human actually reads it before confirming.`);
+      // Rev 1 trusted a supplied brief because "a human wrote it", but --brief is mandatory
+      // without a terminal — which is exactly where nobody is watching.
+      const neutrality = checkBriefNeutrality(text, names);
+      if (neutrality.kind === 'refuse') return failure(`The brief at ${args.brief} names '${neutrality.name}'. A brief that names a tool is describing the tool, not the job; describe the work both skills are competing to do.`);
+      if (neutrality.kind === 'warn') io.print(`Note: the brief contains the word '${neutrality.name}', which is also a skill name here. Continuing — it reads as an ordinary word.`);
+      suppliedBrief = text;
+    }
 
     // Pin the evaluated version and materialize its immutable snapshot BEFORE anything reads
     // skill content: a concurrent sync can refresh the clone mid-run, and the receipt's tree
@@ -173,18 +190,8 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
     let brief: { text: string; source: 'derived' | 'supplied'; order: string[] } | undefined;
     if (rival !== undefined) {
       const names = [record.name, rival.record.name];
-      if (args.brief !== undefined) {
-        const supplied = await optionalText(resolve(args.brief));
-        if (supplied === undefined) return failure(`No brief file at ${args.brief}.`);
-        const text = supplied.trim();
-        if (!text) return failure(`The brief at ${args.brief} is empty.`);
-        if (text.length > BRIEF_MAX) return failure(`The brief at ${args.brief} is ${text.length} characters; the cap is ${BRIEF_MAX} so a human actually reads it before confirming.`);
-        // §3.1: a supplied brief is checked too. Rev 1 trusted it because "a human wrote it",
-        // but --brief is mandatory without a terminal, which is where nobody is watching.
-        const neutrality = checkBriefNeutrality(text, names);
-        if (neutrality.kind === 'refuse') return failure(`The brief at ${args.brief} names '${neutrality.name}'. A brief that names a tool is describing the tool, not the job; describe the work both skills are competing to do.`);
-        if (neutrality.kind === 'warn') io.print(`Note: the brief contains the word '${neutrality.name}', which is also a skill name here. Continuing — it reads as an ordinary word.`);
-        brief = { text, source: 'supplied', order: [...names].sort() };
+      if (suppliedBrief !== undefined) {
+        brief = { text: suppliedBrief, source: 'supplied', order: [...names].sort() };
       } else {
         const derived = await deriveBrief({
           agent: args.agent ?? systemAgent,

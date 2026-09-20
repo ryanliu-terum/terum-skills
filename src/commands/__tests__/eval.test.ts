@@ -213,3 +213,136 @@ it.each([false, true])('size warning reaches eval preflight unless accompanied b
   if (mixed) { expect(agentCalls).toBe(0); expect(result).toMatchObject({ error: expect.stringContaining('HYG2') }); }
   else { expect(agentCalls).toBeGreaterThan(0); expect(result).toMatchObject({ value: { executionStatus: 'complete' } }); }
 });
+
+describe('eval --vs head-to-head (IE6)', () => {
+  const RIVAL_ID = '22222222-2222-4222-8222-222222222222';
+  const rivalSkill = (name: string) => `---\nname: ${name}\ndescription: also checks deployments\nlicense: UNLICENSED\nmetadata:\n  id: ${RIVAL_ID}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\nprefer a dry run first`;
+
+  const briefCases = { cases: ['one', 'two', 'three', 'four', 'five'].map((stem, index) => ({
+    name: `case-${stem}`,
+    task: `Prepare release step ${index + 1}.`,
+    checks: [{ transcript_mentions: 'deployed' }],
+    judge: 'A better answer states what will change before changing it. It names the rollback path.',
+    bucket: index === 4 ? 'adversarial' : 'explicit',
+  })) };
+
+  /** Two skills in one team, both staged by name so the arms are distinguishable. */
+  const twoSkillFixture = async () => {
+    const fixture = await bareTeam();
+    await pushFromSeed(fixture.seed, 'skills/sample/SKILL.md', skill('deploy carefully'));
+    await pushFromSeed(fixture.seed, 'skills/rival-checker/SKILL.md', rivalSkill('rival-checker'));
+    const store = createConfigStore(join(fixture.root, 'state'));
+    await cloneWithIdentity(fixture.bare, store.teamClone('team'));
+    await store.update((config) => { config.teams.team = { remote: fixture.bare, handle: 'seed' }; });
+    return store;
+  };
+
+  const headToHeadAgent = (prompts: string[], brief = 'Take a change that is ready and get it live without surprising anyone.'): AgentApi => ({
+    runAgent: async (_task, cwd) => {
+      const staged = ['sample', 'rival-checker'].find((name) => existsSync(join(cwd, '.claude', 'skills', name)));
+      return transcript(staged === undefined ? [] : [staged]);
+    },
+    askJson: async (prompt) => {
+      prompts.push(prompt);
+      if (prompt.includes('Describe THE JOB')) return { brief };
+      if (prompt.includes('Generate exactly five')) return briefCases;
+      return { selected: ['sample'] };
+    },
+  });
+
+  const noAgent = (counter: { calls: number }): AgentApi => ({
+    runAgent: () => { counter.calls++; return Promise.resolve(transcript([])); },
+    askJson: () => { counter.calls++; return Promise.resolve({}); },
+  });
+
+  it.each([
+    ['--commit', { commit: true }, 'never committed'],
+    ['--case', { case: 'happy-path' }, 'authored assertion'],
+    ['--no-gen', { noGen: true }, 'generated from the shared brief'],
+    ['--save', { save: true, working: true }, 'neither skill'],
+    ['--triggers-only', { triggersOnly: true }, 'execution only'],
+  ])('refuses --vs with %s before any agent call', async (_label, extra, fragment) => {
+    const store = await twoSkillFixture();
+    const counter = { calls: 0 };
+    const result = await run({ ref: 'sample', vs: 'rival-checker', config: store, preflight: async () => success({ ccVersion: 'stub' }), agent: noAgent(counter), ...extra }, new ScriptedPrompter([], [], true));
+    expect(result).toMatchObject({ ok: false, error: expect.stringContaining(fragment) });
+    expect(counter.calls).toBe(0);
+  });
+
+  it('refuses a rival that resolves to the same skill, and one outside the team', async () => {
+    const store = await twoSkillFixture();
+    const counter = { calls: 0 };
+    expect(await run({ ref: 'sample', vs: 'sample', config: store, preflight: async () => success({ ccVersion: 'stub' }), agent: noAgent(counter) }, new ScriptedPrompter([], [], true)))
+      .toMatchObject({ ok: false, error: expect.stringContaining('two different skills') });
+    expect(await run({ ref: 'sample', vs: 'not-a-skill', config: store, preflight: async () => success({ ccVersion: 'stub' }), agent: noAgent(counter) }, new ScriptedPrompter([], [], true)))
+      .toMatchObject({ ok: false, error: expect.stringContaining('No skill named or identified by not-a-skill') });
+    expect(counter.calls).toBe(0);
+  });
+
+  it('refuses a non-interactive channel by naming --brief, not by throwing PromptClosedError', async () => {
+    const store = await twoSkillFixture();
+    const counter = { calls: 0 };
+    const result = await run({ ref: 'sample', vs: 'rival-checker', config: store, preflight: async () => success({ ccVersion: 'stub' }), agent: noAgent(counter) }, new ScriptedPrompter([], [], false));
+    expect(result).toMatchObject({ ok: false, error: expect.stringContaining('--brief <path>') });
+    expect(result).not.toMatchObject({ error: expect.stringContaining('interactive terminal') });
+    expect(counter.calls).toBe(0);
+  });
+
+  it('derives a brief, gates on the confirm, and reports three arms with no verdict and no receipt', async () => {
+    const store = await twoSkillFixture();
+    const prompts: string[] = [];
+    const io = new ScriptedPrompter([], [true], true);
+    const result = await run({ ref: 'sample', vs: 'rival-checker', k: 1, config: store, preflight: async () => success({ ccVersion: 'stub' }), agent: headToHeadAgent(prompts) }, io);
+    expect(result).toMatchObject({ ok: true, value: { rival: { name: 'rival-checker', id: RIVAL_ID } } });
+    if (!result.ok) return;
+
+    expect(io.askedAbout('Use this brief?')).toBe(true);
+    expect(existsSync(join(result.value.runDir, 'brief.md'))).toBe(true);
+
+    // §3.2: the case prompt sees the brief alone — neither SKILL.md reaches it.
+    const casePrompt = prompts.find((prompt) => prompt.includes('Generate exactly five'))!;
+    expect(casePrompt).toContain('TASK BRIEF');
+    expect(casePrompt).not.toContain('deploy carefully');
+    expect(casePrompt).not.toContain('prefer a dry run first');
+
+    const report = io.lines.join('\n');
+    expect(report).toContain('head-to-head: sample vs rival-checker — 5 cases · k=1');
+    expect(report).toContain('scored: 10/10 rows');
+    expect(report).toMatch(/candidate-vs-rival: .*sign test p=/);
+    expect(report).not.toMatch(/^verdict:/m);
+    expect(report).not.toMatch(/net lift/);
+    expect(report).toContain('not a ranking');
+    expect(result.value.receiptPath).toBeUndefined();
+  });
+
+  it('a declined brief stops the run and points at --brief with the path', async () => {
+    const store = await twoSkillFixture();
+    const io = new ScriptedPrompter([], [false], true);
+    const result = await run({ ref: 'sample', vs: 'rival-checker', k: 1, config: store, preflight: async () => success({ ccVersion: 'stub' }), agent: headToHeadAgent([]) }, io);
+    expect(result).toMatchObject({ ok: false, error: expect.stringMatching(/re-run with --brief .*brief\.md/) });
+  });
+
+  it('checks a supplied brief instead of trusting it, on a channel with no human', async () => {
+    const store = await twoSkillFixture();
+    const dir = join(store.root, 'briefs');
+    await mkdir(dir, { recursive: true });
+    const named = join(dir, 'named.md');
+    await writeFile(named, 'Use rival-checker to get the change live.', 'utf8');
+    const counter = { calls: 0 };
+    // §1.2: the deterministic checks run before ANY agent call — preflight is itself a
+    // one-turn agent task (§7.4), so a brief that names a skill must not cost one.
+    let preflights = 0;
+    expect(await run({ ref: 'sample', vs: 'rival-checker', brief: named, config: store, preflight: async () => { preflights++; return success({ ccVersion: 'stub' }); }, agent: noAgent(counter) }, new ScriptedPrompter([], [], false)))
+      .toMatchObject({ ok: false, error: expect.stringContaining("names 'rival-checker'") });
+    expect(counter.calls).toBe(0);
+    expect(preflights).toBe(0);
+
+    const fair = join(dir, 'fair.md');
+    await writeFile(fair, 'Take a change that is ready and get it live without surprising anyone.', 'utf8');
+    const io = new ScriptedPrompter([], [], false);
+    const result = await run({ ref: 'sample', vs: 'rival-checker', brief: fair, k: 1, config: store, preflight: async () => success({ ccVersion: 'stub' }), agent: headToHeadAgent([]) }, io);
+    expect(result).toMatchObject({ ok: true });
+    expect(io.askedAbout('Use this brief?')).toBe(false); // supplied briefs skip the gate, not the checks
+    expect(io.lines.join('\n')).toContain('(supplied)');
+  });
+});
