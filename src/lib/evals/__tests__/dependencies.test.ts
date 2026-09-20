@@ -5,6 +5,7 @@ import { dirname, join, relative, sep } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { ANSWER_KEY_ENTRY_CAP, dependencyPlan, scanHeavySkill, stageDependencies } from '../dependencies.js';
 import { seedSandbox, type EvalCase } from '../execution.js';
+import { SYMLINKS_SUPPORTED } from '../../__tests__/fixtures.js';
 
 const evalCase: EvalCase = { name: 'c', task: 'work', files: {}, checks: [], requires: [] };
 const MiB = 1024 * 1024;
@@ -269,7 +270,7 @@ describe('dependency staging never hands an arm the skill, its answer key, or th
   it('a script whose directory is the repo root or .claude travels alone, not with the whole tree', async () => {
     const { root, skill } = await harnessRepo('Run ./build.sh and .claude/statusline.js before you start');
     const plan = await dependencyPlan(skill, root);
-    expect(plan).toMatchObject({ staged: ['./build.sh', '.claude/statusline.js'].sort(), copies: ['.claude/statusline.js', 'build.sh'] });
+    expect(plan).toMatchObject({ staged: ['./build.sh', '.claude/statusline.js'].sort(), copies: [join('.claude', 'statusline.js'), 'build.sh'] });
     // Scratch outside the repository, as in a real run: copying the root into itself would throw instead.
     const sandbox = await seed(root, skill, plan);
     expect(existsSync(join(sandbox, 'build.sh'))).toBe(true);
@@ -372,13 +373,13 @@ describe('dependency staging never hands an arm the skill, its answer key, or th
     const { root, skill } = await sourceRepo('Run skills-src/build.sh first');
     await put(join(root, 'skills-src', 'build.sh'), 'echo build');
     const plan = await dependencyPlan(skill, root);
-    expect(plan).toMatchObject({ staged: ['skills-src/build.sh'], copies: ['skills-src/build.sh'] });
+    expect(plan).toMatchObject({ staged: ['skills-src/build.sh'], copies: [join('skills-src', 'build.sh')] });
     const sandbox = await arm(root, 'goal', skill, plan);
     expect(existsSync(join(sandbox, 'skills-src', 'build.sh'))).toBe(true);
     expect(existsSync(join(sandbox, 'skills-src', 'goal', 'evals'))).toBe(false);
   });
 
-  it.each(['evals', 'fixtures'])("the skill's %s/ linked out of its folder: a script beside the target travels with its other siblings, a script inside it is withheld (R2-M1)", async (name) => {
+  it.skipIf(!SYMLINKS_SUPPORTED).each(['evals', 'fixtures'])("the skill's %s/ linked out of its folder: a script beside the target travels with its other siblings, a script inside it is withheld (R2-M1)", async (name) => {
     const { root, skill } = await harnessRepo('Run shared/run.sh first; shared/state-key/grade.sh scores it.');
     await rm(join(skill, name), { recursive: true });
     await scripts(root, ['shared']);
@@ -401,7 +402,7 @@ describe('dependency staging never hands an arm the skill, its answer key, or th
     await put(join(root, '.claude', 'handoff.md'), 'data');
     await put(join(root, '.claude', 'skills', 'other', 'evals', 'cases.yaml'), 'other: key');
     const plan = await dependencyPlan(skill, root);
-    expect(plan).toMatchObject({ staged: ['.claude/tool.sh'], copies: ['.claude/tool.sh'] });
+    expect(plan).toMatchObject({ staged: ['.claude/tool.sh'], copies: [join('.claude', 'tool.sh')] });
     const sandbox = await arm(root, 'goal', skill, plan);
     expect(existsSync(join(sandbox, '.claude', 'tool.sh'))).toBe(true);
     expect(existsSync(join(sandbox, '.claude', 'handoff.md'))).toBe(false);
@@ -410,7 +411,7 @@ describe('dependency staging never hands an arm the skill, its answer key, or th
 });
 
 describe('a copy never follows or writes a link beneath a copied directory (§6.1 rev 3)', () => {
-  it('a skills alias inside a staged directory does not hand the arm the answer key', async () => {
+  it.skipIf(!SYMLINKS_SUPPORTED)('a skills alias inside a staged directory does not hand the arm the answer key', async () => {
     const { root, skill } = await harnessRepo('Run .agents/sync.js first.');
     await put(join(root, '.agents', 'sync.js'), 'export {};');
     await link('../.claude/skills', join(root, '.agents', 'skills'));
@@ -422,7 +423,7 @@ describe('a copy never follows or writes a link beneath a copied directory (§6.
     expect(await linksIn(sandbox)).toEqual([]);
   });
 
-  it('no link beneath a copied directory is copied or followed, wherever it points', async () => {
+  it.skipIf(!SYMLINKS_SUPPORTED)('no link beneath a copied directory is copied or followed, wherever it points', async () => {
     const { root, skill } = await harnessRepo('node tools/run.js');
     await put(join(root, 'tools', 'run.js'), 'export {};');
     await put(join(root, 'shared', 'lib.js'), 'export const lib = true;');
@@ -443,7 +444,7 @@ describe('a copy never follows or writes a link beneath a copied directory (§6.
     expect(await linksIn(sandbox)).toEqual([]);
   });
 
-  it('with a symlinked .claude/skills, a link to .claude inside a copy root brings nothing from .claude (C4)', async () => {
+  it.skipIf(!SYMLINKS_SUPPORTED)('with a symlinked .claude/skills, a link to .claude inside a copy root brings nothing from .claude (C4)', async () => {
     const { root } = await harnessRepo('');
     // `.claude/skills` becomes a link, so `.claude` is no longer an ancestor of its real path.
     const shared = await tmp('dependency-shared-skills-');
@@ -464,7 +465,7 @@ describe('a copy never follows or writes a link beneath a copied directory (§6.
     expect(await linksIn(sandbox)).toEqual([]);
   });
 
-  it('a named script that is a link in a directory an outer copy already wrote still arrives as a file', async () => {
+  it.skipIf(!SYMLINKS_SUPPORTED)('a named script that is a link in a directory an outer copy already wrote still arrives as a file', async () => {
     const { root, skill } = await harnessRepo('node tools/run.js, then tools/sub/engine.js');
     const outside = await tmp('dependency-dotfiles-');
     await put(join(outside, 'engine.js'), 'export const engine = "outside";');
@@ -481,7 +482,7 @@ describe('a copy never follows or writes a link beneath a copied directory (§6.
     expect(await linksIn(sandbox)).toEqual([]);
   });
 
-  it('a named script whose directory is a link inside another copy root arrives with its siblings, as real files (TQ2)', async () => {
+  it.skipIf(!SYMLINKS_SUPPORTED)('a named script whose directory is a link inside another copy root arrives with its siblings, as real files (TQ2)', async () => {
     const { root, skill } = await harnessRepo('node tools/run.js, then tools/wf/engine.js');
     await put(join(root, 'tools', 'run.js'), 'export {};');
     await put(join(root, 'shared-wf', 'engine.js'), 'export const engine = true;');
@@ -489,7 +490,7 @@ describe('a copy never follows or writes a link beneath a copied directory (§6.
     await link('../shared-wf', join(root, 'tools', 'wf'));
     const plan = await dependencyPlan(skill, root);
     // The outer walk skips the `tools/wf` link, so the nested root is not already written: it copies itself.
-    expect(plan).toMatchObject({ staged: ['tools/run.js', 'tools/wf/engine.js'], missing: [], skipped: [], copies: ['tools', 'tools/wf'] });
+    expect(plan).toMatchObject({ staged: ['tools/run.js', 'tools/wf/engine.js'], missing: [], skipped: [], copies: ['tools', join('tools', 'wf')] });
     const sandbox = await seed(root, skill, plan);
     expect((await lstat(join(sandbox, 'tools', 'wf'))).isDirectory()).toBe(true);
     for (const name of ['engine.js', 'helper.js']) expect((await lstat(join(sandbox, 'tools', 'wf', name))).isFile()).toBe(true);
@@ -497,7 +498,7 @@ describe('a copy never follows or writes a link beneath a copied directory (§6.
     expect(await linksIn(sandbox)).toEqual([]);
   });
 
-  it.skipIf(caseInsensitiveTmp)('of two links differing only in case, only the one whose target is the named script is written (TQ3)', async () => {
+  it.skipIf(caseInsensitiveTmp || !SYMLINKS_SUPPORTED)('of two links differing only in case, only the one whose target is the named script is written (TQ3)', async () => {
     const { root, skill } = await harnessRepo('node tools/engine.js');
     const outside = await tmp('dependency-dotfiles-');
     await put(join(outside, 'engine.js'), 'export const engine = "named";');
@@ -513,7 +514,7 @@ describe('a copy never follows or writes a link beneath a copied directory (§6.
     expect(await linksIn(sandbox)).toEqual([]);
   });
 
-  it('a symlinked workflow directory outside the repository is staged as a real copy, executable bits kept', async () => {
+  it.skipIf(!SYMLINKS_SUPPORTED)('a symlinked workflow directory outside the repository is staged as a real copy, executable bits kept', async () => {
     const { root, skill } = await harnessRepo('Workflow({ scriptPath: ".claude/workflows/engine.js" })');
     const outside = await tmp('dependency-dotfiles-');
     await put(join(outside, 'workflows', 'engine.js'), 'export const shared = true;');
@@ -523,7 +524,7 @@ describe('a copy never follows or writes a link beneath a copied directory (§6.
     await rm(join(root, '.claude', 'workflows'), { recursive: true });
     await link(join(outside, 'workflows'), join(root, '.claude', 'workflows'));
     const plan = await dependencyPlan(skill, root);
-    expect(plan).toMatchObject({ staged: ['.claude/workflows/engine.js'], missing: [], copies: ['.claude/workflows'] });
+    expect(plan).toMatchObject({ staged: ['.claude/workflows/engine.js'], missing: [], copies: [join('.claude', 'workflows')] });
     const sandbox = await seed(root, skill, plan);
     expect((await lstat(join(sandbox, '.claude', 'workflows'))).isDirectory()).toBe(true);
     expect(await readFile(join(sandbox, '.claude', 'workflows', 'helper.js'), 'utf8')).toBe('export const helper = true;');
@@ -533,7 +534,7 @@ describe('a copy never follows or writes a link beneath a copied directory (§6.
     expect(await linksIn(sandbox)).toEqual([]);
   });
 
-  it('a script that is itself a link outside the repository is staged as a file; a dangling one is missing', async () => {
+  it.skipIf(!SYMLINKS_SUPPORTED)('a script that is itself a link outside the repository is staged as a file; a dangling one is missing', async () => {
     const { root, skill } = await harnessRepo('node tools/engine.js, then tools/broken.js');
     const outside = await tmp('dependency-dotfiles-');
     await put(join(outside, 'engine.js'), 'export const engine = "outside";');
@@ -546,7 +547,7 @@ describe('a copy never follows or writes a link beneath a copied directory (§6.
     expect(await linksIn(sandbox)).toEqual([]);
   });
 
-  it('the cap counts the bytes behind a symlinked directory, not the link', async () => {
+  it.skipIf(!SYMLINKS_SUPPORTED)('the cap counts the bytes behind a symlinked directory, not the link', async () => {
     const { root, skill } = await harnessRepo('Workflow({ scriptPath: ".claude/workflows/engine.js" })');
     await rm(join(root, '.claude', 'workflows'), { recursive: true });
     await put(join(root, 'shared', 'workflows', 'engine.js'), 'export {};');
@@ -556,8 +557,9 @@ describe('a copy never follows or writes a link beneath a copied directory (§6.
   });
 });
 
-/** Permission bits mean nothing to root, so the unreadable-entry tests skip there. */
+/** Permission bits mean nothing to root, and Windows ignores POSIX mode bits (chmod 000 leaves a file readable), so the unreadable-entry tests skip in both places. */
 const asRoot = process.getuid?.() === 0;
+const cannotLock = asRoot || process.platform === 'win32';
 
 /** Runs `body` with each path at its mode, then restores 0755 so the temporary roots can be removed. */
 async function locked<T>(paths: [string, number][], body: () => Promise<T>): Promise<T> {
@@ -570,7 +572,7 @@ async function locked<T>(paths: [string, number][], body: () => Promise<T>): Pro
 }
 
 describe('an entry the eval cannot read is left out, never thrown (§6.1 rev 3)', () => {
-  it.skipIf(asRoot)('a link to an unreadable directory beneath a copy root is left out, and the plan resolves (C2)', async () => {
+  it.skipIf(cannotLock || !SYMLINKS_SUPPORTED)('a link to an unreadable directory beneath a copy root is left out, and the plan resolves (C2)', async () => {
     const { root, skill } = await harnessRepo('node tools/run.js');
     await put(join(root, 'tools', 'run.js'), 'export {};');
     await put(join(root, 'private', 'secret.js'), 'export {};');
@@ -586,7 +588,7 @@ describe('an entry the eval cannot read is left out, never thrown (§6.1 rev 3)'
     });
   });
 
-  it.skipIf(asRoot)('an unreadable directory or file beneath a copy root is left out, and the plan resolves (G1)', async () => {
+  it.skipIf(cannotLock)('an unreadable directory or file beneath a copy root is left out, and the plan resolves (G1)', async () => {
     const { root, skill } = await harnessRepo('node tools/run.js');
     await put(join(root, 'tools', 'run.js'), 'export {};');
     await put(join(root, 'tools', 'helper.js'), 'export {};');
@@ -604,7 +606,7 @@ describe('an entry the eval cannot read is left out, never thrown (§6.1 rev 3)'
     });
   });
 
-  it.skipIf(asRoot)('a named script the eval cannot read is reported missing, and staging does not throw', async () => {
+  it.skipIf(cannotLock)('a named script the eval cannot read is reported missing, and staging does not throw', async () => {
     const { root, skill } = await harnessRepo('node tools/run.js');
     await put(join(root, 'tools', 'run.js'), 'export {};');
     await put(join(root, 'tools', 'helper.js'), 'export {};');
@@ -616,7 +618,7 @@ describe('an entry the eval cannot read is left out, never thrown (§6.1 rev 3)'
     });
   });
 
-  it.skipIf(asRoot)('a named script in a directory the eval may search but not list still travels, alone', async () => {
+  it.skipIf(cannotLock)('a named script in a directory the eval may search but not list still travels, alone', async () => {
     const { root, skill } = await harnessRepo('node tools/run.js');
     await put(join(root, 'tools', 'run.js'), 'export {};');
     await put(join(root, 'tools', 'helper.js'), 'export {};');
@@ -631,7 +633,7 @@ describe('an entry the eval cannot read is left out, never thrown (§6.1 rev 3)'
 });
 
 describe("a harness linked into node_modules is the skill's method (§6.1 rev 3, C1)", () => {
-  it.each([
+  it.skipIf(!SYMLINKS_SUPPORTED).each([
     ['inside the repository', (at: { root: string; prefix: string }) => join(at.root, 'node_modules', '@org', 'harness')],
     ['under a global npm prefix', (at: { root: string; prefix: string }) => join(at.prefix, 'lib', 'node_modules', '@org', 'harness')],
   ])("a .claude/workflows link into node_modules %s is staged, without the package's own node_modules", async (_label, packageDir) => {
@@ -643,7 +645,7 @@ describe("a harness linked into node_modules is the skill's method (§6.1 rev 3,
     await rm(join(root, '.claude', 'workflows'), { recursive: true });
     await link(join(pkg, 'workflows'), join(root, '.claude', 'workflows'));
     const plan = await dependencyPlan(skill, root);
-    expect(plan).toMatchObject({ staged: ['.claude/workflows/engine.js'], missing: [], skipped: [], copies: ['.claude/workflows'] });
+    expect(plan).toMatchObject({ staged: ['.claude/workflows/engine.js'], missing: [], skipped: [], copies: [join('.claude', 'workflows')] });
     const sandbox = await seed(root, skill, plan);
     expect(await readFile(join(sandbox, '.claude', 'workflows', 'engine.js'), 'utf8')).toBe('export const engine = "harness";');
     expect(await readFile(join(sandbox, '.claude', 'workflows', 'helper.js'), 'utf8')).toBe('export const helper = true;');
@@ -652,7 +654,7 @@ describe("a harness linked into node_modules is the skill's method (§6.1 rev 3,
     expect(await linksIn(sandbox)).toEqual([]);
   });
 
-  it('a named script that is itself a link into node_modules is staged as a file, with its own directory', async () => {
+  it.skipIf(!SYMLINKS_SUPPORTED)('a named script that is itself a link into node_modules is staged as a file, with its own directory', async () => {
     const { root, skill } = await harnessRepo('node tools/engine.js');
     await put(join(root, 'node_modules', 'pkg', 'engine.js'), 'export const engine = "package";');
     await put(join(root, 'node_modules', 'pkg', 'other.js'), 'export {};');
@@ -667,7 +669,7 @@ describe("a harness linked into node_modules is the skill's method (§6.1 rev 3,
     expect(await linksIn(sandbox)).toEqual([]);
   });
 
-  it('a named script or workflow directory whose real path is under .git is still refused', async () => {
+  it.skipIf(!SYMLINKS_SUPPORTED)('a named script or workflow directory whose real path is under .git is still refused', async () => {
     const { root, skill } = await harnessRepo('node tools/hook.sh, then Workflow({ scriptPath: ".claude/workflows/pre-push.sh" })');
     await link('../.git/hooks/pre-push.sh', join(root, 'tools', 'hook.sh'));
     await rm(join(root, '.claude', 'workflows'), { recursive: true });
@@ -685,14 +687,14 @@ describe("a harness linked into node_modules is the skill's method (§6.1 rev 3,
 });
 
 describe('every .claude tree is fenced, at any depth and in any spelling (§6.1 rev 3)', () => {
-  it('a skill outside .claude by path, behind a .claude/skills link, stages a .claude script alone (C3)', async () => {
+  it.skipIf(!SYMLINKS_SUPPORTED)('a skill outside .claude by path, behind a .claude/skills link, stages a .claude script alone (C3)', async () => {
     const { root, skill } = await sourceRepo('Run .claude/statusline.js; it reads .claude/handoff.md and .claude/settings.json.');
     await link('../skills-src', join(root, '.claude', 'skills'));
     await put(join(root, '.claude', 'statusline.js'), 'export {};');
     await put(join(root, '.claude', 'handoff.md'), 'handoff notes');
     await put(join(root, '.claude', 'settings.json'), '{"hooks":{}}');
     const plan = await dependencyPlan(skill, root);
-    expect(plan).toMatchObject({ staged: ['.claude/statusline.js'], missing: [], skipped: [], copies: ['.claude/statusline.js'] });
+    expect(plan).toMatchObject({ staged: ['.claude/statusline.js'], missing: [], skipped: [], copies: [join('.claude', 'statusline.js')] });
     const sandbox = await arm(root, 'goal', skill, plan);
     expect(existsSync(join(sandbox, '.claude', 'statusline.js'))).toBe(true);
     for (const path of [['.claude', 'handoff.md'], ['.claude', 'settings.json'], ['.claude', 'skills', 'goal', 'evals']]) {
@@ -701,7 +703,7 @@ describe('every .claude tree is fenced, at any depth and in any spelling (§6.1 
     expect(await linksIn(sandbox)).toEqual([]);
   });
 
-  it('with a symlinked .claude/skills, a script directly under .claude still travels alone', async () => {
+  it.skipIf(!SYMLINKS_SUPPORTED)('with a symlinked .claude/skills, a script directly under .claude still travels alone', async () => {
     const root = await tmp('dependency-linked-skills-');
     const shared = await tmp('dependency-shared-skills-');
     await mkdir(join(root, '.git'), { recursive: true });
@@ -713,7 +715,7 @@ describe('every .claude tree is fenced, at any depth and in any spelling (§6.1 
     await put(join(root, '.claude', 'settings.json'), '{}');
     const skill = join(root, '.claude', 'skills', 'state');
     const plan = await dependencyPlan(skill, root);
-    expect(plan).toMatchObject({ staged: ['.claude/statusline.js'], copies: ['.claude/statusline.js'] });
+    expect(plan).toMatchObject({ staged: ['.claude/statusline.js'], copies: [join('.claude', 'statusline.js')] });
     const sandbox = await seed(root, skill, plan);
     expect(existsSync(join(sandbox, '.claude', 'statusline.js'))).toBe(true);
     for (const path of [['.claude', 'handoff.md'], ['.claude', 'settings.json'], ['.claude', 'skills', 'state', 'evals']]) {
@@ -723,7 +725,7 @@ describe('every .claude tree is fenced, at any depth and in any spelling (§6.1 
 
   // In the two tests below `.claude/skills` links out of `.claude`, so no fence covers `.claude`
   // itself and only its name keeps the script alone: each pins one of the two name tests.
-  it('a script directory whose real path is .claude, reached under another name, travels alone (TQ1, the real-path name)', async () => {
+  it.skipIf(!SYMLINKS_SUPPORTED)('a script directory whose real path is .claude, reached under another name, travels alone (TQ1, the real-path name)', async () => {
     const { root, skill } = await sourceRepo('Run tools/claude/statusline.js first.');
     await link('../skills-src', join(root, '.claude', 'skills'));
     await put(join(root, '.claude', 'statusline.js'), 'export {};');
@@ -731,14 +733,14 @@ describe('every .claude tree is fenced, at any depth and in any spelling (§6.1 
     await put(join(root, '.claude', 'settings.json'), '{"hooks":{}}');
     await link('../.claude', join(root, 'tools', 'claude'));
     const plan = await dependencyPlan(skill, root);
-    expect(plan).toMatchObject({ staged: ['tools/claude/statusline.js'], missing: [], skipped: [], copies: ['tools/claude/statusline.js'] });
+    expect(plan).toMatchObject({ staged: ['tools/claude/statusline.js'], missing: [], skipped: [], copies: [join('tools', 'claude', 'statusline.js')] });
     const sandbox = await arm(root, 'goal', skill, plan);
     expect(await readFile(join(sandbox, 'tools', 'claude', 'statusline.js'), 'utf8')).toBe('export {};');
     for (const name of ['settings.json', 'handoff.md', 'skills']) expect(existsSync(join(sandbox, 'tools', 'claude', name))).toBe(false);
     expect(await linksIn(sandbox)).toEqual([]);
   });
 
-  it('a script under .claude by path, where .claude links to another name, travels alone (TQ1, the path name)', async () => {
+  it.skipIf(!SYMLINKS_SUPPORTED)('a script under .claude by path, where .claude links to another name, travels alone (TQ1, the path name)', async () => {
     const { root, skill } = await sourceRepo('Run .claude/statusline.js first.');
     await put(join(root, 'dotclaude', 'statusline.js'), 'export {};');
     await put(join(root, 'dotclaude', 'handoff.md'), 'handoff notes');
@@ -746,7 +748,7 @@ describe('every .claude tree is fenced, at any depth and in any spelling (§6.1 
     await link('../skills-src', join(root, 'dotclaude', 'skills'));
     await link('dotclaude', join(root, '.claude'));
     const plan = await dependencyPlan(skill, root);
-    expect(plan).toMatchObject({ staged: ['.claude/statusline.js'], missing: [], skipped: [], copies: ['.claude/statusline.js'] });
+    expect(plan).toMatchObject({ staged: ['.claude/statusline.js'], missing: [], skipped: [], copies: [join('.claude', 'statusline.js')] });
     const sandbox = await arm(root, 'goal', skill, plan);
     expect(await readFile(join(sandbox, '.claude', 'statusline.js'), 'utf8')).toBe('export {};');
     for (const name of ['settings.json', 'handoff.md']) expect(existsSync(join(sandbox, '.claude', name))).toBe(false);
@@ -762,7 +764,7 @@ describe('every .claude tree is fenced, at any depth and in any spelling (§6.1 
     await put(join(root, 'packages', 'app', '.claude', 'skills', 'other', 'SKILL.md'), '---\nname: other\ndescription: other\n---\nother');
     await put(join(root, 'packages', 'app', '.claude', 'skills', 'other', 'evals', 'key.yaml'), 'other: key');
     const plan = await dependencyPlan(skill, root);
-    expect(plan).toMatchObject({ staged: ['packages/app/build.sh'], copies: ['packages/app'] });
+    expect(plan).toMatchObject({ staged: ['packages/app/build.sh'], copies: [join('packages', 'app')] });
     const sandbox = await seed(root, skill, plan);
     expect(existsSync(join(sandbox, 'packages', 'app', 'build.sh'))).toBe(true);
     expect(existsSync(join(sandbox, 'packages', 'app', 'lib.js'))).toBe(true);
@@ -820,7 +822,7 @@ describe('script spellings (§6.1 rev 3)', () => {
 });
 
 describe('nothing the answer key reaches, through any link, reaches an arm (§6.1, R3-H1)', () => {
-  it.each([
+  it.skipIf(!SYMLINKS_SUPPORTED).each([
     { label: 'a directory link inside evals/', at: ['evals', 'cases'], target: ['shared', 'cases'], directory: true },
     { label: 'a file link inside evals/', at: ['evals', 'suite.yaml'], target: ['shared', 'suite.yaml'], directory: false },
     { label: 'a directory link inside fixtures/', at: ['fixtures', 'repo'], target: ['shared', 'repo'], directory: true },
@@ -846,7 +848,7 @@ describe('nothing the answer key reaches, through any link, reaches an arm (§6.
     await expectMethodOnly(sandbox, ['shared/run.sh', 'shared/lib.sh']);
   });
 
-  it('a two-hop chain stays out: a link inside a linked directory, and a link to a link', async () => {
+  it.skipIf(!SYMLINKS_SUPPORTED)('a two-hop chain stays out: a link inside a linked directory, and a link to a link', async () => {
     const { root, skill } = await harnessRepo('Run shared/run.sh, then data/run.sh and other/run.sh.');
     await scripts(root, ['shared', 'data', 'other']);
     await put(join(root, 'shared', 'cases', 'case.yaml'), KEY);
@@ -864,7 +866,7 @@ describe('nothing the answer key reaches, through any link, reaches an arm (§6.
     for (const path of [['shared', 'cases'], ['data', 'deep'], ['other', 'key.yaml']]) expect(existsSync(join(sandbox, ...path))).toBe(false);
   });
 
-  it('a loop beneath evals/ and fixtures/ ends, and a link listed after it still stays out', async () => {
+  it.skipIf(!SYMLINKS_SUPPORTED)('a loop beneath evals/ and fixtures/ ends, and a link listed after it still stays out', async () => {
     const { root, skill } = await harnessRepo('Run keys/run.sh, then tools/run.sh.');
     await scripts(root, ['keys', 'tools']);
     await put(join(root, 'keys', 'zz', 'case.yaml'), KEY);
@@ -880,7 +882,7 @@ describe('nothing the answer key reaches, through any link, reaches an arm (§6.
     expect(existsSync(join(sandbox, 'keys', 'zz'))).toBe(false);
   });
 
-  it.skipIf(asRoot)('an unreadable directory or a dangling link inside evals/ is skipped, not thrown, and does not stop the plan', async () => {
+  it.skipIf(cannotLock || !SYMLINKS_SUPPORTED)('an unreadable directory or a dangling link inside evals/ is skipped, not thrown, and does not stop the plan', async () => {
     const { root, skill } = await harnessRepo('Run shared/run.sh, then tools/run.sh.');
     await scripts(root, ['shared', 'tools']);
     await put(join(root, 'shared', 'cases', 'case.yaml'), KEY);
@@ -898,7 +900,7 @@ describe('nothing the answer key reaches, through any link, reaches an arm (§6.
     });
   });
 
-  it('a directory the answer key reaches stays out whole, so not even its names reach the arm', async () => {
+  it.skipIf(!SYMLINKS_SUPPORTED)('a directory the answer key reaches stays out whole, so not even its names reach the arm', async () => {
     const { root, skill } = await harnessRepo('Run shared/run.sh first.');
     await scripts(root, ['shared']);
     await put(join(root, 'shared', 'cases', 'sql-injection-in-login', 'case.yaml'), KEY);
@@ -913,7 +915,7 @@ describe('nothing the answer key reaches, through any link, reaches an arm (§6.
 });
 
 describe('an unfinished identity walk stages nothing (§6.1, R4-H2)', () => {
-  it.skipIf(asRoot)('a directory inside evals/ the eval may search but not list: nothing is staged, and incomplete says why', async () => {
+  it.skipIf(cannotLock || !SYMLINKS_SUPPORTED)('a directory inside evals/ the eval may search but not list: nothing is staged, and incomplete says why', async () => {
     const { root, skill } = await harnessRepo('Run shared/run.sh, then tools/run.sh.');
     await scripts(root, ['shared', 'tools']);
     // The runner can still reach `evals/sealed/zz` by name, and through it all of `shared/`; the walk cannot.
@@ -929,7 +931,7 @@ describe('an unfinished identity walk stages nothing (§6.1, R4-H2)', () => {
     });
   });
 
-  it('past the entry cap nothing is staged, and incomplete says why; under the real cap the same skill stages its method', async () => {
+  it.skipIf(!SYMLINKS_SUPPORTED)('past the entry cap nothing is staged, and incomplete says why; under the real cap the same skill stages its method', async () => {
     expect(ANSWER_KEY_ENTRY_CAP).toBe(200_000);
     const { root, skill } = await harnessRepo('Run shared/run.sh, then tools/run.sh.');
     await scripts(root, ['shared', 'tools']);
@@ -999,7 +1001,7 @@ describe('the answer key and the skill are fenced by file identity, whatever the
     for (const name of ['suite.yaml', 'grade.sh']) expect(existsSync(join(sandbox, 'shared', name))).toBe(false);
   });
 
-  it('withheld names each script a fence refuses: a hard link to a skill file, .git by name and by link, .claude/skills; the siblings still travel', async () => {
+  it.skipIf(!SYMLINKS_SUPPORTED)('withheld names each script a fence refuses: a hard link to a skill file, .git by name and by link, .claude/skills; the siblings still travel', async () => {
     const { root, skill } = await harnessRepo('Run tools/run.sh, tools/copy.sh, tools/hook.sh, .git/hooks/pre-push.sh and .claude/skills/other/tool.sh.');
     await scripts(root, ['tools']);
     // One of the skill's own files by identity: named, and unnamed beside the copied script.
@@ -1026,7 +1028,7 @@ describe('the answer key and the skill are fenced by file identity, whatever the
   });
 
   describe.skipIf(!firmlinked)('through the /System/Volumes/Data firmlink', () => {
-    it.each([
+    it.skipIf(!SYMLINKS_SUPPORTED).each([
       {
         label: 'a directory link inside evals/',
         body: 'Run shared/run.sh first; shared/cases/grade.sh scores it.',
@@ -1079,7 +1081,7 @@ describe('the answer key and the skill are fenced by file identity, whatever the
       await expectMethodOnly(sandbox, ['shared/run.sh', 'shared/lib.sh']);
     });
 
-    it('a skill folder and cwd spelled through the firmlink, with plain links to the key and to a skill file', async () => {
+    it.skipIf(!SYMLINKS_SUPPORTED)('a skill folder and cwd spelled through the firmlink, with plain links to the key and to a skill file', async () => {
       // Outside `.claude/skills`, so only the skill's identity can refuse its file.
       const { root, skill } = await sourceRepo('Run shared/run.sh first; tools/own.sh helps.');
       await put(join(skill, 'run.sh'), `echo ${OWN}`);
@@ -1094,7 +1096,7 @@ describe('the answer key and the skill are fenced by file identity, whatever the
       expect(existsSync(join(sandbox, 'shared', 'cases'))).toBe(false);
     });
 
-    it('a copy root that holds the skill folder under its plain spelling leaves the skill folder out', async () => {
+    it.skipIf(!SYMLINKS_SUPPORTED)('a copy root that holds the skill folder under its plain spelling leaves the skill folder out', async () => {
       const { root, skill } = await sourceRepo('Run tools/build.sh first.');
       await put(join(skill, 'run.sh'), `echo ${OWN}`);
       await put(join(root, 'skills-src', 'build.sh'), 'echo build');
@@ -1110,7 +1112,7 @@ describe('the answer key and the skill are fenced by file identity, whatever the
 });
 
 describe('staging is linear in what it visits (§6.1, R4-M1)', () => {
-  it('2,000 fixture links into a 2,000-file copy root plan and stage in well under 5 s, and none of the linked files travels', async () => {
+  it.skipIf(!SYMLINKS_SUPPORTED)('2,000 fixture links into a 2,000-file copy root plan and stage in well under 5 s, and none of the linked files travels', async () => {
     const { root, skill } = await harnessRepo('Run src/run.sh first.');
     await scripts(root, ['src']);
     for (let dir = 0; dir < 20; dir += 1) {
