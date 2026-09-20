@@ -1,5 +1,5 @@
 /**
- * Eval spec §4.3 / §7.1 / §7.3: three-arm execution, ported from skilldeck `evals/execution.py`
+ * Eval spec §4.3 / §7.1 / §7.3: multi-arm execution, ported from skilldeck `evals/execution.py`
  * (42084dc) with the spec's adaptations — full-tree arms (the caller materializes candidate and
  * incumbent directories; there is no SKILL.md-only swap), per-arm samples for arm scores and
  * efficiency, the judge escalation chain, and the contamination refusal.
@@ -7,6 +7,7 @@
  *   baseline  — agent with no skill staged          (does the skill help at all?)
  *   candidate — the version under test
  *   incumbent — the last receipted version's tree   (did this edit help?)
+ *   rival     — a DIFFERENT skill's tree             (head-to-head only; IE6 §2)
  *
  * An AgentRunError or timeout never aborts the matrix: the arm's row is scored against an empty
  * transcript and `execution_status` reflects any unscored holes.
@@ -24,8 +25,15 @@ import { DEFAULT_ESCALATION_MODEL, judgePair } from './judge.js';
 import type { Result } from '../result.js';
 import { failure, success } from '../result.js';
 
-export const ARMS = ['baseline', 'candidate', 'incumbent'] as const;
+export const ARMS = ['baseline', 'candidate', 'incumbent', 'rival'] as const;
 export type Arm = (typeof ARMS)[number];
+
+/**
+ * §2: identity and tree travel together. One scalar `skillName` could not express the
+ * contamination invariant once two DIFFERENT skills share a matrix — the staging path and
+ * the assertion would read the same name for both arms. `null` is the baseline arm.
+ */
+export type ArmSpec = { name: string; dir: string } | null;
 
 const BUCKETS = ['explicit', 'implicit', 'contextual', 'negative', 'adversarial'] as const;
 
@@ -96,9 +104,8 @@ export async function missingRequirements(requires: readonly string[]): Promise<
 export interface SeedOptions {
   /** Directory the case file lives in — fixture paths resolve relative to it (§5.1). */
   caseDir: string;
-  skillName: string;
-  /** Full skill tree to stage, or null for the baseline arm. */
-  skillDir: string | null;
+  /** The arm's identity and tree, or null for the baseline arm (§2). */
+  arm: ArmSpec;
   scratch: string;
 }
 
@@ -122,10 +129,10 @@ export async function seedSandbox(evalCase: EvalCase, options: SeedOptions): Pro
     if (rel.endsWith('.sh')) await chmod(target, 0o755);
   }
   if (evalCase.setup !== undefined) await runSetup(evalCase, sandbox);
-  if (options.skillDir !== null) {
-    const staged = join(sandbox, '.claude', 'skills', options.skillName);
+  if (options.arm !== null) {
+    const staged = join(sandbox, '.claude', 'skills', options.arm.name);
     await mkdir(dirname(staged), { recursive: true });
-    const root = resolve(options.skillDir);
+    const root = resolve(options.arm.dir);
     await cp(root, staged, {
       recursive: true,
       filter: (source) => {
@@ -201,10 +208,13 @@ export interface RunCaseDeps {
 
 export interface RunCaseOptions {
   k: number;
-  skillName: string;
   caseDir: string;
-  /** Materialized arm trees; omit `incumbent` when none exists or it equals candidate (§7.1). */
-  arms: { candidate: string; incumbent?: string };
+  /**
+   * §2: the arm table. `baseline` (null) and `candidate` are always present; `incumbent` is
+   * omitted when none exists or it equals candidate (§7.1), and `rival` only in head-to-head.
+   * A key that is absent is an arm that does not run; a key whose value is null is the baseline.
+   */
+  arms: Partial<Record<Arm, ArmSpec>>;
   scratch: string;
   /** Transcripts land here as `<case>.<arm>.<rep>.jsonl` (§4.2). */
   transcriptDir: string;
@@ -222,8 +232,17 @@ export async function runCase(deps: RunCaseDeps, evalCase: EvalCase, options: Ru
     log(`  ${evalCase.name}: SKIPPED (environment) — missing ${missing.join(', ')}`);
     return { rows: [], arms: [], skipped: missing };
   }
-  const armDirs: Array<[Arm, string | null]> = [['baseline', null], ['candidate', options.arms.candidate]];
-  if (options.arms.incumbent !== undefined) armDirs.push(['incumbent', options.arms.incumbent]);
+  // ARMS order, so the matrix runs baseline → candidate → incumbent → rival deterministically.
+  const armSpecs: Array<[Arm, ArmSpec]> = ARMS.filter((arm) => Object.hasOwn(options.arms, arm))
+    .map((arm) => [arm, options.arms[arm] ?? null]);
+  const candidateSpec = options.arms.candidate ?? null;
+  if (candidateSpec === null) throw new Error('runCase requires a candidate arm with a name and tree (§2)');
+  // §2: `baseline: null` is always present. A caller that omits it would silently run no
+  // baseline arm and lose `candidate-vs-baseline`, the headline comparison — so it is loud.
+  if (!Object.hasOwn(options.arms, 'baseline')) throw new Error("runCase requires an explicit `baseline: null` arm (§2)");
+  // §2: every skill under evaluation in THIS run. One name in a single-skill run, so the
+  // assertion below reduces exactly to the rev-6 membership check.
+  const evaluated = new Set(armSpecs.map(([, spec]) => spec).filter((spec): spec is NonNullable<ArmSpec> => spec !== null).map((spec) => spec.name));
 
   const rows: ComparisonRow[] = [];
   const samples: ArmSample[] = [];
@@ -231,7 +250,7 @@ export async function runCase(deps: RunCaseDeps, evalCase: EvalCase, options: Ru
   for (let rep = 0; rep < options.k; rep++) {
     const transcripts = new Map<Arm, Transcript | null>();
     const checksByArm = new Map<Arm, CheckResult[]>();
-    for (const [arm, skillDir] of armDirs) {
+    for (const [arm, spec] of armSpecs) {
       // Rev 7: one retry on AgentRunError, in a FRESH sandbox (a timed-out attempt leaves side
       // effects) — an infra flake scored against the empty transcript is a spurious loss.
       let sandbox = '';
@@ -239,7 +258,7 @@ export async function runCase(deps: RunCaseDeps, evalCase: EvalCase, options: Ru
       let retried = false;
       const transcriptPath = join(options.transcriptDir, `${evalCase.name}.${arm}.${rep}.jsonl`);
       for (let attempt = 0; attempt < 2 && transcript === null; attempt++) {
-        sandbox = await seedSandbox(evalCase, { caseDir: options.caseDir, skillName: options.skillName, skillDir, scratch: options.scratch });
+        sandbox = await seedSandbox(evalCase, { caseDir: options.caseDir, arm: spec, scratch: options.scratch });
         try {
           transcript = await deps.agent.runAgent(evalCase.task, sandbox, { transcriptPath, model: deps.model ?? DEFAULT_MODEL });
         } catch (error) {
@@ -259,15 +278,20 @@ export async function runCase(deps: RunCaseDeps, evalCase: EvalCase, options: Ru
       // signal is membership of the skill under eval, never list equality. Everything else in the
       // list is CLI-provided; user/global skills are excluded by construction (--setting-sources
       // project), measured on CC 2.1.236 (VE1).
-      const staged = skillDir !== null;
       // §17.7 targets a transcript whose init event omits `skills`. A fully failed arm
       // (transcript null) stays on the rev-7 scored-empty path and greys the verdict instead.
-      if (transcript !== null && staged && skillList === null) {
+      if (transcript !== null && spec !== null && skillList === null) {
         throw new ContaminationError(`arm '${arm}' did not report its resolved skill list; refusing the run (§7.3)`);
       }
       if (skillList !== null) {
-        if (skillList.includes(options.skillName) !== staged) {
-          throw new ContaminationError(`arm '${arm}' resolved skills [${skillList.join(', ')}] — '${options.skillName}' ${staged ? 'is missing from an arm that staged it' : 'leaked into an arm without it staged'}; refusing the run (§7.3)`);
+        // §2: per-arm, over every skill under evaluation. This arm must contain exactly the
+        // one it staged and none of the others — so a rival tree leaking into the candidate's
+        // arm refuses the run instead of scoring clean.
+        for (const name of evaluated) {
+          const expected = spec !== null && spec.name === name;
+          if (skillList.includes(name) !== expected) {
+            throw new ContaminationError(`arm '${arm}' resolved skills [${skillList.join(', ')}] — '${name}' ${expected ? 'is missing from an arm that staged it' : 'leaked into an arm that did not stage it'}; refusing the run (§7.3)`);
+          }
         }
       }
       const checks = runChecks(evalCase.checks, transcript ?? emptyTranscript, sandbox);
@@ -277,11 +301,11 @@ export async function runCase(deps: RunCaseDeps, evalCase: EvalCase, options: Ru
       samples.push({ kind: 'arm', case: evalCase.name, rep, arm, failed: transcript === null, retried, fraction: fractionPassed(checks), ...efficiency, skill_list: skillList, model_id: transcript?.modelId() ?? null });
     }
 
-    for (const opponent of ['baseline', 'incumbent'] as const) {
-      if (!armDirs.some(([arm]) => arm === opponent)) continue;
+    for (const opponent of ['baseline', 'incumbent', 'rival'] as const) {
+      if (!armSpecs.some(([arm]) => arm === opponent)) continue;
       const outcome = await decide(deps, evalCase, transcripts.get('candidate') ?? null, transcripts.get(opponent) ?? null, checksByArm.get('candidate') ?? [], checksByArm.get(opponent) ?? []);
       rows.push({
-        skill: options.skillName, kind: 'execution', case: evalCase.name, rep,
+        skill: candidateSpec.name, kind: 'execution', case: evalCase.name, rep,
         comparison: `candidate-vs-${opponent}`,
         outcome: outcome.result, decided_by: outcome.decidedBy, reason: outcome.reason,
         ...(outcome.swapped === undefined ? {} : { swapped: outcome.swapped }),

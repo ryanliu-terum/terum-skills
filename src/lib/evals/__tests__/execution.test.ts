@@ -46,7 +46,7 @@ describe('environment requirements (§7.1 rev 8)', () => {
     const { rows, arms, skipped } = await runCase(
       { agent: untouchable, rng: () => 0.9 },
       caseOf({ requires: ['definitely-not-a-real-binary-xq7'] }),
-      { k: 2, skillName: 's', caseDir: scratch, arms: { candidate: scratch }, scratch, transcriptDir: scratch },
+      { k: 2, caseDir: scratch, arms: { baseline: null, candidate: { name: 's', dir: scratch } }, scratch, transcriptDir: scratch },
     );
     expect(rows).toEqual([]);
     expect(arms).toEqual([]);
@@ -71,7 +71,7 @@ describe('sandbox seeding (§4.3, strictly in order)', () => {
       files: { 'src/app.ts': 'code', 'scripts/run.sh': 'echo hi' },
       setup: 'test -f seed.txt && touch setup-ran.marker',
     });
-    const sandbox = await seedSandbox(evalCase, { caseDir, skillName: 'deploy-preflight', skillDir, scratch });
+    const sandbox = await seedSandbox(evalCase, { caseDir, arm: { name: 'deploy-preflight', dir: skillDir }, scratch });
 
     expect(existsSync(join(sandbox, 'seed.txt'))).toBe(true);
     expect(existsSync(join(sandbox, 'src', 'app.ts'))).toBe(true);
@@ -85,12 +85,12 @@ describe('sandbox seeding (§4.3, strictly in order)', () => {
   });
 
   it('baseline stages nothing; unsafe paths and failing setup abort the case', async () => {
-    const sandbox = await seedSandbox(caseOf(), { caseDir: scratch, skillName: 's', skillDir: null, scratch });
+    const sandbox = await seedSandbox(caseOf(), { caseDir: scratch, arm: null, scratch });
     expect(existsSync(join(sandbox, '.claude'))).toBe(false);
-    await expect(seedSandbox(caseOf({ files: { '../evil.txt': 'x' } }), { caseDir: scratch, skillName: 's', skillDir: null, scratch })).rejects.toThrow('unsafe file path');
-    await expect(seedSandbox(caseOf({ files: { '/etc/evil': 'x' } }), { caseDir: scratch, skillName: 's', skillDir: null, scratch })).rejects.toThrow('unsafe file path');
-    await expect(seedSandbox(caseOf({ setup: 'exit 3' }), { caseDir: scratch, skillName: 's', skillDir: null, scratch })).rejects.toThrow('setup failed');
-    await expect(seedSandbox(caseOf({ fixture: 'no-such-dir' }), { caseDir: scratch, skillName: 's', skillDir: null, scratch })).rejects.toThrow('fixture dir not found');
+    await expect(seedSandbox(caseOf({ files: { '../evil.txt': 'x' } }), { caseDir: scratch, arm: null, scratch })).rejects.toThrow('unsafe file path');
+    await expect(seedSandbox(caseOf({ files: { '/etc/evil': 'x' } }), { caseDir: scratch, arm: null, scratch })).rejects.toThrow('unsafe file path');
+    await expect(seedSandbox(caseOf({ setup: 'exit 3' }), { caseDir: scratch, arm: null, scratch })).rejects.toThrow('setup failed');
+    await expect(seedSandbox(caseOf({ fixture: 'no-such-dir' }), { caseDir: scratch, arm: null, scratch })).rejects.toThrow('fixture dir not found');
   });
 });
 
@@ -153,7 +153,7 @@ describe('the three-arm matrix (§7.1 / §7.3)', () => {
     const { rows, arms } = await runCase(
       { agent: armAwareAgent('s'), rng: () => 0.9 },
       evalCase,
-      { k: 2, skillName: 's', caseDir: scratch, arms: { candidate: skillDir }, scratch, transcriptDir: scratch },
+      { k: 2, caseDir: scratch, arms: { baseline: null, candidate: { name: 's', dir: skillDir } }, scratch, transcriptDir: scratch },
     );
     expect(rows).toHaveLength(2);
     expect(rows.every((row) => row.comparison === 'candidate-vs-baseline' && row.outcome === 'win' && row.decided_by === 'checks')).toBe(true);
@@ -167,7 +167,7 @@ describe('the three-arm matrix (§7.1 / §7.3)', () => {
     const { rows } = await runCase(
       { agent: armAwareAgent('s'), rng: () => 0.9 },
       caseOf({ checks: [{ transcript_mentions: 'PREFLIGHT' }] }),
-      { k: 1, skillName: 's', caseDir: scratch, arms: { candidate: skillDir, incumbent: skillDir }, scratch, transcriptDir: scratch },
+      { k: 1, caseDir: scratch, arms: { baseline: null, candidate: { name: 's', dir: skillDir }, incumbent: { name: 's', dir: skillDir } }, scratch, transcriptDir: scratch },
     );
     expect(rows.map((row) => row.comparison).sort()).toEqual(['candidate-vs-baseline', 'candidate-vs-incumbent']);
   });
@@ -183,7 +183,7 @@ describe('the three-arm matrix (§7.1 / §7.3)', () => {
     const { rows, arms } = await runCase(
       { agent: flaky, rng: () => 0.9 },
       caseOf({ checks: [{ transcript_mentions: 'PREFLIGHT' }] }),
-      { k: 1, skillName: 's', caseDir: scratch, arms: { candidate: skillDir }, scratch, transcriptDir: scratch },
+      { k: 1, caseDir: scratch, arms: { baseline: null, candidate: { name: 's', dir: skillDir } }, scratch, transcriptDir: scratch },
     );
     expect(rows[0]).toMatchObject({ outcome: 'win', decided_by: 'opponent-run-failed' });
     expect(arms.find((sample) => sample.arm === 'baseline')).toMatchObject({ failed: true, retried: true, fraction: 0, turns: null });
@@ -210,7 +210,7 @@ describe('the three-arm matrix (§7.1 / §7.3)', () => {
     const { rows, arms } = await runCase(
       { agent: flakyOnce, rng: () => 0.9 },
       caseOf({ checks: [{ transcript_mentions: 'PREFLIGHT' }] }),
-      { k: 1, skillName: 's', caseDir: scratch, arms: { candidate: skillDir }, scratch, transcriptDir: scratch },
+      { k: 1, caseDir: scratch, arms: { baseline: null, candidate: { name: 's', dir: skillDir } }, scratch, transcriptDir: scratch },
     );
     expect(rows[0]).toMatchObject({ outcome: 'win', decided_by: 'checks' });
     expect(arms.find((sample) => sample.arm === 'baseline')).toMatchObject({ failed: false, retried: true, model_id: 'claude-sonnet-5-20260115' });
@@ -231,7 +231,7 @@ describe('the three-arm matrix (§7.1 / §7.3)', () => {
     const { arms } = await runCase(
       { agent: candidateDead, rng: () => 0.9 },
       caseOf({ checks: [{ transcript_mentions: 'PREFLIGHT' }] }),
-      { k: 1, skillName: 's', caseDir: scratch, arms: { candidate: skillDir }, scratch, transcriptDir: scratch },
+      { k: 1, caseDir: scratch, arms: { baseline: null, candidate: { name: 's', dir: skillDir } }, scratch, transcriptDir: scratch },
     );
     expect(arms.find((sample) => sample.arm === 'candidate')).toMatchObject({ failed: true, retried: true, fraction: 0 });
   });
@@ -252,7 +252,7 @@ describe('the three-arm matrix (§7.1 / §7.3)', () => {
     const { rows } = await runCase(
       { agent: initAgent((withSkill) => (withSkill ? [...BUILTINS, 's'] : BUILTINS)), rng: () => 0.9 },
       caseOf({ checks: [{ transcript_mentions: 'PREFLIGHT' }] }),
-      { k: 1, skillName: 's', caseDir: scratch, arms: { candidate: skillDir }, scratch, transcriptDir: scratch },
+      { k: 1, caseDir: scratch, arms: { baseline: null, candidate: { name: 's', dir: skillDir } }, scratch, transcriptDir: scratch },
     );
     expect(rows).toHaveLength(1);
   });
@@ -262,7 +262,7 @@ describe('the three-arm matrix (§7.1 / §7.3)', () => {
     await expect(runCase(
       { agent: initAgent(() => BUILTINS), rng: () => 0.9 },
       caseOf(),
-      { k: 1, skillName: 's', caseDir: scratch, arms: { candidate: skillDir }, scratch, transcriptDir: scratch },
+      { k: 1, caseDir: scratch, arms: { baseline: null, candidate: { name: 's', dir: skillDir } }, scratch, transcriptDir: scratch },
     )).rejects.toThrow(ContaminationError);
   });
 
@@ -271,7 +271,7 @@ describe('the three-arm matrix (§7.1 / §7.3)', () => {
     const missingList: AgentApi = { runAgent: () => Promise.resolve(transcriptWith('ok')), askJson: () => Promise.resolve({}) };
     await expect(runCase(
       { agent: missingList, rng: () => 0.9 }, caseOf(),
-      { k: 1, skillName: 's', caseDir: scratch, arms: { candidate: skillDir }, scratch, transcriptDir: scratch },
+      { k: 1, caseDir: scratch, arms: { baseline: null, candidate: { name: 's', dir: skillDir } }, scratch, transcriptDir: scratch },
     )).rejects.toThrow(ContaminationError);
   });
 
@@ -279,7 +279,7 @@ describe('the three-arm matrix (§7.1 / §7.3)', () => {
     const skillDir = await skillFixture();
     const output = await runCase(
       { agent: armAwareAgent('s'), rng: () => 0.9 }, caseOf({ setup: 'exit 3' }),
-      { k: 1, skillName: 's', caseDir: scratch, arms: { candidate: skillDir }, scratch, transcriptDir: scratch },
+      { k: 1, caseDir: scratch, arms: { baseline: null, candidate: { name: 's', dir: skillDir } }, scratch, transcriptDir: scratch },
     );
     expect(output).toEqual({ rows: [], arms: [] });
   });
@@ -289,7 +289,92 @@ describe('the three-arm matrix (§7.1 / §7.3)', () => {
     await expect(runCase(
       { agent: initAgent(() => [...BUILTINS, 's']), rng: () => 0.9 },
       caseOf(),
-      { k: 1, skillName: 's', caseDir: scratch, arms: { candidate: skillDir }, scratch, transcriptDir: scratch },
+      { k: 1, caseDir: scratch, arms: { baseline: null, candidate: { name: 's', dir: skillDir } }, scratch, transcriptDir: scratch },
     )).rejects.toThrow(ContaminationError);
+  });
+});
+
+describe('two-skill arm identity (§2, head-to-head)', () => {
+  const BUILTINS = ['deep-research', 'dataviz', 'code-review'];
+
+  const skillAt = async (name: string): Promise<string> => {
+    const dir = join(scratch, name);
+    await mkdir(dir, { recursive: true });
+    await writeFile(join(dir, 'SKILL.md'), `# ${name}`);
+    return dir;
+  };
+
+  /** Reports whatever `listFor` says for the arm identified by what is actually staged. */
+  const twoSkillAgent = (listFor: (staged: string | null) => string[]): AgentApi => ({
+    runAgent: (_task, cwd) => {
+      const staged = ['alpha-linter', 'beta-linter'].find((name) => existsSync(join(cwd, '.claude', 'skills', name))) ?? null;
+      return Promise.resolve(transcriptWith('ran PREFLIGHT', [{ type: 'system', subtype: 'init', skills: listFor(staged) }]));
+    },
+    askJson: () => Promise.resolve({}),
+  });
+
+  const armsOf = (a: string, b: string) => ({
+    baseline: null,
+    candidate: { name: 'alpha-linter', dir: a },
+    rival: { name: 'beta-linter', dir: b },
+  });
+
+  const honest = (staged: string | null): string[] => (staged === null ? BUILTINS : [...BUILTINS, staged]);
+
+  it('runs three arms and emits candidate-vs-baseline and candidate-vs-rival, never rival-vs-baseline', async () => {
+    const [a, b] = [await skillAt('alpha-linter'), await skillAt('beta-linter')];
+    const { rows, arms } = await runCase(
+      { agent: twoSkillAgent(honest), rng: () => 0.9 },
+      caseOf({ checks: [{ transcript_mentions: 'PREFLIGHT' }] }),
+      { k: 2, caseDir: scratch, arms: armsOf(a, b), scratch, transcriptDir: scratch },
+    );
+    expect(new Set(arms.map((sample) => sample.arm))).toEqual(new Set(['baseline', 'candidate', 'rival']));
+    expect(new Set(rows.map((row) => row.comparison))).toEqual(new Set(['candidate-vs-baseline', 'candidate-vs-rival']));
+    expect(rows).toHaveLength(4); // k=2 × 2 opponents
+    expect(rows.every((row) => row.skill === 'alpha-linter')).toBe(true);
+  });
+
+  it("refuses when the rival's tree leaks into the candidate's arm", async () => {
+    const [a, b] = [await skillAt('alpha-linter'), await skillAt('beta-linter')];
+    await expect(runCase(
+      { agent: twoSkillAgent((staged) => (staged === 'alpha-linter' ? [...BUILTINS, 'alpha-linter', 'beta-linter'] : honest(staged))), rng: () => 0.9 },
+      caseOf(),
+      { k: 1, caseDir: scratch, arms: armsOf(a, b), scratch, transcriptDir: scratch },
+    )).rejects.toThrow(/'beta-linter' leaked into an arm that did not stage it/);
+  });
+
+  it("refuses when the candidate's tree leaks into the rival's arm", async () => {
+    const [a, b] = [await skillAt('alpha-linter'), await skillAt('beta-linter')];
+    await expect(runCase(
+      { agent: twoSkillAgent((staged) => (staged === 'beta-linter' ? [...BUILTINS, 'beta-linter', 'alpha-linter'] : honest(staged))), rng: () => 0.9 },
+      caseOf(),
+      { k: 1, caseDir: scratch, arms: armsOf(a, b), scratch, transcriptDir: scratch },
+    )).rejects.toThrow(/'alpha-linter' leaked into an arm that did not stage it/);
+  });
+
+  it('refuses when either skill leaks into the baseline arm', async () => {
+    const [a, b] = [await skillAt('alpha-linter'), await skillAt('beta-linter')];
+    await expect(runCase(
+      { agent: twoSkillAgent((staged) => (staged === null ? [...BUILTINS, 'beta-linter'] : honest(staged))), rng: () => 0.9 },
+      caseOf(),
+      { k: 1, caseDir: scratch, arms: armsOf(a, b), scratch, transcriptDir: scratch },
+    )).rejects.toThrow(ContaminationError);
+  });
+
+  it("refuses when an arm is missing the skill it staged", async () => {
+    const [a, b] = [await skillAt('alpha-linter'), await skillAt('beta-linter')];
+    await expect(runCase(
+      { agent: twoSkillAgent((staged) => (staged === 'beta-linter' ? BUILTINS : honest(staged))), rng: () => 0.9 },
+      caseOf(),
+      { k: 1, caseDir: scratch, arms: armsOf(a, b), scratch, transcriptDir: scratch },
+    )).rejects.toThrow(/'beta-linter' is missing from an arm that staged it/);
+  });
+
+  it('requires an explicit baseline arm — omitting it would silently drop the headline comparison', async () => {
+    const [a, b] = [await skillAt('alpha-linter'), await skillAt('beta-linter')];
+    await expect(runCase(
+      { agent: twoSkillAgent(honest), rng: () => 0.9 }, caseOf(),
+      { k: 1, caseDir: scratch, arms: { candidate: { name: 'alpha-linter', dir: a }, rival: { name: 'beta-linter', dir: b } }, scratch, transcriptDir: scratch },
+    )).rejects.toThrow(/explicit `baseline: null` arm/);
   });
 });

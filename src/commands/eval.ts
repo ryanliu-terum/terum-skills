@@ -186,7 +186,7 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
         const output = await runCase(
           { agent: args.agent ?? systemAgent, rng, model, judgeModel: args.judgeModel ?? model, log: (line) => io.print(line) },
           parsed.value,
-          { k, skillName: record.name, caseDir: casesDir, arms: { candidate: candidateDir, ...(incumbent === undefined ? {} : { incumbent }) }, scratch, transcriptDir },
+          { k, caseDir: casesDir, arms: { baseline: null, candidate: { name: record.name, dir: candidateDir }, ...(incumbent === undefined ? {} : { incumbent: { name: record.name, dir: incumbent } }) }, scratch, transcriptDir },
         );
         rows.push(...output.rows); arms.push(...output.arms);
         if (output.skipped) environmentSkips[name] = output.skipped;
