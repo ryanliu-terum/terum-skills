@@ -66,9 +66,11 @@ hold for code written here, and this file wins over any comment or doc that cont
   (`src/lib/__tests__/fixtures.ts`, a probe that needs Developer Mode or an elevated shell); POSIX
   mode assertions (0600/0700, executable bits) are guarded by `process.platform !== 'win32'`; and
   the eval engine's setup hooks, requirement probes and `command_succeeds` checks run under
-  `/bin/sh`, which Windows lacks, so those cases skip there. A skip is not a pass: report the
-  skipped count next to the passed count, and never add a skip to hide a failure that a Linux
-  run would show.
+  `/bin/sh`, which Windows lacks, so those cases skip there; tests that make an entry unreadable
+  with `chmod` skip on win32 too, since Windows ignores POSIX mode bits. Repo-relative paths a
+  plan reports (`copies`, `entries[].to`) come from `path.relative`, so expectations spell them
+  with `join(...)`, never a literal `/`. A skip is not a pass: report the skipped count next to
+  the passed count, and never add a skip to hide a failure that a Linux run would show.
 - Use absolute paths in shell commands; do not `cd`.
 
 ## Things that look wrong and are not

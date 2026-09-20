@@ -268,7 +268,7 @@ describe('mode-2 task rules (eval-gen rev 2 §4; live spec-readable run, 2026-09
     await expect(generate({ ...at(), agent: agent([generated]) })).resolves.toMatchObject({ ok: true });
   });
 
-  it("refuses a generated suite whose task opens with the skill's own slash command", async () => {
+  it.skipIf(!POSIX_SHELL)("refuses a generated suite whose task opens with the skill's own slash command", async () => {
     const prompts: string[] = [];
     const selfCall = { suite: { ...validSuite.suite, task: '/deploy review the uncommitted diff' } };
     const result = await generate({ ...at(), agent: agent([selfCall, validSuite], prompts) });
@@ -286,7 +286,7 @@ describe('generated YAML round-trips byte for byte', () => {
   const aDiff = `diff --git a/src/a.js b/src/a.js\n--- a/src/a.js\n+++ b/src/a.js\n@@ -1,4 +1,4 @@\n ${long}\n   \n \n-const alpha = 1;\n+const alpha = -1;\n`;
   const restDiff = validSuite.suite.plants_diff.slice(validSuite.suite.plants_diff.indexOf('diff --git a/src/b.js'));
 
-  it('a generated suite keeps plants_diff and its files exactly', async () => {
+  it.skipIf(!POSIX_SHELL)('a generated suite keeps plants_diff and its files exactly', async () => {
     const plantsDiff = aDiff + restDiff;
     const suite = { suite: { ...validSuite.suite, files: { ...validSuite.suite.files, 'src/a.js': aSource }, plants_diff: plantsDiff } };
     const prompts: string[] = [];
@@ -310,7 +310,7 @@ describe('generated YAML round-trips byte for byte', () => {
     if (loaded.ok) expect(loaded.value.files['changes.diff']).toBe(aDiff);
   });
 
-  it('a generated case whose setup applies its seeded diff passes the dry run on the first ask', async () => {
+  it.skipIf(!POSIX_SHELL)('a generated case whose setup applies its seeded diff passes the dry run on the first ask', async () => {
     // The dry run seeds what validateCases re-parsed: folded bytes would make `git apply` fail and
     // re-ask the model for a case that was valid all along.
     const prompts: string[] = [];
