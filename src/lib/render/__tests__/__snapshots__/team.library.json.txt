@@ -259,7 +259,8 @@
             "frontmatter": "---\nname: [\ndescription: broken\n---",
             "body": "",
             "category": null,
-            "characters": 36
+            "characters": 36,
+            "enabled": true
           },
           {
             "skillId": null,
@@ -271,7 +272,8 @@
             "frontmatter": null,
             "body": null,
             "category": null,
-            "characters": null
+            "characters": null,
+            "enabled": true
           }
         ],
         "problems": []
