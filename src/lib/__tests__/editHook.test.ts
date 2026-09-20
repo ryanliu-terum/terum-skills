@@ -65,8 +65,10 @@ describe('the edit hook script', () => {
     expect(context).toContain('You edited mine');
     expect(context).toContain('teammates see the published version until a new one is published');
     expect(context).toContain('npx -y terum-skills@latest publish mine');
-    // Publish needs a terminal (the manual's Table B); the hook must not invite the agent to run it.
-    expect(context).toContain('needs a real terminal');
+    // Publish runs in the session (the manual's Table A); the hook invites the agent to run it, and names
+    // the one question that would send it to a terminal instead.
+    expect(context).toContain('here through Bash once the user agrees');
+    expect(context).not.toContain('prepare the command for the user');
   });
 
   it('tells an installed copy apart, with the version and team it came from', async () => {

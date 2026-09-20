@@ -901,7 +901,7 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "file": ".claude/skills/terum-skills/SKILL.md",
     "line": 24,
     "policy": "prose",
-    "pattern": "publish hand-off it names. A skill edited and never published is a skill only that machine has."
+    "pattern": "the `publish` it names here. A skill edited and never published is a skill only that machine has."
   },
   {
     "file": ".claude/skills/terum-skills/SKILL.md",
@@ -1129,7 +1129,7 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "file": ".claude/skills/terum-skills/SKILL.md",
     "line": 117,
     "policy": "fixed",
-    "pattern": "| `publish <ref> [--project <p>] [--category <c>]` | none; confirm the local skill and team with the user | `npx -y terum-skills@latest publish <ref> --project <p> --category <c>` — omit optional flags the user has not chosen |"
+    "pattern": "| `publish <ref> [--project <p>] [--category <c>]` | confirm the local skill, the team when more than one is configured, and any `--project` or `--category` the user chose; say that it rewrites the folder's managed frontmatter and writes an immutable version to team main. Omit optional flags the user has not chosen | show stdout, including the version line and any category disclosure. Its only question is a confirm when the latest local eval of these exact bytes failed; without a TTY that refuses before the local write-back or the team write, so quote the refusal and hand the same command to a terminal |"
   },
   {
     "file": ".claude/skills/terum-skills/SKILL.md",
