@@ -19,7 +19,7 @@ import { assessHygiene, HygieneRefused, reportHygieneWarnings } from '../lib/eva
 import { dependencyPlan } from '../lib/evals/dependencies.js';
 import { versionFolderName, versionLabel, versionsInTree } from '../lib/versions.js';
 import { localReceiptsFor } from '../lib/evals/receipt-store.js';
-import { recordProfileEntry } from '../lib/profile-entry.js';
+import { addProfileEntry, recordProfileEntry, writePersonFile } from '../lib/profile-entry.js';
 import { askCategory, resolveCategory, suggestCategory, teamCategory, type CategorySuggestion } from '../lib/categorize.js';
 import type { AgentApi } from '../lib/evals/agent.js';
 
@@ -476,6 +476,102 @@ export async function run(args: PublishArgs, io: Prompter): Promise<Result<Publi
  * project is an opt-in second list. A named project that the team does not have is refused here,
  * before anything is written — locally or in the clone.
  */
+
+export interface PublishManyArgs extends Omit<PublishArgs, 'ref'> { refs: readonly string[] }
+
+/**
+ * Publish several skills in one run: one refresh, every question asked once, and ONE push.
+ *
+ * The desktop publishes a selection by invoking this verb once per skill - a whole process each,
+ * with its own fetch and its own push, measured at ~2s of network apiece. Nothing about a version
+ * folder needs that: the folders are independent, and the clone's writer lock is held once here
+ * instead of contended N times.
+ *
+ * `run` is untouched and still the single-skill path: one skill does not need a batch, and D77's
+ * separate profile write - whose failure must never be reported as a failed publish - is worth its
+ * second round trip when there is only one of them.
+ */
+export async function runMany(args: PublishManyArgs, io: Prompter): Promise<Result<PublishResult[]>> {
+  const abort = new AbortController();
+  try {
+    const categoryFlag = args.category?.trim();
+    if (args.category !== undefined && !categoryFlag) throw new Error('--category must be a non-empty name.');
+    if (!args.refs.length) throw new Error('Give at least one skill to publish.');
+    const store = args.config ?? createConfigStore();
+    const runner = args.runner ?? systemRunner;
+    const config = await store.read();
+    const team = await teamForReference(config, args.team, undefined, args.refs[0], args.form);
+    const binding = config.teams[team]!;
+    if (!binding.handle) throw new Error(`Team ${team} has no joined handle.`);
+    const handle = binding.handle;
+    const clone = store.teamClone(team);
+    io.progress?.({ step: 'Refreshing the team repository', current: 1, total: 4 });
+    await refreshClone(runner, clone, { label: team, ...lockWait(io) });
+    const teamJson = await readTeam(clone);
+    const catalogue = await skillRecords(clone, team);
+    // Every folder is read and decided before any of them is written back: a selection refused at
+    // one skill's question must leave every folder byte-identical, not just the ones after it (OF-2).
+    const prepared: { prepared: PreparedPublish; regression: { against: string } | null; writeBack: () => Promise<void> }[] = [];
+    for (const [index, ref] of args.refs.entries()) {
+      io.progress?.({ step: `Checking ${ref}`, current: index + 1, total: args.refs.length });
+      const source = await readLocalSource({ ...args, ref }, config, store);
+      prepared.push(await preparePublish({ args: { ...args, ref }, store, config, binding, teamJson, catalogue, categoryFlag, abort, earlyAsk: null, source }, io));
+    }
+    const failing = prepared.filter((entry): entry is typeof entry & { regression: { against: string } } => entry.regression !== null);
+    if (failing.length) {
+      const detail = failing.map(entry => `${entry.prepared.name}: latest eval of these exact bytes failed against ${entry.regression.against}`);
+      if (!(await io.confirm(`Publish ${failing.length === 1 ? failing[0]!.prepared.name : `${failing.length} skills`} despite a failed eval?`, { detail }))) {
+        throw new CancelledError('Publish was cancelled.');
+      }
+    }
+    for (const entry of prepared) await entry.writeBack();
+    io.progress?.({ step: `Publishing ${prepared.length} skills`, current: args.refs.length, total: args.refs.length });
+    const added = new Date().toISOString().slice(0, 10);
+    const outcome = await openTeamRepo(clone, binding.remote, runner).safeWriteBatch(prepared.map(entry => ({
+      message: `${handle}: publish ${entry.prepared.name}`,
+      // D77's profile entry rides in this skill's own commit rather than taking a second push of its
+      // own. Row f already permits the actor's people file under `publish` (guard.ts PEOPLE_ACTIONS).
+      mutate: (tree: MutableTree) => {
+        const result = publishIntoTree(tree, entry.prepared);
+        const at = result.version ?? result.identicalTo;
+        if (at !== null) writePersonFile(tree, handle, person => addProfileEntry(person, { id: entry.prepared.id, name: entry.prepared.name, version: at, added, via: 'publish' }));
+        return result;
+      },
+    })), { action: 'publish', handle, ...args.safeWrite, ...lockWait(io) });
+    const byIndex = new Map(outcome.committed.map(item => [item.index, item.returned]));
+    for (const skipped of outcome.skipped) {
+      const name = prepared[skipped.index]!.prepared.name;
+      if (skipped.noop) io.print(`Nothing to publish: ${name} is identical to what the team already has.`);
+      else io.print(`Could not publish ${name}: ${skipped.reason}`);
+    }
+    const results: PublishResult[] = [];
+    for (const [index, entry] of prepared.entries()) {
+      const result = byIndex.get(index);
+      const landed = result ?? { version: null, identicalTo: null, attached: 0, projectAdded: false, assets: 0 };
+      if (result) {
+        const at = result.version ?? result.identicalTo;
+        const label = at === null ? null : versionLabel(Number(at.slice(1)));
+        io.print(result.version !== null
+          ? `Published ${entry.prepared.name} as ${label} to the ${team} marketplace. Attached ${result.attached} eval run(s).`
+          : `${entry.prepared.name} is identical to ${label}, so no new version was minted.`);
+      }
+      results.push({
+        team, id: entry.prepared.id, name: entry.prepared.name, project: entry.prepared.project,
+        version: landed.version, created: landed.version !== null, identicalTo: landed.identicalTo,
+        attachedEvals: landed.attached, evalAssets: landed.assets,
+        profileAdded: result !== undefined && (landed.version ?? landed.identicalTo) !== null,
+        projectAdded: landed.projectAdded,
+      });
+    }
+    return success(results);
+  } catch (error) {
+    if (error instanceof HygieneRefused) reportHygieneWarnings((line) => io.print(line), error.assessment);
+    return fromError(error);
+  } finally {
+    abort.abort();
+  }
+}
+
 function requestedProject(args: PublishArgs, teamJson: Awaited<ReturnType<typeof readTeam>>): string | null {
   if (args.project === undefined) return null;
   if (!Object.hasOwn(teamJson.projects, args.project)) throw new Error(`Unknown project ${args.project}.`);
