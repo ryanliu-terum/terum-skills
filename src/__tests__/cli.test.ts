@@ -233,11 +233,11 @@ describe('CLI wiring (§3: commander wiring only)', () => {
     const calls: unknown[] = [];
     const program = buildProgram(async (invoke) => { await invoke(new ScriptedPrompter()); }, {
       login: async () => success({ gh: { installed: true, authenticated: true }, handle: 'me', updated: [], notice: null }), team: async () => success({ team: 't', remote: 'r' }),
-      project: async (args) => { calls.push(args.kind); return success({ projects: [] }); },
+      project: async (args) => { calls.push(args.kind === 'rename' ? `rename ${args.path} --to ${args.to}` : args.kind); return success({ projects: [] }); },
     });
     program.configureOutput({ writeErr: () => undefined, writeOut: () => undefined });
-    for (const argv of [['project', 'add', '/a'], ['project', 'remove', '/a'], ['project', 'list']]) await program.parseAsync(argv, { from: 'user' });
-    expect(calls).toEqual(['add', 'remove', 'list']);
+    for (const argv of [['project', 'add', '/a'], ['project', 'remove', '/a'], ['project', 'list'], ['project', 'rename', '/a', '--to', 'Payments']]) await program.parseAsync(argv, { from: 'user' });
+    expect(calls).toEqual(['add', 'remove', 'list', 'rename /a --to Payments']);
   });
 
   it('wires workflow-update as print-only and keeps receipt-check hidden like readme', async () => {

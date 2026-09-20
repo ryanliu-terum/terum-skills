@@ -565,3 +565,19 @@ describe('W-02 install progress', () => {
     if(mode==='declined')expect(result).toMatchObject({cancelled:true});
   });
 });
+
+
+/** Sub-projects (2026-09-19): a folder inside a checkout answers the checkout's origin, so nested matches default to the outermost one, and only unrelated matches leave no default. */
+describe('Library install destinations with sub-projects', () => {
+  it('defaults to the outermost of nested origin matches, and still offers every registered root', async () => {
+    const f = await destinationFixture(); const inner = join(f.checkout, 'apps', 'web'); await mkdir(inner, { recursive: true });
+    await f.store.update(config => { config.projects = [{ root: inner, label: 'apps/web' }, { root: f.checkout, label: 'checkout' }]; });
+    const { resolveDestination } = await import('../install.js'); const { readTeam } = await import('../../lib/skills.js');
+    const team = await readTeam(f.clone); team.projects.alpha = { remotes: ['git@github.com:acme/product.git'], skills: [f.id] };
+    const runner = wrapRunner(systemRunner, async () => ({ code: 0, stdout: 'https://github.com/acme/product.git\n', stderr: '' }));
+    const io = new ScriptedPrompter([''], [], true);
+    expect(await resolveDestination(f.store, team, 'alpha', io, true, { cwd: f.seed, runner, home: f.home })).toEqual({ kind: 'checkout', root: await realpath(f.checkout) });
+    expect(io.offered).toEqual([['Global (~/.claude/skills)', `apps/web · ${await realpath(inner)}`, `checkout · ${await realpath(f.checkout)}`]]);
+    expect(io.offeredDefaults).toEqual([`checkout · ${await realpath(f.checkout)}`]);
+  });
+});

@@ -9,7 +9,7 @@ The Library reads local files and nothing else. It never fetches, never prompts,
 It scans exactly two kinds of root:
 
 - **Global**: `~/.claude/skills` (`%USERPROFILE%\.claude\skills` on Windows).
-- **A project you registered**: `<project>/.claude/skills`, for every folder you added with `project add`.
+- **A project you registered**: `<project>/.claude/skills`, for every folder you added with `project add`. A folder registered inside another registered folder is that project's sub-project, named by its path inside it; the tree is the folder structure.
 
 ```sh
 npx -y terum-skills@latest project add <path>

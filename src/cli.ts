@@ -101,7 +101,9 @@ export function buildProgram(execute: Execute, verbs: CliVerbs = { login, team: 
     .action(async (path: string | undefined) => execute(io => active.project({ form: context.form, kind: 'add', path, cwd: process.cwd() }, io), { verb: 'project add', notices: true }));
   project.command('remove <path>').description('Forget a project; leave its files and ledger unchanged')
     .action(async (path: string) => execute(io => active.project({ form: context.form, kind: 'remove', path, cwd: process.cwd() }, io), { verb: 'project remove', notices: true }));
-  project.command('list').description('List the projects in your library')
+  project.command('rename <path>').description('Rename a project in your library; the folder on disk is unchanged').requiredOption('--to <name>', 'the new name')
+    .action(async (path: string, options: { to: string }) => execute(io => active.project({ form: context.form, kind: 'rename', path, to: options.to, cwd: process.cwd() }, io), { verb: 'project rename', notices: true }));
+  project.command('list').description('List the projects in your library, sub-projects under the project whose folder holds them')
     .action(async () => execute(io => active.project({ form: context.form, kind: 'list' }, io), { verb: 'project list', notices: true }));
 
   program.command('reconcile').description('Check Library folders against published team skills')

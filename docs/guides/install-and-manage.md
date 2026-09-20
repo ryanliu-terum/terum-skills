@@ -87,6 +87,7 @@ with `Pass --into global or --into <project root>` when some are.
 ```sh
 npx -y terum-skills@latest project add [path]
 npx -y terum-skills@latest project remove <path>
+npx -y terum-skills@latest project rename <path> --to <name>
 npx -y terum-skills@latest project list
 ```
 
@@ -98,6 +99,13 @@ root, or the current folder when there is none. It prints `Added /home/me/dev/we
 or `/home/me/dev/web is already in your library.` When a team is configured it then runs `reconcile`
 over that one root. A folder that does not exist, is not a folder, or is your home directory is
 refused.
+
+A folder registered inside another registered folder is that project's sub-project. The tree is read
+off the paths every time and never stored, so it always matches the folder structure: `project list`
+draws a sub-project indented under its parent, `ls --local` names the parent on its section, and the
+app's sidebar nests the row. A sub-project's name is its path inside the parent (`apps/web`).
+`project rename <path> --to <name>` gives any row a name of your own. It changes display text only:
+the folder and every ledger path stay as they are, and the name is kept until you rename again.
 
 The current folder is never registered automatically, by any verb. A project root appearing because a
 command happened to run inside it is exactly the thing that made it impossible to say what this

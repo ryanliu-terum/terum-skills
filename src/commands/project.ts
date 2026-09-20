@@ -1,8 +1,9 @@
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createConfigStore, type ConfigStore } from '../lib/config.js';
-import { addLibraryProject, projectPath, underProject } from '../lib/projects.js';
+import { addLibraryProject, projectPath, renameLibraryProject, underProject, type ProjectAdded, type ProjectRenamed } from '../lib/projects.js';
 import { canonicalLedger, localSkillCounts, localSkills, nearestRepoRoot, type LocalInventory } from '../lib/local-skills.js';
+import { insideRoot, orderByProjectTree, projectParents } from '../lib/schema.js';
 import type { WithForm } from '../lib/invocation.js';
 import type { Prompter } from '../lib/prompt.js';
 import { fromError, success, type Result } from '../lib/result.js';
@@ -13,10 +14,14 @@ import { run as reconcile, type ReconcileResult } from './reconcile.js';
  * §7.1 L-PROJ — the Library's local project registry. Renamed from `checkout`: the sidebar's button
  * already said "Add project", and the word the user reads is the word the verb should use. The team
  * project creator this file's name used to belong to is now `team project create`.
+ *
+ * `rename` names a row; `list` draws the tree. A sub-project is a registered folder inside another
+ * registered folder — nothing else, and nothing stored — so the tree is the file structure.
  */
-export interface ProjectArgs extends WithForm { kind: 'add' | 'remove' | 'list'; path?: string; config?: ConfigStore; home?: string; cwd?: string; runner?: Runner; reconcile?: typeof reconcile; }
-export interface ProjectRow { path: string; label: string; rootState: LocalInventory['rootState']; skillFolders: number; }
-export type ProjectResult = { path: string; label: string; added: boolean; reconcile?: ReconcileResult } | { path: string; placementsRemaining: number } | { projects: ProjectRow[] };
+export interface ProjectArgs extends WithForm { kind: 'add' | 'remove' | 'list' | 'rename'; path?: string; /** `rename`: the new name (`--to`). */ to?: string; config?: ConfigStore; home?: string; cwd?: string; runner?: Runner; reconcile?: typeof reconcile; }
+export interface ProjectRow { path: string; label: string; /** The registered project this one sits inside, or null at the top level. */ parent: string | null; rootState: LocalInventory['rootState']; skillFolders: number; }
+export interface ProjectRemoved { path: string; placementsRemaining: number; /** Registered folders inside the removed one: they stay, now as top-level projects or under the next ancestor. */ subProjectsRemaining: number; }
+export type ProjectResult = (ProjectAdded & { reconcile?: ReconcileResult }) | ProjectRemoved | { projects: ProjectRow[] } | ProjectRenamed;
 
 export async function run(args: ProjectArgs, io: Prompter): Promise<Result<ProjectResult>> {
   try {
@@ -33,16 +38,25 @@ export async function run(args: ProjectArgs, io: Prompter): Promise<Result<Proje
       }
       return success(io.channel === 'frames' ? { ...added, reconcile: checked.value } : added);
     }
+    if (args.kind === 'rename') {
+      if (args.path === undefined) throw new Error('Specify a project path.');
+      if (args.to === undefined) throw new Error('Specify the new name with --to.');
+      return success(await renameLibraryProject(store, resolve(args.cwd ?? process.cwd(), args.path), args.to, io));
+    }
     if (args.kind === 'remove') {
       if (args.path === undefined) throw new Error('Specify a project path.');
       const path = await projectPath(resolve(args.cwd ?? process.cwd(), args.path));
       let placementsRemaining = 0;
+      let subProjectsRemaining = 0;
       await store.update(async config => {
         const registered = config.projects ?? [];
         const canonical = await Promise.all(registered.map(project => projectPath(project.root)));
         if (!canonical.includes(path)) throw new Error(`${path} is not in your library.`);
         const removed = registered.filter((_, index) => canonical[index] === path);
         config.projects = registered.filter((_, index) => canonical[index] !== path);
+        // Forgetting a parent forgets one row: the folders registered inside it are projects in
+        // their own right and stay exactly as they are, drawn one level up.
+        subProjectsRemaining = canonical.filter(root => insideRoot(root, path)).length;
         const lexicalRoots = [path, resolve(args.cwd ?? process.cwd(), args.path!), ...removed.map(project => resolve(project.root))];
         placementsRemaining = (await Promise.all(Object.keys(config.placements).map(async target =>
           underProject(await projectPath(target), path) || lexicalRoots.some(root => underProject(resolve(target), root)),
@@ -50,15 +64,20 @@ export async function run(args: ProjectArgs, io: Prompter): Promise<Result<Proje
       }, { preserveUnchanged: true });
       io.print(`Removed ${path} from your library.`);
       io.print(`${placementsRemaining} placements recorded under ${path} stay in the ledger; uninstall-skill removes them.`);
-      return success({ path, placementsRemaining });
+      if (subProjectsRemaining > 0) io.print(`${subProjectsRemaining} ${subProjectsRemaining === 1 ? 'sub-project' : 'sub-projects'} under ${path} ${subProjectsRemaining === 1 ? 'stays' : 'stay'} in your library.`);
+      return success({ path, placementsRemaining, subProjectsRemaining });
     }
     const config = await store.read(); const ledger = await canonicalLedger(config);
-    const projects = await Promise.all((config.projects ?? []).map(async project => {
+    const registered = config.projects ?? [];
+    const parents = projectParents(registered.map(project => project.root));
+    const rows = await Promise.all(registered.map(async (project, index): Promise<ProjectRow> => {
       const inventory = await localSkills(join(project.root, '.claude', 'skills'), config, { scope: 'project', stateRoot: store.root, ledger });
-      return { path: project.root, label: project.label, rootState: inventory.rootState, skillFolders: localSkillCounts(inventory).skillFolders };
+      return { path: project.root, label: project.label, parent: parents[index] ?? null, rootState: inventory.rootState, skillFolders: localSkillCounts(inventory).skillFolders };
     }));
-    for (const project of projects) io.print(`${project.label} — ${project.path}; ${project.rootState}; ${project.skillFolders} skill folders`);
-    if (!projects.length) io.print('none');
-    return success({ projects });
+    // Tree order, indented by depth: a sub-project reads under the project whose folder holds it.
+    const ordered = orderByProjectTree(rows, row => row.path, row => row.parent ?? undefined);
+    for (const { item, depth } of ordered) io.print(`${'  '.repeat(depth)}${item.label} — ${item.path}; ${item.rootState}; ${item.skillFolders} skill folders`);
+    if (!rows.length) io.print('none');
+    return success({ projects: ordered.map(entry => entry.item) });
   } catch (error) { return fromError(error); }
 }

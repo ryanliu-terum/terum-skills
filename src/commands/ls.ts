@@ -436,7 +436,7 @@ async function showLocal(store: ConfigStore, home: string, io: Prompter, runner:
     const overrides = await loadOverrides(overrideFilesFor({ scope: root.scope, repoRoot: root.repoRoot }, home).read);
     const local: LocalSection = { ...root, root: inventory.root, rootState: inventory.rootState, label: localRootLabel(root), remote: remotes[index]!, counts: localSkillCounts(inventory), rows: [], notOffered: [], problems: [...inventory.problems, ...overrides.problems] };
     sections.push(local);
-    io.print(`Local Claude Code skills (${printable(inventory.root)}; ${inventory.scope}${root.registered ? '; registered' : ''}):`);
+    io.print(`Local Claude Code skills (${printable(inventory.root)}; ${inventory.scope}${root.registered ? '; registered' : ''}${root.parent === undefined ? '' : `; sub-project of ${printable(root.parent)}`}):`);
     if (root.repoRoot !== undefined) io.print(`  GitHub: ${local.remote === null ? 'not connected' : local.remote.slug === null ? `not connected (origin is ${printable(local.remote.url)})` : printable(local.remote.slug)}`);
     // Recursive fingerprint reads dominate latency on UNC roots; retain row order after the wave.
     const healthNeeded = inventory.entries.filter((entry) => entry.placement !== undefined || entry.inspection.kind === 'candidate');

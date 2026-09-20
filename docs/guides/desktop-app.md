@@ -81,7 +81,7 @@ Two habits are worth knowing. Almost everything is right-clickable: a skill card
 
 ## Library
 
-The Library is one board per root: Global (`~/.claude/skills`) and one for each project you registered with `project add`. The sidebar lists them under Library ▸ Projects. Both are read with `ls --local`.
+The Library is one board per root: Global (`~/.claude/skills`) and one for each project you registered with `project add`. The sidebar lists them under Library ▸ Projects, with a project registered inside another drawn under it, one indent deeper. Both are read with `ls --local`.
 
 The header names the root and its path, and for a project it names the GitHub slug or says `GitHub: not connected`. Under it are the overview tiles (Skills, Evaluated, Unpublished, Needs attention), then the search and sort row, then the cards.
 
@@ -95,6 +95,7 @@ Each card carries the skill's project and category, its name, description, versi
 | Sync | Runs `sync`, then `reconcile --list`, and opens the reconcile dialog |
 | Add project | Opens a folder chooser, then runs `project add` on what you chose |
 | Drag a folder onto the board | One `project add` per dropped folder |
+| Right-click a project row | Show in Finder, Copy path, Rename… (runs `project rename --to <name> -- <path>`, a display name only) and Manage projects… |
 | Card menu (⋯ or right-click) | The card's actions, plus Copy name, and, for a card with a folder on this machine, Copy path, Show in Finder (Show in Explorer on Windows) and Open in editor |
 
 The card menu runs one verb each: Run eval (`eval`), and for a folder no team has, Move to… (`skill move`), Copy to… (`skill copy`), Rename… (`skill rename`), Delete… (`skill delete`). For a team skill it offers Install… (`install`), Reinstall… when your people file records the install but nothing is on this machine, or Uninstall… (`uninstall-skill`) instead. Publish to team… (`publish`) and Unpublish… (`unpublish`) are on both. A row the card cannot run is disabled and carries the reason.
@@ -212,7 +213,7 @@ Team policy (categories, skill licence, team projects) is read-only. It lives in
 | Placed here | The placement ledger: Path, Scope, Version, Placed, State. A row opens its skill; right-click for reveal and copy path |
 | Tool approvals | What you approved, per skill, with the exact tool list |
 | Quarantine | What is in quarantine, with Prune… (`prune`), the only thing that deletes it. A CLI that does not report the contents gets one line saying so and no button |
-| Projects | One row per registered project with Remove (`project remove -- <path>`), and a field plus Add (`project add -- <path>`) |
+| Projects | One row per registered project, a sub-project captioned with its parent, with Rename (`project rename --to <name> -- <path>`) and Remove (`project remove -- <path>`), and a field plus Add (`project add -- <path>`) |
 
 ### Sync
 

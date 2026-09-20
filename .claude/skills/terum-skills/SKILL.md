@@ -44,7 +44,7 @@ The user's terminal answers the CLI's questions; the skill answers none of them.
 - Always `npx -y terum-skills@latest <verb> …`, exactly that spelling, for a runnable command.
   Never another spelling, a checkout entry, or `node dist/index.js`.
 - Run through Bash from the current working directory. Do not `cd`. Use absolute path arguments.
-  The Library reads Global and explicitly added project roots; cwd does not add a project.
+  The Library reads Global and explicitly added project roots; cwd does not add a project. A registered folder inside another registered folder is that project's sub-project, named by its path inside the parent; the tree is the folder structure, never a setting.
 - Do not use the skill-file `` !`command` `` injection: a non-zero exit aborts the whole skill.
   `validate` exits 1 on error findings; warnings alone are not a failure.
 - `$ARGUMENTS`: the command path can have multiple tokens (`skill move`, `team project create`).
@@ -60,7 +60,7 @@ The user's terminal answers the CLI's questions; the skill answers none of them.
 | `status` | nothing | show stdout; exit 0 means the query succeeded, not that setup is complete. Pending work needs the matching install or removal retried, not a fetch |
 | `ls`, `ls member <h>`, `ls project <n>` | nothing | show the team inventory |
 | `ls --local` | nothing | show the requested project section; summarise other roots and rejected/unreadable folders by count and reason unless asked for all. This inventory is local-only |
-| `project add <abs-path>`, `project remove <abs-path>`, `project list` | confirm with the user before adding or forgetting a root | show stdout; removing a project leaves its files and placement ledger unchanged |
+| `project add <abs-path>`, `project remove <abs-path>`, `project rename <abs-path> --to <name>`, `project list` | confirm with the user before adding, renaming, or forgetting a root | show stdout; removing a project leaves its files and placement ledger unchanged; a folder registered inside another registered folder is listed as its sub-project |
 | `search <term> [--category <c>] [--author <a>] [--project <p>]` | nothing | show stdout; `No skills found.` is a result |
 | `skill fix <abs-path>` | none; the folder is the user's own | show stdout; it applies the repairs with one right answer (quote a frontmatter value YAML refuses, `name` to the folder, `license` to team policy, strip invisible characters, clear an executable bit on a non-script) and prints `Still needs you` for the rest |
 | `skill category <abs-path> --to <name>` | none; the folder is the user's own | show stdout; it rewrites `metadata.terum-category` locally and publishes nothing, so the team keeps showing the category its newest version carries until the user runs the `publish` the output prints. Any name is accepted; an off-list one gets the same advisory warning `publish` gives |

@@ -532,3 +532,18 @@ it('returns failed inspection detail for an unreadable folder',async()=>{
  const spy=vi.spyOn(fs,'readFile').mockImplementation(async(...args)=>{if(args[0]===join(path,'SKILL.md'))throw new Error('permission denied');return original(...args);});
  try{const result=await resolveLibrarySkill(home,emptyConfig(),join(home,'.state'),'blocked');expect(result?.inspection).toEqual({kind:'failed',reason:'permission denied'});expect(unusableSkillFolder(result!)).toBe(`${path} could not be read as a skill folder: permission denied`);}finally{spy.mockRestore();}
 });
+
+
+/** Sub-projects (2026-09-19): a registered root inside another is drawn under it, in tree order, whatever order they were added in. */
+it('marks a registered root inside another as its sub-project and returns the tree in depth-first order', async () => {
+  const home = await temporaryDirectory();
+  const repo = join(home, 'acme'), web = join(repo, 'apps', 'web'), other = join(home, 'other');
+  for (const dir of [web, other]) await mkdir(dir, { recursive: true });
+  const roots = (await localSkillRoots(home, [{ root: web, label: 'apps/web' }, { root: other, label: 'other' }, { root: repo, label: 'acme' }])).roots;
+  expect(roots).toEqual([
+    { root: join(home, '.claude', 'skills'), scope: 'global', registered: false },
+    { root: join(other, '.claude', 'skills'), scope: 'project', repoRoot: other, registered: true, label: 'other' },
+    { root: join(repo, '.claude', 'skills'), scope: 'project', repoRoot: repo, registered: true, label: 'acme' },
+    { root: join(web, '.claude', 'skills'), scope: 'project', repoRoot: web, registered: true, label: 'apps/web', parent: repo },
+  ]);
+});
