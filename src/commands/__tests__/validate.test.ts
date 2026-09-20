@@ -1,5 +1,5 @@
 import { join } from 'node:path';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, writeFile } from 'node:fs/promises';
 import { describe, expect, it, vi } from 'vitest';
 import { createConfigStore } from '../../lib/config.js';
 import { bareTeam, cloneWithIdentity, pushFromSeed, ScriptedPrompter, TEAM_JSON } from '../../lib/__tests__/fixtures.js';
@@ -98,6 +98,24 @@ describe('validate (§9)', () => {
     const v1 = await run({ target: join(clone, 'skills', 'sample', 'v1'), cwd: clone }, new ScriptedPrompter());
     expect(v1).toMatchObject({ ok: false, error: expect.stringContaining('HYG2') });
     expect(v1.ok ? '' : v1.error).not.toContain('HYG1');
+  });
+
+  // Release check G1: validate exited 1 with "EACCES: permission denied, scandir" when the directory
+  // of a script the SKILL.md names held an unreadable subdirectory. Root ignores permission bits.
+  it.skipIf(process.getuid?.() === 0)('an unreadable directory beside a named script is skipped: HYG8 still warns and validate passes (§6.1)', async () => {
+    const fixture = await bareTeam(); await pushFromSeed(fixture.seed, 'skills/sample/v1/SKILL.md', skill('Run tools/run.sh first.'));
+    const checkout = await cloneWithIdentity(fixture.bare, join(fixture.root, 'checkout'));
+    await mkdir(join(checkout, 'tools', 'locked'), { recursive: true });
+    await writeFile(join(checkout, 'tools', 'run.sh'), 'echo run');
+    await writeFile(join(checkout, 'tools', 'locked', 'inner.sh'), 'echo inner');
+    await chmod(join(checkout, 'tools', 'locked'), 0o000);
+    try {
+      const io = new ScriptedPrompter();
+      expect(await run({ target: 'sample', cwd: checkout }, io)).toMatchObject({ ok: true, value: { name: 'sample', findings: 0, warnings: 1 } });
+      expect(io.lines[0]).toMatch(/^warning HYG8/);
+    } finally {
+      await chmod(join(checkout, 'tools', 'locked'), 0o755);
+    }
   });
 
   it('without --cwd a folder at the user cwd wins, otherwise a bare name resolves through the configured team clone', async () => {

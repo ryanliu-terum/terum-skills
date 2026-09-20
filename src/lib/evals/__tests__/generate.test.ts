@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { AgentRunError, Transcript, type AgentApi } from '../agent.js';
 import { loadCase, loadSuite } from '../execution.js';
-import { GENERATION_TIMEOUT_MS, generate } from '../generate.js';
+import { GENERATION_TIMEOUT_MS, casePrompt, generate } from '../generate.js';
 import { parseTriggers } from '../triggers.js';
 
 const skill = '---\nname: deploy\ndescription: deploy safely\nlicense: UNLICENSED\nmetadata:\n  id: 11111111-1111-4111-8111-111111111111\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\nDeploy only after checks.';
@@ -226,5 +226,97 @@ describe('eval generation (IE5)', () => {
       const recovered = await generate({ ...at(), agent: agent([timeout(), validCases]) });
       expect(recovered).toMatchObject({ ok: true });
     });
+  });
+});
+
+const TASK_RULE = 'Tasks must not demand magic-string incantations and must be answerable without human follow-up.';
+
+describe('mode-2 task rules (eval-gen rev 2 §4; live spec-readable run, 2026-09-16)', () => {
+  it('states the eval-gen task rule in the mode-2 case appendix, the same sentence the case prompt carries', async () => {
+    const prompts: string[] = [];
+    await generate({ ...at(), agent: agent([validCases], prompts) });
+    const appendix = prompts[0]!.slice(prompts[0]!.indexOf('Case shape (when you return {"cases": [...]})'));
+    expect(appendix).toContain(TASK_RULE);
+    expect(casePrompt({ ...at(), agent: agent([]) })).toContain(TASK_RULE);
+  });
+
+  it("refuses a generated case whose task opens with the skill's own slash command, and the re-ask repairs it", async () => {
+    const prompts: string[] = [];
+    const selfCall = withCase({ task: '/deploy the service to staging' });
+    const result = await generate({ ...at(), agent: agent([selfCall, validCases], prompts) });
+    expect(result).toMatchObject({ ok: true });
+    expect(prompts).toHaveLength(2);
+    expect(prompts[1]).toContain("generated case 'happy-path' starts its task with /deploy");
+    expect(prompts[1]).toContain('Unknown command');
+  });
+
+  it.each([
+    ['uppercase with a colon', '  /DEPLOY: ship it'],
+    ['the bare command', '/deploy'],
+  ])('refuses the self slash command however it is written: %s', async (_label, task) => {
+    const bad = withCase({ task });
+    const result = await generate({ ...at(), agent: agent([bad, bad, bad]) });
+    expect(result).toMatchObject({ ok: false, error: expect.stringContaining('starts its task with /deploy') });
+  });
+
+  it('accepts a task that only mentions the command or starts with a different one', async () => {
+    const generated = { cases: [
+      { ...validCases.cases[0]!, task: 'Ship the service; the team usually types /deploy for this.' },
+      { ...validCases.cases[1]!, task: '/deployment-report for last week' },
+      validCases.cases[2],
+    ] };
+    await expect(generate({ ...at(), agent: agent([generated]) })).resolves.toMatchObject({ ok: true });
+  });
+
+  it("refuses a generated suite whose task opens with the skill's own slash command", async () => {
+    const prompts: string[] = [];
+    const selfCall = { suite: { ...validSuite.suite, task: '/deploy review the uncommitted diff' } };
+    const result = await generate({ ...at(), agent: agent([selfCall, validSuite], prompts) });
+    expect(result).toMatchObject({ ok: true });
+    expect(prompts).toHaveLength(2);
+    expect(prompts[1]).toContain('generated suite starts its task with /deploy');
+  });
+});
+
+describe('generated YAML round-trips byte for byte', () => {
+  const long = `const banner = "${'x'.repeat(90)}";`;
+  // A context line longer than 80 columns, then a whitespace-only context line (for "  ") and a
+  // blank context line (for ""): the shape the default 80-column dump folds into a `>` scalar.
+  const aSource = `${long}\n  \n\nconst alpha = 1;\n`;
+  const aDiff = `diff --git a/src/a.js b/src/a.js\n--- a/src/a.js\n+++ b/src/a.js\n@@ -1,4 +1,4 @@\n ${long}\n   \n \n-const alpha = 1;\n+const alpha = -1;\n`;
+  const restDiff = validSuite.suite.plants_diff.slice(validSuite.suite.plants_diff.indexOf('diff --git a/src/b.js'));
+
+  it('a generated suite keeps plants_diff and its files exactly', async () => {
+    const plantsDiff = aDiff + restDiff;
+    const suite = { suite: { ...validSuite.suite, files: { ...validSuite.suite.files, 'src/a.js': aSource }, plants_diff: plantsDiff } };
+    const prompts: string[] = [];
+    const result = await generate({ ...at(), agent: agent([suite, suite, suite], prompts) });
+    expect(result).toMatchObject({ ok: true });
+    expect(prompts).toHaveLength(1);
+    if (!result.ok) return;
+    const loaded = loadSuite(result.value.suite!.file, 'suite');
+    expect(loaded.ok).toBe(true);
+    if (!loaded.ok) return;
+    expect(loaded.value.files['.plants.diff']).toBe(plantsDiff);
+    expect(loaded.value.files['src/a.js']).toBe(aSource);
+  });
+
+  it('a generated case keeps a seeded diff file exactly', async () => {
+    const result = await generate({ ...at(), agent: agent([withCase({ files: { 'changes.diff': aDiff } })]) });
+    expect(result).toMatchObject({ ok: true });
+    if (!result.ok) return;
+    const loaded = loadCase(result.value.cases!.files['happy-path.yaml']!, 'happy-path');
+    expect(loaded).toMatchObject({ ok: true });
+    if (loaded.ok) expect(loaded.value.files['changes.diff']).toBe(aDiff);
+  });
+
+  it('a generated case whose setup applies its seeded diff passes the dry run on the first ask', async () => {
+    // The dry run seeds what validateCases re-parsed: folded bytes would make `git apply` fail and
+    // re-ask the model for a case that was valid all along.
+    const prompts: string[] = [];
+    const applies = withCase({ files: { 'changes.diff': aDiff, 'src/a.js': aSource }, setup: 'git init -q && git apply changes.diff' });
+    const result = await generate({ ...at(), agent: agent([applies, applies, applies], prompts) });
+    expect(result).toMatchObject({ ok: true });
+    expect(prompts).toHaveLength(1);
   });
 });
