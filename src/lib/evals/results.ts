@@ -7,7 +7,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Arm, ArmSample, ComparisonRow, DroppedCase, Outcome } from './execution.js';
 import type { TriggerSummary } from './triggers.js';
-import { netLift, signTest, summarize, verdictBand, type Verdict } from './stats.js';
+import { netLift, signTest, summarize, summarizePaired, verdictBand, type Verdict } from './stats.js';
 
 /** §4.2: run ids are UTC timestamps, so lexicographic order is chronological (rev 5). */
 export function runIdFrom(date: Date): string {
@@ -50,7 +50,8 @@ export interface CaseRun { case: string; rep: number; arms: Partial<Record<Arm, 
 export interface CaseRunTally { passed: number; total: number }
 
 export interface Aggregate {
-  verdict: Verdict;
+  /** Null in head-to-head mode (§4): there is no band, and NEUTRAL would read as a finding. */
+  verdict: Verdict | null;
   attribution: string;
   execution_status: 'complete' | 'partial' | 'failed';
   expected_rows: number;
@@ -72,7 +73,7 @@ export interface Aggregate {
  * Roll rows and arm samples up into receipt numbers. `expectedRows` is k × opponents × cases;
  * a row decided by `both-arms-failed` is an unscored hole, and holes grey the verdict (§5.4).
  */
-export function aggregate(rows: readonly ComparisonRow[], arms: readonly ArmSample[], expectedRows: number, environmentSkips: Record<string, string[]> = {}, droppedCases: Record<string, DroppedCase> = {}, suiteRan = false): Aggregate {
+export function aggregate(rows: readonly ComparisonRow[], arms: readonly ArmSample[], expectedRows: number, environmentSkips: Record<string, string[]> = {}, droppedCases: Record<string, DroppedCase> = {}, suiteRan = false, mode: 'standard' | 'head-to-head' = 'standard'): Aggregate {
   const comparisons: Record<string, ComparisonSummary> = {};
   const counts = new Map<string, { win: number; loss: number; tie: number }>();
   const scoredRows = rows.filter((row) => row.decided_by !== 'both-arms-failed' && !row.decided_by.endsWith('-run-failed'));
@@ -106,7 +107,9 @@ export function aggregate(rows: readonly ComparisonRow[], arms: readonly ArmSamp
   const scored = scoredRows.length;
   const executionStatus = expectedRows === 0 ? 'complete' : scored === 0 ? 'failed' : scored < expectedRows ? 'partial' : 'complete';
   const headline = comparisons['candidate-vs-baseline'];
-  const verdict = headline ? verdictBand(headline.win, headline.loss, headline.tie) : 'NEUTRAL';
+  // §4: head-to-head has no verdict at all — the band derives from candidate-vs-baseline, which
+  // says nothing about the rival, and NEUTRAL would read as a finding.
+  const verdict = mode === 'head-to-head' ? null : headline ? verdictBand(headline.win, headline.loss, headline.tie) : 'NEUTRAL';
   // §2.2 (spec rev 2): an unscored row is omitted from per_case and the case_runs tally and shows only
   // as expected_rows − scored_rows; a dead suite session therefore empties every sub-case row at once.
   const perCase = perCaseRows(scoredRows, scoredArms);
@@ -193,11 +196,33 @@ function attributionLine(rows: readonly ComparisonRow[]): string {
 }
 
 /** §6: the printed report — verdict, per-comparison record, arm scores, trigger failures, efficiency. */
-export function renderReport(aggregateResult: Aggregate, triggers: TriggerSummary | null): string {
+/** IE6 §4: what the head-to-head headline needs that the aggregate cannot know. */
+export interface HeadToHead {
+  candidate: string;
+  rival: string;
+  cases: number;
+  k: number;
+  briefPath: string;
+  briefSource: 'derived' | 'supplied';
+}
+
+/** §4: fixed, never sorted by score — sorting is the ranking surface D29 bans. */
+const HEAD_TO_HEAD_ARMS = ['candidate', 'rival', 'baseline'] as const;
+
+export function renderReport(aggregateResult: Aggregate, triggers: TriggerSummary | null, head: HeadToHead | null = null): string {
   const lines: string[] = [];
   const grey = aggregateResult.execution_status !== 'complete' ? ` [${aggregateResult.execution_status} — ${aggregateResult.scored_rows}/${aggregateResult.expected_rows} scored]` : '';
-  lines.push(`verdict: ${aggregateResult.verdict}${grey}`);
-  lines.push(`why: ${aggregateResult.attribution}`);
+  if (head === null) {
+    lines.push(`verdict: ${aggregateResult.verdict}${grey}`);
+    // §4: `why` is derived from candidate-vs-baseline rows only, so under a head-to-head
+    // headline it would read as if it described the head-to-head.
+    lines.push(`why: ${aggregateResult.attribution}`);
+  } else {
+    lines.push(`head-to-head: ${head.candidate} vs ${head.rival} — ${head.cases} case${head.cases === 1 ? '' : 's'} · k=${head.k}`);
+    // §4: the grey marker used to ride on the verdict line. With no band to annotate, the
+    // denominator is stated outright on every run — engine §5.3, holes stay visible.
+    lines.push(`scored: ${aggregateResult.scored_rows}/${aggregateResult.expected_rows} rows${aggregateResult.execution_status === 'complete' ? '' : ` [${aggregateResult.execution_status}]`}`);
+  }
   for (const [caseName, missing] of Object.entries(aggregateResult.environment_skips)) {
     lines.push(`skipped (environment): ${caseName} — missing ${missing.join(', ')}`);
   }
@@ -205,9 +230,12 @@ export function renderReport(aggregateResult: Aggregate, triggers: TriggerSummar
     lines.push(`dropped (${dropped.kind}): ${caseName} — ${dropped.detail}`);
   }
   for (const [comparison, summary] of Object.entries(aggregateResult.comparisons)) {
-    lines.push(`${comparison}: ${summarize(summary.win, summary.loss, summary.tie)}`);
+    lines.push(`${comparison}: ${head === null ? summarize(summary.win, summary.loss, summary.tie) : summarizePaired(summary.win, summary.loss, summary.tie)}`);
   }
-  const scores = Object.entries(aggregateResult.arm_scores).map(([arm, score]) => `${arm} ${score === null ? 'n/a' : score.toFixed(2)}`);
+  const armEntries = head === null
+    ? Object.entries(aggregateResult.arm_scores)
+    : HEAD_TO_HEAD_ARMS.filter((arm) => Object.hasOwn(aggregateResult.arm_scores, arm)).map((arm) => [arm, aggregateResult.arm_scores[arm] ?? null] as const);
+  const scores = armEntries.map(([arm, score]) => `${arm} ${score === null ? 'n/a' : score.toFixed(2)}`);
   if (scores.length) lines.push(`arm scores: ${scores.join(' · ')}`);
   const caseRuns = Object.entries(aggregateResult.case_runs).filter(([, tally]) => tally.total > 0).map(([arm, tally]) => `${arm} ${tally.passed}/${tally.total}`);
   if (caseRuns.length) lines.push(`case-runs passed: ${caseRuns.join(' · ')}`);
@@ -229,5 +257,14 @@ export function renderReport(aggregateResult: Aggregate, triggers: TriggerSummar
     })
     .filter((piece): piece is string => piece !== null);
   if (efficiency.length) lines.push(`efficiency: ${efficiency.join(' | ')}`);
+  if (head !== null) {
+    lines.push(`brief: ${head.briefPath} (${head.briefSource === 'derived' ? 'human-confirmed' : 'supplied'})`);
+    // §5's caveat, kept in front of the reader rather than in the spec only. The r=0.97 figure
+    // belongs to the WITHOUT-skill arm; the two printed here are with-skill arms, which moved
+    // ~0.08 between identical runs — about as much as lift did.
+    lines.push('note: arm scores correlate across skills better than their difference does, but a');
+    lines.push('      single with-skill arm still moves ~0.08 between identical runs. This is');
+    lines.push('      evidence about two skills on one task brief, not a ranking.');
+  }
   return lines.join('\n');
 }

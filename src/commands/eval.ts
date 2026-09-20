@@ -11,7 +11,7 @@ import type { Config } from '../lib/schema.js';
 import { localReceiptsFor, newestReceiptAt } from '../lib/evals/receipt-store.js';
 import { type AgentApi, DEFAULT_MODEL, preflight as systemPreflight, systemAgent } from '../lib/evals/agent.js';
 import { type Arm, type ArmSpec, type DroppedCase, type ArmSample, type ComparisonRow, loadCase, loadSuite, runCase, runSuite } from '../lib/evals/execution.js';
-import { generate, type GeneratedAssets } from '../lib/evals/generate.js';
+import { BRIEF_MAX, checkBriefNeutrality, deriveBrief, generate, type GeneratedAssets } from '../lib/evals/generate.js';
 import { assessHygiene, exemptAuthorEmail, formatHygieneFindings, hygieneFrontmatter, HygieneRefused, inspectContent, reportHygieneWarnings } from '../lib/evals/hygiene.js';
 import { makeRng } from '../lib/evals/judge.js';
 import { receiptPath, buildReceipt, NO_TEAM_RUNNER_HANDLE } from '../lib/evals/receipt.js';
@@ -186,6 +186,23 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
       if (resolve(rivalMatch.path) === resolve(local.path)) return failure(`--vs ${args.vs} resolves to the same folder as ${args.ref ?? local.name}; a head-to-head needs two different skills.`);
       rival = { name: rivalMatch.name, dir: rivalMatch.path, id: null };
     }
+    // §1.2 / §3.1: a supplied brief is validated HERE — before hygiene, before preflight, and so
+    // before any agent call. Rejecting a brief that names a skill must not cost a run. Rev 1
+    // trusted supplied briefs because "a human wrote it", but --brief is mandatory without a
+    // terminal, which is exactly where nobody is watching.
+    let suppliedBrief: { text: string; path: string } | undefined;
+    if (rival !== undefined && args.brief !== undefined) {
+      const briefPath = resolve(args.brief);
+      const supplied = await optionalText(briefPath);
+      if (supplied === undefined) return failure(`No brief file at ${args.brief}.`);
+      const text = supplied.replace(/^#.*$/gm, '').trim();
+      if (!text) return failure(`The brief at ${args.brief} is empty.`);
+      if (text.length > BRIEF_MAX) return failure(`The brief at ${args.brief} is ${text.length} characters; the cap is ${BRIEF_MAX} so a human actually reads it before confirming.`);
+      const neutrality = checkBriefNeutrality(text, [local.name, rival.name]);
+      if (neutrality.kind === 'refuse') return failure(`The brief at ${args.brief} names '${neutrality.name}'. A brief that names a tool is describing the tool, not the job; describe the work both skills are competing to do.`);
+      if (neutrality.kind === 'warn') io.print(`Note: the brief contains the word '${neutrality.name}', which is also a skill name here. Continuing — it reads as an ordinary word.`);
+      suppliedBrief = { text, path: briefPath };
+    }
     // Best-effort, never a gate: a folder the team has never seen is still evaluable (§6.3).
     // By the FOLDER's name, not the ref: a path ref would never match a team skill, and the incumbent arm
     // would then silently treat a published skill as one the team has never seen.
@@ -277,7 +294,45 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
     const authoredSelected = args.case === undefined ? authoredCaseFiles : authoredCaseFiles.filter((file) => file.replace(/\.ya?ml$/i, '') === args.case);
     // A named case is an authored assertion; it intentionally never causes a model call.
     if (wantsCases && args.case !== undefined && authoredSelected.length === 0) return failure(`No eval case named ${args.case} for ${local.name}.`);
-    const { generateCases, generateTriggers } = plannedGeneration(args, assets);
+    const planned = plannedGeneration(args, assets);
+    // §3.2: head-to-head cases always come from the brief — authored cases belong to one skill,
+    // --case is refused, and --no-gen is refused above.
+    const generateCases = rival === undefined ? planned.generateCases : true;
+    const generateTriggers = rival === undefined && planned.generateTriggers;
+
+    // §3: the brief is the whole neutrality guarantee — the only thing the case generator sees,
+    // and a human signs its text.
+    let brief: { text: string; source: 'derived' | 'supplied'; order: string[]; path: string } | undefined;
+    if (rival !== undefined) {
+      const names = [local.name, rival.name];
+      if (suppliedBrief !== undefined) {
+        brief = { text: suppliedBrief.text, source: 'supplied', order: [...names].sort(), path: suppliedBrief.path };
+      } else {
+        const derived = await deriveBrief({
+          agent: args.agent ?? systemAgent, model,
+          skills: [
+            { name: local.name, skill: candidateFiles.files.get('SKILL.md')?.toString('utf8') ?? '', files: [...candidateFiles.files.keys()].sort() },
+            { name: rival.name, skill: (await sourceFiles(rival.dir)).files.get('SKILL.md')?.toString('utf8') ?? '', files: [] },
+          ],
+        });
+        if (!derived.ok) return failure(derived.error);
+        // --commit is refused in this mode, so generation never rewrites the skill and
+        // `regenerated` stays false: this is the same path the run tree gets below.
+        const briefDir = join(store.root, 'evals', 'local', candidateDigest.replace(/^sha256:/, ''), runId);
+        const briefPath = join(briefDir, 'brief.md');
+        await mkdir(briefDir, { recursive: true, mode: 0o700 });
+        await writeFile(briefPath, `# generated by terum-skills eval-gen — review before trusting\n# model: ${model} · engine: ${packageVersion() ?? 'unknown'} · ${runAt.toISOString()}\n${derived.value.brief}\n`, 'utf8');
+        io.print('');
+        io.print(derived.value.brief);
+        io.print('');
+        io.print(`brief: ${briefPath}`);
+        if (derived.value.warning !== undefined) io.print(`Note: the brief contains the word '${derived.value.warning}', which is also a skill name here. It reads as an ordinary word — check that it does.`);
+        if (!await io.confirm('Use this brief?')) {
+          return failure(`Stopped without running. Edit ${briefPath} so it describes the job fairly to both skills, then re-run with --brief ${briefPath}.`);
+        }
+        brief = { text: derived.value.brief, source: 'derived', order: derived.value.order, path: briefPath };
+      }
+    }
     let generated: GeneratedAssets = {};
     if (generateCases || generateTriggers) {
       const catalog = await endorsedCatalog(local.libraryRoot, { name: local.name, description });
@@ -293,6 +348,7 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
         cases: generateCases,
         triggers: generateTriggers,
         shape: frontmatter?.metadata?.eval?.shape,
+        ...(brief === undefined ? {} : { brief: brief.text }),
       });
       if (!built.ok) return failure(built.error);
       generated = built.value;
@@ -426,7 +482,7 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
         if (output.dropped) droppedCases[suite.value.name] = output.dropped;
       }
     }
-    const summary = aggregate(rows, arms, expectedRows, environmentSkips, droppedCases, suiteRan);
+    const summary = aggregate(rows, arms, expectedRows, environmentSkips, droppedCases, suiteRan, rival === undefined ? 'standard' : 'head-to-head');
     await writeRunTree(runDir, {
       team: teamName, skill_id: skillId, skill_name: local.name, run_id: runId,
       cc_version: preflight.value.ccVersion, model, judge_model: args.judgeModel ?? model,
@@ -483,7 +539,10 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
     const source = `${JSON.stringify(receipt.value, null, 2)}\n`;
     await writeFile(join(runDir, 'receipt.json'), source, 'utf8');
     if (generated.cases !== undefined || generated.suite !== undefined || generated.triggers !== undefined) announceGeneratedAssets(io, wantsCases, wantsTriggers, generated, join(runDir, 'generated'));
-    io.print(renderReport(summary, triggers));
+    io.print(renderReport(summary, triggers, rival === undefined || brief === undefined ? null : {
+      candidate: local.name, rival: rival.name, cases: caseNames.length, k,
+      briefPath: brief.path, briefSource: brief.source,
+    }));
 
     // Running the eval is the sharing step (Ajay, 2026-09-13). When these exact bytes are ALREADY a
     // published version, the receipt has a version to name and nothing else has to move — so it goes
@@ -504,7 +563,9 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
     // produced nothing to share — a folder with no cases and no triggers has no results, and
     // "to share these results" over an empty report is the kind of line users learn to skim.
     const hasResults = summary.expected_rows > 0 || triggers !== null;
-    if (shared === null && hasResults && args.commit !== false && teamName !== null && handle !== null) io.print(shareHint(local.name, summary.verdict, args.form));
+    // IE6 §5.2: a head-to-head never lands a receipt, so there is nothing to offer to share —
+    // and its verdict is null, which is exactly what the hint has no way to render.
+    if (rival === undefined && shared === null && hasResults && args.commit !== false && teamName !== null && handle !== null && summary.verdict !== null) io.print(shareHint(local.name, summary.verdict, args.form));
 
     return success({
       team: teamName, id: skillId, name: local.name, runDir, ccVersion: preflight.value.ccVersion,
