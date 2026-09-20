@@ -155,8 +155,13 @@ export interface GenerateOptions {
 }
 
 /** Generate each requested asset kind with at most two validation-correction re-asks. */
+/** The provenance header every generated asset carries (§3.1: `brief.md` carries it too). */
+export function assetHeader(model: string, engineVersion: string, now: Date): string {
+  return `${HEADER}\n# model: ${model} · engine: ${engineVersion} · ${now.toISOString()}\n`;
+}
+
 export async function generate(options: GenerateOptions): Promise<Result<GeneratedAssets>> {
-  const header = `${HEADER}\n# model: ${options.model} · engine: ${options.engineVersion} · ${options.now.toISOString()}\n`;
+  const header = assetHeader(options.model, options.engineVersion, options.now);
   const skillBytes = Buffer.byteLength(options.skill, 'utf8');
   const out: GeneratedAssets = {};
   if (options.triggers) {
