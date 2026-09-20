@@ -1,6 +1,6 @@
 import type { Backend } from './Backend';
 import { PromptCancelledError } from './types';
-import type { LaunchContext, Run, Frame, PromptQuestion, Result, SetupResult, SetupStep } from './types';
+import type { LaunchContext, Run, Frame, PromptAnswer, PromptQuestion, Result, SetupResult, SetupStep } from './types';
 import { repoIdentity } from './paths';
 import { driveRun } from './drive';
 // CLI keys map to the six drawn tour steps; print-only keys are copy, never placement counters.
@@ -26,7 +26,10 @@ export function printedSetupStep(line:string):SetupStep|null {
  return null;
 }
 export function askedSetupStep(question:string):SetupStep|null {
- if(question==='Use this identity?')return 'team';
+ // The three forms (protocol 2, 2026-09-19) are keyed by their titles; `Use this identity?` is the pre-form CLI's one identity confirm.
+ if(question==='Use this identity?'||question==='Create your team'||question==='Your identity')return 'team';
+ if(question==='Invite teammates')return 'invite';
+ if(question==='Claude Code integration')return 'hook';
  if(question==='Add a project?'||question==='Which folder?')return 'projects';
  if(question.startsWith('Record ')||question.startsWith('Publish your version of '))return 'existing';
  if(question.startsWith('Evaluate the ')||question==='How many at a time?'||question.startsWith('Continue with the next '))return 'evals';
@@ -46,7 +49,7 @@ export interface SetupSession {
  stop(): Promise<void>;
  snapshot(): SetupSnapshot;
  subscribe(listener: () => void): () => void;
- start(ask: (question: PromptQuestion) => Promise<string | boolean>): Promise<void>;
+ start(ask: (question: PromptQuestion) => Promise<PromptAnswer>): Promise<void>;
 }
 const sessions = new WeakMap<Backend, Map<string, SetupSession>>();
 export function existingSetupSession(backend: Backend, launch: LaunchContext): SetupSession | null {
@@ -61,7 +64,7 @@ export function setupSession(backend: Backend, launch: LaunchContext): SetupSess
  let current = initial(1);
  let running: Promise<void> | null = null;
  let run: Run<SetupResult> | null = null;
- let askHuman: ((question: PromptQuestion) => Promise<string | boolean>) | null = null;
+ let askHuman: ((question: PromptQuestion) => Promise<PromptAnswer>) | null = null;
  let stopped = false;
  let rejectPrompt: ((error: Error) => void) | null = null;
  const listeners = new Set<() => void>();
@@ -98,9 +101,12 @@ export function setupSession(backend: Backend, launch: LaunchContext): SetupSess
       }
      }
      if (!driven) {
+      // One cached status read first, so the adapter knows whether this CLI draws forms (hello.features.form) before
+      // it spells the setup argv; on a machine that already ran any verb this is the cache, not a spawn.
+      await backend.features();
       run = backend.setup({ ...(launch.target ? { target: launch.target } : {}) });
       if (stopped) await run.cancel();
-      driven = await driveRun(run, {}, question => new Promise<string | boolean>((resolve, reject) => {
+      driven = await driveRun(run, {}, question => new Promise<PromptAnswer>((resolve, reject) => {
        rejectPrompt = reject;
        if (stopped) reject(new PromptCancelledError('Cancelled.'));
        else void ask(question).then(resolve, reject);

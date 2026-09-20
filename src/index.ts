@@ -20,7 +20,7 @@ import { buildProgram } from './cli.js';
 import { createExecute } from './lib/execute.js';
 import { terminalPrompter } from './lib/prompt.js';
 import { runShutdownHooks } from './lib/shutdown.js';
-import { FRAMES_FLAG, frameChannel, attemptedVerb, COMMANDER_NON_ERRORS, type ResultOutcome } from './lib/frames.js';
+import { framesFromArgv, frameChannel, attemptedVerb, COMMANDER_NON_ERRORS, type ResultOutcome } from './lib/frames.js';
 
 // A reader that closes early (`terum-skills ls | head -5`) surfaces as an asynchronous 'error' on
 // the stream, reachable by no try/catch below, and a broken pipe is not a failure of the verb. A
@@ -47,10 +47,7 @@ const form = await resolveInvocationForm({ launch, env: process.env, platform: p
 // global and position-independent, so it is taken off argv before commander sees it; the same
 // Result → exit-code contract applies, plus one terminal `result` frame per run. The session hook
 // is refused here: its stdout is the reload directive, which is not a frame.
-const separator = process.argv.indexOf('--');
-const prefixEnd = separator === -1 ? process.argv.length : separator;
-const frames = process.argv.slice(0, prefixEnd).includes(FRAMES_FLAG);
-const argv = process.argv.filter((argument, index) => index >= prefixEnd || argument !== FRAMES_FLAG);
+const { frames, shellProtocol, argv } = framesFromArgv(process.argv);
 if (argv[2] === 'serve') {
   // A session owns stdin and many results; never attach the one-shot channel/report sink.
   const diagnostic = (line: string) => { process.stderr.write(`${line}\n`); };
@@ -74,7 +71,7 @@ if (argv[2] === 'serve') {
 // on Windows process.kill(self) is TerminateProcess, which runs no 'exit' handler, so the clone's
 // writer lock would be left behind for up to a minute. process.exit runs the hooks' children-killing
 // and then lets signal-exit release every lock this process holds.
-const channel = frames ? frameChannel({ onCancel: () => { runShutdownHooks(); process.exit(143); }, input: process.stdin, output: process.stdout, diagnostic: (line) => { process.stderr.write(`${line}\n`); } }) : undefined;
+const channel = frames ? frameChannel({ onCancel: () => { runShutdownHooks(); process.exit(143); }, input: process.stdin, output: process.stdout, shellProtocol, diagnostic: (line) => { process.stderr.write(`${line}\n`); } }) : undefined;
 let reported = false;
 const report = (outcome: ResultOutcome) => {
   if (!channel || reported) return;

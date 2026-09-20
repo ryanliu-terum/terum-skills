@@ -17,7 +17,7 @@ export interface Identity { handle: string; displayName: string; email: string; 
 export interface GhState { installed: boolean; authenticated: boolean; }
 
 export const MAX_ATTEMPTS = 3;
-const GITHUB_LOGIN_RULE = 'a GitHub login is 1-39 letters, digits, or single internal hyphens; enter - if you have none';
+export const GITHUB_LOGIN_RULE = 'a GitHub login is 1-39 letters, digits, or single internal hyphens; enter - if you have none';
 
 /** Offline executable presence; never probes credentials. */
 export async function gitState(runner: Runner = systemRunner): Promise<{ installed: boolean }> {
@@ -72,21 +72,36 @@ export interface IdentityOptions {
  * each with the same defaults (acceptance A2, 2026-09-06). A machine that knows less asks the
  * questions it needs, as before — the confirmation collapses questions, it never skips one.
  */
-export async function collectIdentity(io: Prompter, existing: Config, runner: Runner = systemRunner, options: IdentityOptions = {}): Promise<Identity> {
+/**
+ * What this machine already knows about the person, before anyone is asked: the GitHub login from config or
+ * from gh, the handle from config or the login, the name and email from config or git's global identity.
+ * `githubKnown` is whether the login question is settled (a `-` answered before is stored as '' and counts).
+ * Both `collectIdentity` and setup's identity form start from this one read.
+ */
+export interface IdentityDefaults { github: string; githubKnown: boolean; handle?: string; displayName?: string; email?: string; }
+export async function identityDefaults(existing: Config, runner: Runner = systemRunner, options: IdentityOptions = {}): Promise<IdentityDefaults> {
   // A persisted value that is not a login (written before this validation existed) is no default: it would be re-offered forever.
   let suggested = existing.github && githubLoginSchema.safeParse(existing.github).success ? existing.github : '';
   if (!suggested && options.gh?.authenticated) {
     const login = await runner.run('gh', ['api', 'user', '-q', '.login']);
     if (login.code === 0 && githubLoginSchema.safeParse(login.stdout.trim()).success) suggested = login.stdout.trim();
   }
-  const handleDefault = options.fixedHandle ?? existing.default_handle ?? (suggested || undefined);
-  const nameDefault = existing.display_name ?? (await gitGlobalIdentity(runner, 'user.name'));
+  const handle = options.fixedHandle ?? existing.default_handle ?? (suggested || undefined);
+  const displayName = existing.display_name ?? (await gitGlobalIdentity(runner, 'user.name'));
   // Only a well-formed email is offered: an invalid default would be re-offered on every Enter.
   const gitEmail = existing.email === undefined ? await gitGlobalIdentity(runner, 'user.email') : '';
-  const emailDefault = existing.email ?? (emailSchema.safeParse(gitEmail).success ? gitEmail : undefined);
+  const email = existing.email ?? (emailSchema.safeParse(gitEmail).success ? gitEmail : undefined);
+  return { github: suggested, githubKnown: suggested !== '' || existing.github === '', ...(handle === undefined ? {} : { handle }), ...(displayName ? { displayName } : {}), ...(email === undefined ? {} : { email }) };
+}
+
+export async function collectIdentity(io: Prompter, existing: Config, runner: Runner = systemRunner, options: IdentityOptions = {}): Promise<Identity> {
+  const defaults = await identityDefaults(existing, runner, options);
+  const suggested = defaults.github;
+  const handleDefault = defaults.handle;
+  const nameDefault = defaults.displayName;
+  const emailDefault = defaults.email;
   const handleKnown = handleDefault === undefined ? undefined : handleSchema.safeParse(handleDefault);
-  // A `-` answered before is stored as '' and is an answer; an absent key is not.
-  const githubKnown = suggested !== '' || existing.github === '';
+  const githubKnown = defaults.githubKnown;
   if (githubKnown && handleKnown?.success && nameDefault && emailDefault) {
     const known: Identity = { handle: handleKnown.data, displayName: nameDefault, email: emailDefault, github: suggested };
     const identityLine = `Identity: @${known.handle} — ${known.displayName} <${known.email}>${known.github ? ` (GitHub: ${known.github})` : ' (no GitHub login)'}`;

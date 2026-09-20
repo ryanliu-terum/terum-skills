@@ -115,7 +115,8 @@ export function cliRun<TIn, TOut>(bridge: Bridge, state: Promise<AppState | null
           void bridge.write(id, JSON.stringify({ t: 'answer', id: frame.id, value: false })).catch((error: unknown) => finish({ ok: false, error: `Could not answer terum-skills: ${error instanceof Error ? error.message : String(error)}` }));
           return;
         }
-        push({ t: 'ask', id: frame.id, kind: frame.kind, question: frame.question, ...(frame.default === undefined ? {} : { default: frame.default }), ...(frame.choices === undefined ? {} : { choices: frame.choices }), ...(frame.detail === undefined ? {} : { detail: frame.detail }), ...(frame.descriptions === undefined ? {} : { descriptions: frame.descriptions }) });
+        push({ t: 'ask', id: frame.id, kind: frame.kind, question: frame.question, ...(frame.default === undefined ? {} : { default: frame.default }), ...(frame.choices === undefined ? {} : { choices: frame.choices }), ...(frame.detail === undefined ? {} : { detail: frame.detail }), ...(frame.descriptions === undefined ? {} : { descriptions: frame.descriptions }),
+          ...(frame.fields === undefined ? {} : { fields: frame.fields }), ...(frame.submit === undefined ? {} : { submit: frame.submit }), ...(frame.skippable === undefined ? {} : { skippable: frame.skippable }), ...(frame.skipLabel === undefined ? {} : { skipLabel: frame.skipLabel }), ...(frame.errors === undefined ? {} : { errors: frame.errors }) });
         return;
       }
       case 'progress': { const current = frame.current ?? 0; push({ t: 'progress', done: current, total: Math.max(frame.total ?? current, current, 1), label: frame.step }); return; }

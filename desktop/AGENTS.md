@@ -18,8 +18,8 @@ specs; the maintainers write the specs, run every gate themselves, and do all gi
    greps the tree enforce this. Seam names follow the CLI pinned at `b5c0507`: the verb is `connect`
    (`Backend.connect(args: ConnectArgs): Run<ConnectOutcome | undefined>`, `ConnectResult`, `ConnectBatch`),
    `Backend.uninstallMachine`, `Backend.setup({ target?, offerConnect? })`, `ValidateResult { name, findings,
-   warnings }`. The Prompter has exactly five members: `interactive`, `confirm`, `text`, `select`, `print`
-   (there is no `secret()`).
+   warnings }`. The Prompter has exactly six members: `interactive`, `confirm`, `text`, `select`, `form`, `print`
+   (there is no `secret()`; `form` arrived with frame protocol 2 on 2026-09-19 and is the CLI's `askForm` drawn as one dialog).
 2. **Flags come from the CLI, and every flag has exactly one consumer.** `capabilities()` carries
    `disablePerMachine`, `inboxEventLog`, `offtargetKind`, `machineRegistry`, `perCaseEvalTables` (plus the
    platform-shaped `windowChrome`, `windowControlsEnd`, `openInEditor`, `clipboard`); `features()` carries the CLI's twelve

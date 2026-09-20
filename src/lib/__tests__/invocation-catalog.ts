@@ -64,36 +64,6 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "pattern": "if (presence.kind === 'foreign') throw new Error(`${target} exists and is not the bundled terum-skills edit hook (${presence.why}); move it aside and re-run.`);"
   },
   {
-    "file": "src/lib/editHook.ts",
-    "line": 146,
-    "policy": "not-a-hint",
-    "pattern": "if (state === 'unavailable') { io.print(`The terum-skills edit hook is not bundled in this copy of terum-skills (expected at ${options.source}); skipped.`); return 'unavailable'; }"
-  },
-  {
-    "file": "src/lib/editHook.ts",
-    "line": 147,
-    "policy": "not-a-hint",
-    "pattern": "if (state === 'foreign') { io.print(`${target} exists and is not the bundled terum-skills edit hook; left alone. Move it aside and re-run setup to install it.`); return 'foreign'; }"
-  },
-  {
-    "file": "src/lib/editHook.ts",
-    "line": 150,
-    "policy": "not-a-hint",
-    "pattern": "if (state === 'current' && await eventHookInstalled(options.settingsFile, 'PostToolUse')) { io.print(`The terum-skills edit hook at ${target} is current.`); return 'present'; }"
-  },
-  {
-    "file": "src/lib/editHook.ts",
-    "line": 151,
-    "policy": "not-a-hint",
-    "pattern": "if (state === 'outdated' || state === 'current') { await installEditHook(options); io.print(`Updated the terum-skills edit hook at ${target}.`); return 'replaced'; }"
-  },
-  {
-    "file": "src/lib/editHook.ts",
-    "line": 157,
-    "policy": "not-a-hint",
-    "pattern": "io.print(`Installed the terum-skills edit hook at ${target} and a Write/Edit hook in ${options.settingsFile}.`);"
-  },
-  {
     "file": "src/lib/frames.ts",
     "line": 75,
     "policy": "not-a-hint",
@@ -371,48 +341,6 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
   },
   {
     "file": "src/lib/wrapper.ts",
-    "line": 132,
-    "policy": "not-a-hint",
-    "pattern": "if (state === 'unavailable') { io.print(`The /terum-skills Claude Code skill is not bundled in this copy of terum-skills (expected at ${options.source}); skipped.`); return 'unavailable'; }"
-  },
-  {
-    "file": "src/lib/wrapper.ts",
-    "line": 133,
-    "policy": "not-a-hint",
-    "pattern": "if (state === 'foreign') { io.print(`${directory} exists and is not the bundled /terum-skills skill; left alone. Move it aside and re-run setup to install the bundled one.`); return 'foreign'; }"
-  },
-  {
-    "file": "src/lib/wrapper.ts",
-    "line": 134,
-    "policy": "not-a-hint",
-    "pattern": "if (state === 'current') { io.print(`The /terum-skills Claude Code skill at ${directory} is current.`); return 'present'; }"
-  },
-  {
-    "file": "src/lib/wrapper.ts",
-    "line": 135,
-    "policy": "not-a-hint",
-    "pattern": "if (state === 'outdated') { await installWrapper(options); io.print(`Updated the /terum-skills Claude Code skill at ${directory}.`); return 'replaced'; }"
-  },
-  {
-    "file": "src/lib/wrapper.ts",
-    "line": 136,
-    "policy": "not-a-hint",
-    "pattern": "if (!(await io.confirm(`Install the /terum-skills Claude Code skill so Claude can run terum-skills for you? (writes ${directory})`))) {"
-  },
-  {
-    "file": "src/lib/wrapper.ts",
-    "line": 137,
-    "policy": "not-a-hint",
-    "pattern": "io.print('Skipped the /terum-skills skill; re-run setup to install it later.');"
-  },
-  {
-    "file": "src/lib/wrapper.ts",
-    "line": 141,
-    "policy": "not-a-hint",
-    "pattern": "io.print(`Installed the /terum-skills Claude Code skill at ${directory}.`);"
-  },
-  {
-    "file": "src/lib/wrapper.ts",
     "line": 31,
     "policy": "not-a-hint",
     "pattern": "/** The command spelling the placed copy teaches (lib/invocation.ts pinnedPrefix); the bundled copy says `npx -y terum-skills@latest`. */"
@@ -578,24 +506,6 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "line": 91,
     "policy": "prose",
     "pattern": "'Welcome to terum-skills.',"
-  },
-  {
-    "file": "src/commands/setup.ts",
-    "line": 93,
-    "policy": "prose",
-    "pattern": "'This wizard helps you create a team, join one, invite teammates, and offer the session hook, the /terum-skills Claude Code skill and a reminder to publish a skill after Claude edits one; re-run it any time to continue, and leave the invitation question blank to skip it.',"
-  },
-  {
-    "file": "src/commands/setup.ts",
-    "line": 145,
-    "policy": "prose",
-    "pattern": "`Setup stopped here, so the project, eval, session hook, /terum-skills and edit-hook steps were not offered — run \\`${invocation(form, 'setup')}\\` again to finish.`,"
-  },
-  {
-    "file": "src/commands/setup.ts",
-    "line": 508,
-    "policy": "prose",
-    "pattern": "// The /terum-skills Claude Code skill ships inside this package, and setup is the one onboarding"
   },
   {
     "file": "src/commands/status.ts",
@@ -1237,7 +1147,7 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "file": "docs/frame-protocol.md",
     "line": 7,
     "policy": "prose",
-    "pattern": "The flag is position-independent before the first `--` (`--frames status` and `status --frames` are the same) and is removed before the verb's own options are parsed."
+    "pattern": "The flag is position-independent before the first `--` (`--frames status` and `status --frames` are the same) and is removed before the verb's own options are parsed. `--frames=2` is the same flag with a declaration: the shell renders `form` asks (below). A bare `--frames` is protocol 1, and every form is then asked as its fields, one question at a time, exactly as before. Send `=2` only to a CLI whose `hello.features.form` is `true`; an older CLI would hand the spelling to commander as an unknown option."
   },
   {
     "file": "docs/frame-protocol.md",
@@ -1388,12 +1298,6 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "line": 145,
     "policy": "prose",
     "pattern": "command: use `sync`. Neither belongs in the advertised verb list."
-  },
-  {
-    "file": "docs/frame-protocol.md",
-    "line": 147,
-    "policy": "prose",
-    "pattern": "`hello.features` names `libraryProjects`, `projects`, `memberRole`, `localIdentity`, `roles`, `favorites`, `follow`, `lastSeen`, `installScope`, `inviteScoping`, `disablePerMachine`, `projectMembers`, `liftOnCards`, `runEvalInApp`, `perCase`, `progress`, `refresh`, `appUpdate`, `reconcile`, `serve`, and `usage`."
   },
   {
     "file": "docs/frame-protocol.md",
@@ -2084,5 +1988,95 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "line": 80,
     "policy": "prose",
     "pattern": "- **Skill content itself.** A skill your team publishes is text Claude Code reads; terum-skills"
+  },
+  {
+    "file": "docs/frame-protocol.md",
+    "line": 191,
+    "policy": "prose",
+    "pattern": "`hello.features` names `libraryProjects`, `projects`, `memberRole`, `localIdentity`, `roles`, `favorites`, `follow`, `lastSeen`, `installScope`, `inviteScoping`, `disablePerMachine`, `projectMembers`, `liftOnCards`, `runEvalInApp`, `perCase`, `progress`, `refresh`, `appUpdate`, `reconcile`, `serve`, `usage`, and `form`."
+  },
+  {
+    "file": "docs/frame-protocol.md",
+    "line": 17,
+    "policy": "prose",
+    "pattern": "| `ask` | `{\"t\":\"ask\",\"id\":\"q1\",\"kind\":\"confirm\"\\|\"text\"\\|\"select\"\\|\"path\"\\|\"form\",\"question\":\"...\",\"default\":\"...\",\"choices\":[...],\"detail\":[\"...\"]}` | The verb is blocked until an `answer` with the same `id` arrives. `default` appears for `text`, `path`, and `select` when the verb offers one; `choices` only for `select`. `path` is `text` whose answer is a filesystem path: a shell may offer a folder chooser beside the field, a terminal reads a line as usual, and the answer is a string either way — a shell that treats `path` as `text` is correct, just less convenient. `detail` is optional and carries the lines the person needs in order to answer (for example the identity line, or a skill's requested allowed-tools); render it with the question, as the dialog's description, not in the transcript; absent means none. `form` (protocol 2 only, 2026-09-19) is several fields on one screen with one confirm: `question` is the title, `fields` is an ordered list of `{\"id\",\"kind\":\"text\",\"label\",\"default\"?,\"note\"?,\"readOnly\"?,\"required\"?,\"follows\"?:{\"field\",\"template\"}}` and `{\"id\",\"kind\":\"checkbox\",\"label\",\"default\",\"note\"?,\"disabled\"?}`, `submit` is the confirm button's label (default Continue), `skippable` adds a Skip button (`skipLabel` names it), and `errors` maps field ids to a one-line problem with the previous answers, so the same form is drawn again with those fields marked. A `follows` field tracks the named field through `template` (`{value}` replaced) until the person edits it. A read-only field is shown and never editable; a disabled checkbox is shown checked and not changeable. `setup` asks three: the team and identity form (`Create your team`, or `Your identity` for a joiner), `Invite teammates`, and `Claude Code integration`. |"
+  },
+  {
+    "file": "src/commands/setup.ts",
+    "line": 96,
+    "policy": "prose",
+    "pattern": "'This wizard helps you create a team, join one, invite teammates, and offer the session hook, the /terum-skills Claude Code skill and a reminder to publish a skill after Claude edits one; re-run it any time to continue, and skip the invitation step if you have nobody to invite yet.',"
+  },
+  {
+    "file": "src/commands/setup.ts",
+    "line": 564,
+    "policy": "prose",
+    "pattern": "// The Claude Code pieces — the session hook, the bundled /terum-skills skill (npm-first, Ryan 2026-09-08)"
+  },
+  {
+    "file": "src/lib/claudeCode.ts",
+    "line": 9,
+    "policy": "prose",
+    "pattern": "* fetch the team clone at session start; the /terum-skills skill (wrapper.ts) is a folder Claude reads; the"
+  },
+  {
+    "file": "src/lib/claudeCode.ts",
+    "line": 56,
+    "policy": "prose",
+    "pattern": "else if (editHook === 'foreign') { io.print(`${editHookAt} exists and is not the bundled terum-skills edit hook; left alone. Move it aside and re-run setup to install it.`); outcomes.editHook = 'foreign'; }"
+  },
+  {
+    "file": "src/lib/claudeCode.ts",
+    "line": 59,
+    "policy": "prose",
+    "pattern": "else if (editHook === 'outdated' || editHook === 'current') { await installEditHook(options.editHook); io.print(`Updated the terum-skills edit hook at ${editHookAt}.`); outcomes.editHook = 'replaced'; offer('editHook', true, `Updated at ${editHookAt}.`); }"
+  },
+  {
+    "file": "src/lib/claudeCode.ts",
+    "line": 48,
+    "policy": "prose",
+    "pattern": "else if (wrapper === 'foreign') { io.print(`${wrapperAt} exists and is not the bundled /terum-skills skill; left alone. Move it aside and re-run setup to install the bundled one.`); outcomes.wrapper = 'foreign'; }"
+  },
+  {
+    "file": "src/lib/claudeCode.ts",
+    "line": 50,
+    "policy": "prose",
+    "pattern": "else if (wrapper === 'outdated') { await installWrapper(options.wrapper); io.print(`Updated the /terum-skills Claude Code skill at ${wrapperAt}.`); outcomes.wrapper = 'replaced'; offer('wrapper', true, `Updated at ${wrapperAt}.`); }"
+  },
+  {
+    "file": "src/lib/claudeCode.ts",
+    "line": 55,
+    "policy": "prose",
+    "pattern": "if (editHook === 'unavailable') { io.print(`The terum-skills edit hook is not bundled in this copy of terum-skills (expected at ${options.editHook.source}); skipped.`); outcomes.editHook = 'unavailable'; }"
+  },
+  {
+    "file": "src/lib/claudeCode.ts",
+    "line": 47,
+    "policy": "prose",
+    "pattern": "if (wrapper === 'unavailable') { io.print(`The /terum-skills Claude Code skill is not bundled in this copy of terum-skills (expected at ${options.wrapper.source}); skipped.`); outcomes.wrapper = 'unavailable'; }"
+  },
+  {
+    "file": "src/lib/claudeCode.ts",
+    "line": 76,
+    "policy": "prose",
+    "pattern": "io.print(`Installed the /terum-skills Claude Code skill at ${wrapperAt}.`);"
+  },
+  {
+    "file": "src/lib/claudeCode.ts",
+    "line": 81,
+    "policy": "prose",
+    "pattern": "io.print(`Installed the terum-skills edit hook at ${editHookAt} and a Write/Edit hook in ${options.editHook.settingsFile}.`);"
+  },
+  {
+    "file": "src/lib/claudeCode.ts",
+    "line": 19,
+    "policy": "prose",
+    "pattern": "wrapper: 'Evaluate, publish, and discover skills in Claude Code through a /terum-skills skill.',"
+  },
+  {
+    "file": "src/lib/claudeCode.ts",
+    "line": 77,
+    "policy": "prose",
+    "pattern": "} else if (outcomes.wrapper === 'declined') io.print('Skipped the /terum-skills skill; re-run setup to install it later.');"
   }
 ];

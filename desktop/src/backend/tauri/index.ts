@@ -1012,7 +1012,12 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
     team: (args: TeamArgs) => args.kind === 'move'
       ? run(teamArgv(args), cliTeamMove, (value): TeamResult => ({ name: value.to, kind: 'move', restored: value.restored, missing: value.missing, failed: value.failed }), ['config', 'clone', 'placed'])
       : run(teamArgv(args), cliTeam, (value): TeamResult => ({ name: value.team, kind: args.kind }), ['config', 'clone', 'placed']),
-    setup: (args: SetupArgs) => run(['setup', ...(args.target ? ['--', args.target] : [])], cliSetup, (value): SetupResult => ({ team: value.team, role: value.role, steps: value.steps ?? null }), ['config', 'clone', 'placed']),
+    // `--frames=2` declares that this app draws `form` asks (protocol 2), so setup's team, invitation and Claude Code
+    // questions arrive as three forms instead of one dialog per field. Only a CLI whose cached hello advertises `form`
+    // understands the spelling (an older CLI would hand it to commander as an unknown option), so the caller reads
+    // `features()` first when no hello has been seen yet (setup-session.ts does); with no hello, the CLI falls back
+    // to one question per field, which every CLI understands.
+    setup: (args: SetupArgs) => run(['setup', ...(hello?.features.form === true ? ['--frames=2'] : []), ...(args.target ? ['--', args.target] : [])], cliSetup, (value): SetupResult => ({ team: value.team, role: value.role, steps: value.steps ?? null }), ['config', 'clone', 'placed']),
     // Settings ▸ Evals defaults reach every run as explicit flags ("the flags the app passes") through the one producer in eval-flags.ts; an unset pref (or the k '—' sentinel) passes nothing and the CLI falls back to its own defaults (k = 1, model sonnet).
     eval: (args: EvalArgs) => run(['eval', ...evalPrefFlags(prefs), ...(args.team ? ['--team', args.team] : []), '--', args.ref], cliEval, (value): EvalResult => ({ name:value.name,runDir:value.runDir,executionStatus:value.executionStatus,team:value.team,id:value.id,shareHint:value.shareHint===true }), ['config', 'placed']),
     // Several at once: the same receipts land locally, so the same boards move. A request the CLI would refuse throws here, before any spawn.

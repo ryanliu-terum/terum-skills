@@ -15,8 +15,10 @@ it('consumes a hard failure so the same launch does not restart, but Retry does'
  expect(session.snapshot()).toMatchObject({outcome:'failed',result:{ok:false,error:'Setup failed.'}});
  expect(backend.prefs.get('launch:consumedWrittenAt','')).toBe(STATE.writtenAt);
  expect(decide(await backend.launchContext(),backend.prefs.get('launch:consumedWrittenAt',''),undefined)).toBe('none');
- await session.start(async()=>true);expect(fake.spawns).toHaveLength(1);
- await session.retry();expect(fake.spawns).toHaveLength(2);expect(session.snapshot().attempt).toBe(2);
+ // One cached status read precedes the first setup (it tells the adapter whether the CLI draws forms), so only setup spawns are counted.
+ const setups=()=>fake.spawns.filter(spawn=>spawn.args[0]==='setup');
+ await session.start(async()=>true);expect(setups()).toHaveLength(1);
+ await session.retry();expect(setups()).toHaveLength(2);expect(session.snapshot().attempt).toBe(2);
 });
 it('consumes a thrown setup failure',async()=>{
  const {backend}=failedSetup();vi.spyOn(backend,'setup').mockImplementation(()=>{throw new Error('Spawn failed.');});

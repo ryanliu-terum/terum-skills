@@ -43,3 +43,17 @@ it('a question the run finishes past is withdrawn too, and the finished result s
  expect(await driveRun(run,{},unexpected)).toEqual({ok:false,error:'The agent exited.'});
  expect(aborted).toEqual([true]);
 });
+
+// A form ask travels whole (protocol 2): the fields and errors reach the prompt provider as the question, and the answer is one object or null.
+it('hands a form ask to the prompt provider with its fields and answers the run with the object it returns',async()=>{
+ const fields=[{id:'team',kind:'text' as const,label:'Team name',required:true},{id:'hook',kind:'checkbox' as const,label:'Hook',default:true}];
+ type FormAsk=(kind:'form',question:string,opts:object)=>Promise<unknown>;
+ const run=createRun(async ctx=>({ok:true,value:await (ctx.ask as unknown as FormAsk)('form','Create your team',{fields,submit:'Create team',errors:{team:'taken'}})}));
+ const unexpected=vi.fn().mockResolvedValue({team:'alpha',hook:false});
+ const onAsk=vi.fn();
+ expect(await driveRun(run,{},unexpected,undefined,undefined,onAsk)).toEqual({ok:true,value:{team:'alpha',hook:false}});
+ expect(onAsk).toHaveBeenCalledExactlyOnceWith({kind:'form',question:'Create your team',fields,submit:'Create team',errors:{team:'taken'}});
+ expect(unexpected).toHaveBeenCalledExactlyOnceWith({kind:'form',question:'Create your team',fields,submit:'Create team',errors:{team:'taken'}},{signal:expect.any(AbortSignal)});
+ const skipped=createRun(async ctx=>({ok:true,value:await (ctx.ask as unknown as FormAsk)('form','Invite teammates',{fields,skippable:true})}));
+ expect(await driveRun(skipped,{'Invite teammates':null},vi.fn())).toEqual({ok:true,value:null});
+});

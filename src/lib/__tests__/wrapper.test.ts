@@ -1,10 +1,10 @@
 import { mkdir, readFile, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { BUNDLED_WRAPPER, defaultWrapperOptions, inspectWrapper, installWrapper, isManagedWrapper, offerWrapper, removeWrapper, renderWrapper, wrapperDestination, wrapperState } from '../wrapper.js';
+import { BUNDLED_WRAPPER, defaultWrapperOptions, inspectWrapper, installWrapper, isManagedWrapper, removeWrapper, renderWrapper, wrapperDestination, wrapperState } from '../wrapper.js';
 import { NPX_PREFIX, pinnedPrefix } from '../invocation.js';
 import { packageVersion } from '../package.js';
-import { BUNDLED_SKILL_SOURCE, ScriptedPrompter, SYMLINKS_SUPPORTED, temporaryDirectory, wrapperFor } from './fixtures.js';
+import { BUNDLED_SKILL_SOURCE, SYMLINKS_SUPPORTED, temporaryDirectory, wrapperFor } from './fixtures.js';
 
 const OLD_COPY = '---\nname: terum-skills\ndescription: an older bundled copy\nmetadata:\n  managed-by: terum-skills\n---\nold body\n';
 const SOMEONE_ELSES = '---\nname: terum-skills\ndescription: someone else\'s skill under the same name\n---\n';
@@ -97,47 +97,9 @@ describe('the bundled /terum-skills Claude Code skill', () => {
     const missing = { ...options, source: join(root, 'nowhere', 'SKILL.md') };
     expect(await wrapperState(missing)).toBe('unavailable');
     await expect(installWrapper(missing)).rejects.toThrow(`The /terum-skills Claude Code skill is not bundled in this copy of terum-skills (expected at ${missing.source}).`);
-    const io = new ScriptedPrompter([], []);
-    expect(await offerWrapper(io, missing)).toBe('unavailable');
-    expect(io.asked).toEqual([]);
-    expect(io.lines).toEqual([`The /terum-skills Claude Code skill is not bundled in this copy of terum-skills (expected at ${missing.source}); skipped.`]);
     expect(await inspectWrapper(options.skillsRoot)).toEqual({ kind: 'absent' });
     // A source without the marker is not a bundle either: setup could never recognise the copy it placed.
     const unmarked = join(root, 'unmarked.md'); await writeFile(unmarked, SOMEONE_ELSES);
     expect(await wrapperState({ ...options, source: unmarked })).toBe('unavailable');
-  });
-
-  it('the offer asks exactly once and only for a first install; a re-run refreshes or reports without asking and leaves a foreign folder alone', async () => {
-    const { options, destination } = await fresh();
-    const question = `Install the /terum-skills Claude Code skill so Claude can run terum-skills for you? (writes ${destination})`;
-    const declined = new ScriptedPrompter([], [false]);
-    expect(await offerWrapper(declined, options)).toBe('declined');
-    expect(declined.asked).toEqual([question]);
-    expect(declined.lines).toEqual(['Skipped the /terum-skills skill; re-run setup to install it later.']);
-    expect(await wrapperState(options)).toBe('absent');
-
-    const accepted = new ScriptedPrompter([], [true]);
-    expect(await offerWrapper(accepted, options)).toBe('installed');
-    expect(accepted.asked).toEqual([question]);
-    expect(accepted.lines).toEqual([`Installed the /terum-skills Claude Code skill at ${destination}.`]);
-
-    const again = new ScriptedPrompter([], []);
-    expect(await offerWrapper(again, options)).toBe('present');
-    expect(again.asked).toEqual([]);
-    expect(again.lines).toEqual([`The /terum-skills Claude Code skill at ${destination} is current.`]);
-
-    await writeFile(join(destination, 'SKILL.md'), OLD_COPY);
-    const refreshed = new ScriptedPrompter([], []);
-    expect(await offerWrapper(refreshed, options)).toBe('replaced');
-    expect(refreshed.asked).toEqual([]);
-    expect(refreshed.lines).toEqual([`Updated the /terum-skills Claude Code skill at ${destination}.`]);
-    expect(await readFile(join(destination, 'SKILL.md'), 'utf8')).toBe(await readFile(options.source, 'utf8'));
-
-    await writeFile(join(destination, 'SKILL.md'), SOMEONE_ELSES);
-    const foreign = new ScriptedPrompter([], []);
-    expect(await offerWrapper(foreign, options)).toBe('foreign');
-    expect(foreign.asked).toEqual([]);
-    expect(foreign.lines).toEqual([`${destination} exists and is not the bundled /terum-skills skill; left alone. Move it aside and re-run setup to install the bundled one.`]);
-    expect(await readFile(join(destination, 'SKILL.md'), 'utf8')).toBe(SOMEONE_ELSES);
   });
 });

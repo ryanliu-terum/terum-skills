@@ -25,7 +25,8 @@ describe('M3 setup walkthrough', () => {
     const aliceStore = createConfigStore(join(root, 'alice-state'));
     const bare = join(root, 'team.git'); await git(['init', '-q', '--bare', bare]);
     const aliceRunner = mappedRunner(REMOTE, bare, fakeGh('alice', { 'repo create team --private': { code: 0, stdout: '', stderr: '' }, 'repo view team --json nameWithOwner -q .nameWithOwner': { code: 0, stdout: 'alice/team\n', stderr: '' } }));
-    const aliceIo = new ScriptedPrompter(['Create a new team', 'team', '', '', 'Alice', 'alice@example.com', 'team', ''], [false, false, false, false], true);
+    // The team form on a terminal: name, then the two typed fields; the offered block is declined so the repository name can be typed as `team` (the fixture's remote) and the handle left at its default; no invitation; projects no; the Claude Code block declined and each piece declined.
+    const aliceIo = new ScriptedPrompter(['Create a new team', 'team', 'Alice', 'alice@example.com', 'team', '', ''], [false, false, false, false, false, false], true);
     const alice = await setup({ app: false, config: aliceStore, home: join(root, 'alice-home'), runner: aliceRunner, hook: hookFor(root, 'alice-setup'), wrapper: wrapperFor(join(root, 'alice-home')), editHook: editHookFor(join(root, 'alice-state'), hookFor(root, 'alice-setup').settingsFile), communityUrl: '' }, aliceIo);
     expect(alice).toMatchObject({ ok: true, value: { steps: { team: 'done', invite: 'skipped', done: 'printed' } } });
     expect(aliceIo.asked).toContain(PROJECTS_QUESTION);

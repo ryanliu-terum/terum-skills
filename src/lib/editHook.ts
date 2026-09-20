@@ -5,7 +5,6 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { editHookEntry, installEventHook, removeEventHook, eventHookInstalled, type HookTarget } from './hook.js';
-import { Prompter } from './prompt.js';
 
 /**
  * The PostToolUse(Write|Edit) hook script: the one thing in this package that speaks at the moment a
@@ -131,29 +130,3 @@ export async function editHookInstalled(options: ResolvedEditHookOptions): Promi
   return (await editHookState(options)) === 'current' && await eventHookInstalled(options.settingsFile, 'PostToolUse');
 }
 
-export type EditHookOffer = 'installed' | 'replaced' | 'present' | 'declined' | 'foreign' | 'unavailable';
-
-/**
- * Setup's offer, in the session hook's shape and with its own y/N. It is a SEPARATE question from
- * the session hook on purpose: that hook fetches on a schedule and this one reads what the agent is
- * editing, so folding this into a yes already given would install something the user never agreed
- * to. An outdated copy of our own is refreshed without asking — that consent was given when it was
- * installed, and a stale script gives wrong advice.
- */
-export async function offerEditHook(io: Prompter, options: ResolvedEditHookOptions): Promise<EditHookOffer> {
-  const target = editHookDestination(options.storeRoot);
-  const state = await editHookState(options);
-  if (state === 'unavailable') { io.print(`The terum-skills edit hook is not bundled in this copy of terum-skills (expected at ${options.source}); skipped.`); return 'unavailable'; }
-  if (state === 'foreign') { io.print(`${target} exists and is not the bundled terum-skills edit hook; left alone. Move it aside and re-run setup to install it.`); return 'foreign'; }
-  // `current` still checks the entry: a script the settings file no longer names never runs, and
-  // that is the state a hand-edited settings.json leaves behind.
-  if (state === 'current' && await eventHookInstalled(options.settingsFile, 'PostToolUse')) { io.print(`The terum-skills edit hook at ${target} is current.`); return 'present'; }
-  if (state === 'outdated' || state === 'current') { await installEditHook(options); io.print(`Updated the terum-skills edit hook at ${target}.`); return 'replaced'; }
-  if (!(await io.confirm(`Remind Claude Code to publish a skill after it edits one? (installs ${target} and a Write/Edit hook in ${options.settingsFile})`))) {
-    io.print('Skipped the edit hook; re-run setup to install it later.');
-    return 'declined';
-  }
-  await installEditHook(options);
-  io.print(`Installed the terum-skills edit hook at ${target} and a Write/Edit hook in ${options.settingsFile}.`);
-  return 'installed';
-}

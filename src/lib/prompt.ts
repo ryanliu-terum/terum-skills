@@ -20,6 +20,120 @@ export interface AskOptions {
 export interface ProgressUpdate { step: string; current?: number; total?: number; }
 
 /**
+ * One field of a form (Ryan, 2026-09-19: setup asks its related questions on one screen with one Confirm
+ * instead of one dialog per question). A text field carries a prefilled default the person may edit; a
+ * read-only one is shown, never asked. `follows` is a display convenience for a shell: the field tracks
+ * another field's value through `template` (`{value}` is replaced) until the person edits it, which is
+ * how the repository name follows the team name. The terminal fallback computes the same default.
+ */
+export interface FormTextField {
+  id: string;
+  kind: 'text';
+  label: string;
+  default?: string;
+  /** One line under the field: what the value is for, or what it is published to. */
+  note?: string;
+  readOnly?: boolean;
+  required?: boolean;
+  follows?: { field: string; template: string };
+}
+export interface FormCheckboxField {
+  id: string;
+  kind: 'checkbox';
+  label: string;
+  default: boolean;
+  note?: string;
+  /** Shown checked and not changeable (already installed); its answer is its default. */
+  disabled?: boolean;
+}
+export type FormField = FormTextField | FormCheckboxField;
+export type FormAnswers = Record<string, string | boolean>;
+export interface FormOptions {
+  /** Lines a person needs in order to answer, rendered with the title. */
+  detail?: readonly string[];
+  /** The confirm button's label; a shell defaults to Continue. */
+  submit?: string;
+  /** The form may be skipped as a whole (invitations, the Claude Code offer): a shell shows a Skip button and the answer is null. */
+  skippable?: boolean;
+  skipLabel?: string;
+  /** Per-field problems with the previous answers, so the same form is shown again with the fields marked. */
+  errors?: Readonly<Record<string, string>>;
+  /** Terminal fallback only: the question that offers every prefilled value at once (default `Use these values?`). */
+  confirmQuestion?: string;
+  /** Internal terminal presentation; never changes frame question text. */
+  decorated?: boolean;
+}
+
+export const MAX_FORM_ATTEMPTS = 5;
+
+/**
+ * The one way a verb asks a form. A channel that can draw one (frame mode, when the shell declared it can
+ * render forms) gets the whole form as one question; every other channel gets the same fields one line at a
+ * time. The fallback keeps acceptance A2 (2026-09-06) and generalises it: fields with no default are asked
+ * first, in order; every field that already has a value is then shown once and confirmed with one Y/n, and
+ * only a `n` asks them one by one. A read-only field is printed, a disabled checkbox is silently its default.
+ * Per-field `errors` mark those fields as must-ask on the next pass.
+ *
+ * Returns null only for a skippable form that was skipped: on a shell, the Skip button; on a terminal, every
+ * text field left blank and no checkbox to answer.
+ */
+export async function askForm(io: Prompter, title: string, fields: readonly FormField[], options: FormOptions = {}): Promise<FormAnswers | null> {
+  if (io.form) return io.form(title, fields, options);
+  const answers: FormAnswers = {};
+  const errors = options.errors ?? {};
+  io.print(title);
+  for (const line of options.detail ?? []) io.print(line);
+  for (const [id, problem] of Object.entries(errors)) {
+    const field = fields.find((candidate) => candidate.id === id);
+    io.print(`${field?.label ?? id}: ${problem}`);
+  }
+  const offered: FormField[] = [];
+  const derivedDefault = (field: FormTextField): string | undefined => {
+    if (field.follows && (field.default === undefined || field.default === '')) {
+      const source = answers[field.follows.field];
+      if (typeof source === 'string' && source !== '') return field.follows.template.replaceAll('{value}', source);
+    }
+    return field.default;
+  };
+  const askText = async (field: FormTextField, fallback: string | undefined): Promise<void> => {
+    const value = await io.text(field.label, fallback, { ...(field.note ? { detail: [field.note] } : {}), ...(options.decorated === undefined ? {} : { decorated: options.decorated }) });
+    answers[field.id] = value;
+  };
+  for (const field of fields) {
+    if (field.kind === 'checkbox') {
+      answers[field.id] = field.default;
+      if (!field.disabled) offered.push(field);
+      continue;
+    }
+    if (field.readOnly) {
+      answers[field.id] = field.default ?? '';
+      io.print(`${field.label}: ${answers[field.id] === '' ? '(none)' : String(answers[field.id])}`);
+      continue;
+    }
+    const fallback = derivedDefault(field);
+    if (fallback === undefined || fallback === '' || Object.hasOwn(errors, field.id)) await askText(field, fallback);
+    else { answers[field.id] = fallback; offered.push(field); }
+  }
+  if (offered.length > 0) {
+    // Fields with defaults are also answered by an `errors` pass whose problem is elsewhere: show them and confirm once.
+    const shown = offered.map((field) => field.kind === 'checkbox' ? `[${answers[field.id] ? 'x' : ' '}] ${field.label}` : `${field.label}: ${String(answers[field.id])}`);
+    const keep = await io.confirm(options.confirmQuestion ?? 'Use these values?', { default: true, detail: shown, ...(options.decorated === undefined ? {} : { decorated: options.decorated }) });
+    if (!keep) {
+      for (const field of offered) {
+        if (field.kind === 'checkbox') answers[field.id] = await io.confirm(field.label, { default: field.default, ...(field.note ? { detail: [field.note] } : {}), ...(options.decorated === undefined ? {} : { decorated: options.decorated }) });
+        else await askText(field, String(answers[field.id]));
+      }
+    }
+  }
+  if (options.skippable) {
+    const texts = fields.filter((field): field is FormTextField => field.kind === 'text' && !field.readOnly);
+    const boxes = fields.filter((field) => field.kind === 'checkbox' && !field.disabled);
+    if (boxes.length === 0 && texts.every((field) => String(answers[field.id] ?? '').trim() === '')) return null;
+  }
+  return answers;
+}
+
+/**
  * §3 library-first: the ONLY channel a verb uses to talk to a human. Verbs never touch
  * process.stdin / stdout / console; the ESLint rule in eslint.config.js enforces that and
  * src/lib/__tests__/prompt.test.ts proves the rule fires.
@@ -41,6 +155,11 @@ export interface Prompter {
   text(question: string, defaultValue?: string, options?: AskOptions): Promise<string>;
   select(question: string, choices: readonly string[], defaultChoice?: string, options?: AskOptions): Promise<string>;
   print(line: string): void;
+  /**
+   * Optional: only a channel that can draw several fields on one screen implements it (frame mode, once the shell
+   * said it renders forms). Verbs never call it directly: `askForm` does, and falls back to the fields one at a time.
+   */
+  form?(title: string, fields: readonly FormField[], options?: FormOptions): Promise<FormAnswers | null>;
   /**
    * Optional: only a channel that can render progress implements it (frame mode does; a terminal does not,
    * because a verb that wants a person to see progress prints a line). Callers must use `io.progress?.(…)`.

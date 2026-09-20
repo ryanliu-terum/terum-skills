@@ -4,19 +4,28 @@ export type Result<T> = {ok:true;value:T}|{ok:false;error:string;cancelled?:true
 export interface LaunchContext { writtenAt: string; target?: string; intent?: 'setup' }
 export class PromptCancelledError extends Error { readonly cancelled = true as const; }
 export interface AskOptions {detail?:readonly string[];descriptions?:readonly string[];default?:string}
-export interface Prompter {readonly interactive:boolean;confirm(question:string,options?:AskOptions):Promise<boolean>;text(question:string,defaultValue?:string,options?:AskOptions):Promise<string>;select(question:string,choices:readonly string[],options?:AskOptions):Promise<string>;print(line:string):void}
-/** §9.2/D13: `path` is `text` whose answer is a filesystem path — the shell may offer a folder chooser. */
-export type AskKind='confirm'|'text'|'select'|'path';
+/** One field of a `form` ask (frame protocol 2, 2026-09-19): the CLI's shapes, mirrored so a screen never reads the wire format. */
+export interface FormTextField {id:string;kind:'text';label:string;default?:string;note?:string;readOnly?:boolean;required?:boolean;follows?:{field:string;template:string}}
+export interface FormCheckboxField {id:string;kind:'checkbox';label:string;default:boolean;note?:string;disabled?:boolean}
+export type FormField=FormTextField|FormCheckboxField;
+export type FormAnswers=Record<string,string|boolean>;
+export interface FormOptions {detail?:readonly string[];submit?:string;skippable?:boolean;skipLabel?:string;errors?:Readonly<Record<string,string>>}
+/** What a form ask resolves to: every field's answer, or null for Skip. */
+export type FormAnswer=FormAnswers|null;
+export type PromptAnswer=string|boolean|FormAnswer;
+export interface Prompter {readonly interactive:boolean;confirm(question:string,options?:AskOptions):Promise<boolean>;text(question:string,defaultValue?:string,options?:AskOptions):Promise<string>;select(question:string,choices:readonly string[],options?:AskOptions):Promise<string>;form(title:string,fields:readonly FormField[],options?:FormOptions):Promise<FormAnswer>;print(line:string):void}
+/** §9.2/D13: `path` is `text` whose answer is a filesystem path — the shell may offer a folder chooser. `form` is several fields on one screen with one confirm (protocol 2). */
+export type AskKind='confirm'|'text'|'select'|'path'|'form';
 /** Carried with a question from the run that asked it: when `signal` aborts, the run has settled and the question is withdrawn. */
 export type PromptOptions={signal?:AbortSignal};
-export interface PromptQuestion {kind:AskKind;question:string;choices?:readonly string[];default?:string;detail?:readonly string[];descriptions?:readonly string[]}
-export type Frame={t:'print';line:string}|{t:'ask';id:string;kind:AskKind;question:string;default?:string;choices?:readonly string[];detail?:readonly string[];descriptions?:readonly string[]}|{t:'progress';done:number;total:number;label?:string}|{t:'result';ok:boolean;error?:string;declined?:boolean;refused?:boolean};
-export interface Run<T>{readonly frames:AsyncIterable<Frame>;answer(id:string,value:string|boolean):void;cancel():Promise<void>;readonly done:Promise<Result<T>>}
+export interface PromptQuestion {kind:AskKind;question:string;choices?:readonly string[];default?:string;detail?:readonly string[];descriptions?:readonly string[];fields?:readonly FormField[];submit?:string;skippable?:boolean;skipLabel?:string;errors?:Readonly<Record<string,string>>}
+export type Frame={t:'print';line:string}|{t:'ask';id:string;kind:AskKind;question:string;default?:string;choices?:readonly string[];detail?:readonly string[];descriptions?:readonly string[];fields?:readonly FormField[];submit?:string;skippable?:boolean;skipLabel?:string;errors?:Readonly<Record<string,string>>}|{t:'progress';done:number;total:number;label?:string}|{t:'result';ok:boolean;error?:string;declined?:boolean;refused?:boolean};
+export interface Run<T>{readonly frames:AsyncIterable<Frame>;answer(id:string,value:PromptAnswer):void;cancel():Promise<void>;readonly done:Promise<Result<T>>}
 /** `windowControlsEnd`: right edge, in CSS px from the window's left edge, of the OS controls drawn over the web content under `mac-overlay` (68 before macOS 26, 76 from it); null when the OS draws none there. */
 export interface Capabilities {appVersion:string;windowChrome:'mac-overlay'|'native'|'cosmetic';windowControlsEnd:number|null;disablePerMachine:boolean;inboxEventLog:boolean;offtargetKind:boolean;machineRegistry:boolean;perCaseEvalTables:boolean;openInEditor:boolean;clipboard:boolean}
 // §7.1: the local key is `libraryProjects`, not `projects` — `projects` is already the marketplace's
 // team-projects screen, and desktop/AGENTS.md invariant 2 forbids one flag meaning two things.
-export const FEATURE_KEYS = ['favorites','follow','roles','lastSeen','installScope','inviteScoping','disablePerMachine','projectMembers','liftOnCards','runEvalInApp','perCase','progress','memberRole','localIdentity','libraryProjects','projects','refresh','appUpdate','reconcile','serve','usage'] as const;
+export const FEATURE_KEYS = ['favorites','follow','roles','lastSeen','installScope','inviteScoping','disablePerMachine','projectMembers','liftOnCards','runEvalInApp','perCase','progress','memberRole','localIdentity','libraryProjects','projects','refresh','appUpdate','reconcile','serve','usage','form'] as const;
 export type FeatureKey = typeof FEATURE_KEYS[number];
 export type Features = Readonly<Record<FeatureKey, boolean>>;
 export interface Surfaces {libraryProjects:boolean;divergence:boolean;status:boolean;settings:boolean;onboarding:boolean;library:boolean;skill:boolean;receipts:boolean;inbox:boolean;catalog:boolean;roster:boolean;update:boolean;appUpdate:boolean}

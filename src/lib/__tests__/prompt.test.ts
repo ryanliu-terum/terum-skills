@@ -5,7 +5,8 @@ import { stripVTControlCharacters } from 'node:util';
 import { PassThrough } from 'node:stream';
 import { ESLint } from 'eslint';
 import { describe, expect, expectTypeOf, it, vi } from 'vitest';
-import { NonInteractivePrompter, PromptClosedError, terminalPrompter } from '../prompt.js';
+import { askForm, NonInteractivePrompter, PromptClosedError, terminalPrompter, type FormField, type Prompter } from '../prompt.js';
+import { ScriptedPrompter } from './fixtures.js';
 
 describe('Prompter boundary (§3, §12 "prompter")', () => {
   it('a verb handed the non-interactive Prompter cannot call confirm/text/select — compile-time', () => {
@@ -327,5 +328,69 @@ describe('cursor-driven select (arrow keys)', () => {
       expect(plain()).toContain('  You are me <me@example.com>\n  Pick\n  › 1. a\n    2. b\n');
       await expect(io.select('Pick', [], undefined)).rejects.toThrow('Select needs at least one choice.');
     } finally { vi.restoreAllMocks(); vi.unstubAllEnvs(); }
+  });
+});
+
+describe('askForm: one form on a channel that draws one, the same fields one line at a time everywhere else (2026-09-19)', () => {
+  const fields: FormField[] = [
+    { id: 'team', kind: 'text', label: 'Team name', required: true },
+    { id: 'repo', kind: 'text', label: 'Repository', follows: { field: 'team', template: '{value}-shared-skills' } },
+    { id: 'login', kind: 'text', label: 'GitHub login', default: 'alice', readOnly: true },
+    { id: 'handle', kind: 'text', label: 'Handle', default: 'alice' },
+    { id: 'name', kind: 'text', label: 'Your name' },
+  ];
+
+  it('hands the whole form to a channel that has `form` and returns its answers untouched', async () => {
+    const seen: unknown[] = [];
+    const base = new ScriptedPrompter();
+    const io: Prompter = { interactive: true, confirm: base.confirm.bind(base), text: base.text.bind(base), select: base.select.bind(base), print: base.print.bind(base), form: async (title, shown, options) => { seen.push([title, shown, options]); return { team: 'alpha', repo: 'alpha-shared-skills', login: 'alice', handle: 'al', name: 'Alice' }; } };
+    expect(await askForm(io, 'Create your team', fields, { submit: 'Create team' })).toEqual({ team: 'alpha', repo: 'alpha-shared-skills', login: 'alice', handle: 'al', name: 'Alice' });
+    expect(seen).toEqual([['Create your team', fields, { submit: 'Create team' }]]);
+  });
+
+  it('terminal fallback: fields with no default are asked in order, a followed default is computed from the answer, read-only fields are printed, and the prefilled rest is confirmed once', async () => {
+    const io = new ScriptedPrompter(['alpha', 'Alice'], [true]);
+    expect(await askForm(io, 'Create your team', fields, { detail: ['One private repository.'] })).toEqual({ team: 'alpha', repo: 'alpha-shared-skills', login: 'alice', handle: 'alice', name: 'Alice' });
+    expect(io.asked).toEqual(['Team name', 'Your name', 'Use these values?']);
+    expect(io.details['Use these values?']).toEqual(['Repository: alpha-shared-skills', 'Handle: alice']);
+    expect(io.lines).toEqual(['Create your team', 'One private repository.', 'GitHub login: alice']);
+  });
+
+  it('terminal fallback: declining the block asks every prefilled field by its own line with the shown value as its default', async () => {
+    const io = new ScriptedPrompter(['alpha', 'Alice', 'alpha-repo', ''], [false]);
+    expect(await askForm(io, 'Create your team', fields)).toEqual({ team: 'alpha', repo: 'alpha-repo', login: 'alice', handle: 'alice', name: 'Alice' });
+    expect(io.asked).toEqual(['Team name', 'Your name', 'Use these values?', 'Repository', 'Handle']);
+    expect(io.offeredDefaults).toEqual([]);
+  });
+
+  it('terminal fallback: errors are printed by label and mark their fields as must-ask, while the rest keep the previous answers', async () => {
+    const io = new ScriptedPrompter(['al ice'], [true]);
+    const previous = fields.map((field): FormField => field.kind === 'text' && field.id === 'team' ? { ...field, default: 'alpha' } : field.kind === 'text' && field.id === 'name' ? { ...field, default: 'Alice' } : field);
+    expect(await askForm(io, 'Create your team', previous, { errors: { handle: 'a handle is letters, digits and hyphens' } })).toMatchObject({ team: 'alpha', handle: 'al ice', name: 'Alice' });
+    expect(io.lines).toContain('Handle: a handle is letters, digits and hyphens');
+    expect(io.asked).toEqual(['Handle', 'Use these values?']);
+  });
+
+  it('terminal fallback: checkboxes are one Y/n over the list, a disabled box is silently its default, and a no asks each box', async () => {
+    const boxes: FormField[] = [
+      { id: 'a', kind: 'checkbox', label: 'First thing', default: true },
+      { id: 'b', kind: 'checkbox', label: 'Second thing', default: true, disabled: true },
+      { id: 'c', kind: 'checkbox', label: 'Third thing', default: false },
+    ];
+    const yes = new ScriptedPrompter([], [true]);
+    expect(await askForm(yes, 'Pieces', boxes, { confirmQuestion: 'Install these?' })).toEqual({ a: true, b: true, c: false });
+    expect(yes.asked).toEqual(['Install these?']);
+    expect(yes.details['Install these?']).toEqual(['[x] First thing', '[ ] Third thing']);
+    const no = new ScriptedPrompter([], [false, false, true]);
+    expect(await askForm(no, 'Pieces', boxes)).toEqual({ a: false, b: true, c: true });
+    expect(no.asked).toEqual(['Use these values?', 'First thing', 'Third thing']);
+  });
+
+  it('terminal fallback: a skippable form whose text fields are all left blank is skipped (null); one filled field is an answer', async () => {
+    const logins: FormField[] = [{ id: 'logins', kind: 'text', label: 'GitHub logins' }];
+    expect(await askForm(new ScriptedPrompter(['']), 'Invite teammates', logins, { skippable: true })).toBeNull();
+    expect(await askForm(new ScriptedPrompter(['bob carol']), 'Invite teammates', logins, { skippable: true })).toEqual({ logins: 'bob carol' });
+    // Not skippable: a blank is simply a blank answer for the caller to validate.
+    expect(await askForm(new ScriptedPrompter(['']), 'Invite teammates', logins)).toEqual({ logins: '' });
   });
 });

@@ -143,6 +143,14 @@ button:focus-visible,.button[data-state="focus"],[role="switch"]:focus-visible,[
 .prompt-path {display:flex;gap:8px;align-items:center;}
 .prompt-path .prompt-field {flex:1 1 auto;min-width:0;}
 .prompt-actions {display:flex;justify-content:flex-end;gap:8px;margin-top:16px;}
+/* A `form` ask (protocol 2): fields stacked with their one-line notes; a field the CLI marked invalid carries its message under it. */
+.prompt-form {display:flex;flex-direction:column;gap:12px;margin-top:4px;}
+.prompt-form-field {display:flex;flex-direction:column;gap:4px;}
+.prompt-form-label {font-size:12px;font-weight:510;color:var(--tk-text2);}
+.prompt-form-note {font-size:12px;color:var(--tk-text3);}
+.prompt-form-error {font-size:12px;color:var(--tk-bad);}
+.prompt-form-field[data-invalid] .prompt-field {border-color:var(--tk-bad);}
+.prompt-form .prompt-field[readonly] {color:var(--tk-text3);}
 
 .eval-chip { font-size: 12px; background: var(--tk-bg2); border: 1px solid var(--tk-border1); border-radius: 6px; height: 24px; padding: 0 8px; color: var(--tk-text2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 /* The eval chip's labels are longer than the slot (.topbar-right is a fixed 240px). The chip gives way, but only its

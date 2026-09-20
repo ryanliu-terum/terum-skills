@@ -7,7 +7,6 @@ import { fileURLToPath } from 'node:url';
 import YAML from 'yaml';
 import { NPX_PREFIX, pinnedPrefix, type InvocationForm } from './invocation.js';
 import { AGENT_PATHS } from './placer/agent-paths.js';
-import { Prompter } from './prompt.js';
 import { FRONTMATTER } from './schema.js';
 
 /**
@@ -131,26 +130,3 @@ export async function removeWrapper(options: Pick<Required<WrapperOptions>, 'ski
   return 'removed';
 }
 
-export type WrapperOffer = 'installed' | 'replaced' | 'present' | 'declined' | 'foreign' | 'unavailable';
-
-/**
- * The offer `setup` makes right after the hook. Asks exactly once, and only for a first install:
- * an outdated copy of our own is refreshed without a question (the consent was given when it was
- * installed; a stale copy teaches Claude the wrong verbs), a current one is reported, a foreign
- * folder is named and left alone, and a copy of the package built without the bundle says so.
- */
-export async function offerWrapper(io: Prompter, options: Required<WrapperOptions>): Promise<WrapperOffer> {
-  const directory = wrapperDestination(options.skillsRoot);
-  const state = await wrapperState(options);
-  if (state === 'unavailable') { io.print(`The /terum-skills Claude Code skill is not bundled in this copy of terum-skills (expected at ${options.source}); skipped.`); return 'unavailable'; }
-  if (state === 'foreign') { io.print(`${directory} exists and is not the bundled /terum-skills skill; left alone. Move it aside and re-run setup to install the bundled one.`); return 'foreign'; }
-  if (state === 'current') { io.print(`The /terum-skills Claude Code skill at ${directory} is current.`); return 'present'; }
-  if (state === 'outdated') { await installWrapper(options); io.print(`Updated the /terum-skills Claude Code skill at ${directory}.`); return 'replaced'; }
-  if (!(await io.confirm(`Install the /terum-skills Claude Code skill so Claude can run terum-skills for you? (writes ${directory})`))) {
-    io.print('Skipped the /terum-skills skill; re-run setup to install it later.');
-    return 'declined';
-  }
-  await installWrapper(options);
-  io.print(`Installed the /terum-skills Claude Code skill at ${directory}.`);
-  return 'installed';
-}

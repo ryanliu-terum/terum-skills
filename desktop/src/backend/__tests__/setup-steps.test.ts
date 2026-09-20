@@ -15,6 +15,8 @@ it('keeps unrecognized CLI output as copy without inventing a step outcome',()=>
 it('claims no step for the terminal hint block setup still prints',()=>{expect(printedSetupStep('Next, from any terminal:')).toBeNull();expect(printedSetupStep('  npx -y terum-skills@latest publish <skill>          — publish a local skill explicitly')).toBeNull();});
 
 it('maps the identity ask to team without treating unrelated asks as setup steps',()=>{expect(askedSetupStep('Use this identity?')).toBe('team');expect(askedSetupStep('Join this team?')).toBeNull();});
+// The three forms setup asks since protocol 2 (2026-09-19) are keyed by their titles.
+it('maps the three setup forms to their steps',()=>{expect(askedSetupStep('Create your team')).toBe('team');expect(askedSetupStep('Your identity')).toBe('team');expect(askedSetupStep('Invite teammates')).toBe('invite');expect(askedSetupStep('Claude Code integration')).toBe('hook');});
 
 // D13 replaced the scan's four questions with one confirm and one folder picker.
 it('maps the projects and evals questions to their steps',()=>{

@@ -3,11 +3,11 @@ import { mkdir, readFile, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
-  BUNDLED_EDIT_HOOK_SOURCE, editHookFor, ScriptedPrompter, SYMLINKS_SUPPORTED, temporaryDirectory,
+  BUNDLED_EDIT_HOOK_SOURCE, editHookFor, SYMLINKS_SUPPORTED, temporaryDirectory,
 } from './fixtures.js';
 import {
   editHookCommand, editHookDestination, editHookInstalled, editHookState, inspectEditHook,
-  installEditHook, isManagedEditHook, offerEditHook, removeEditHook,
+  installEditHook, isManagedEditHook, removeEditHook,
 } from '../editHook.js';
 
 const ID = '31313131-3131-4131-8131-313131313131';
@@ -170,49 +170,10 @@ describe('placing the edit hook', () => {
     const { options } = await fixture();
     const unbundled = { ...options, source: join(options.storeRoot, 'no-bundle', 'terum-skills-edit.mjs') };
     expect(await editHookState(unbundled)).toBe('unavailable');
-    const io = new ScriptedPrompter();
-    expect(await offerEditHook(io, unbundled)).toBe('unavailable');
-    expect(io.asked).toEqual([]);
   });
 });
 
-describe('offering the edit hook', () => {
-  it('asks once, installs on yes, and writes nothing on no', async () => {
-    const declined = await fixture();
-    const no = new ScriptedPrompter([], [false]);
-    expect(await offerEditHook(no, declined.options)).toBe('declined');
-    expect(no.asked).toHaveLength(1);
-    expect(await editHookState(declined.options)).toBe('absent');
-
-    const accepted = await fixture();
-    const yes = new ScriptedPrompter([], [true]);
-    expect(await offerEditHook(yes, accepted.options)).toBe('installed');
-    expect(await editHookInstalled(accepted.options)).toBe(true);
-  });
-
-  it('refreshes its own copy without a second question, and repairs a settings file that lost the entry', async () => {
-    const { options } = await fixture();
-    await installEditHook(options);
-
-    // Outdated: a copy of ours this CLI has moved past. Consent was given when it was installed.
-    await writeFile(editHookDestination(options.storeRoot), '// terum-skills managed hook\n// an older release\n');
-    const refresh = new ScriptedPrompter();
-    expect(await offerEditHook(refresh, options)).toBe('replaced');
-    expect(refresh.asked).toEqual([]);
-    expect(await editHookState(options)).toBe('current');
-
-    // A current script the settings file no longer names never runs; that is not "present".
-    await writeFile(options.settingsFile, JSON.stringify({}));
-    const repair = new ScriptedPrompter();
-    expect(await offerEditHook(repair, options)).toBe('replaced');
-    expect(repair.asked).toEqual([]);
-    expect(await editHookInstalled(options)).toBe(true);
-
-    const settled = new ScriptedPrompter();
-    expect(await offerEditHook(settled, options)).toBe('present');
-    expect(settled.asked).toEqual([]);
-  });
-
+describe('the managed marker', () => {
   it('is judged managed only by its first line', () => {
     expect(isManagedEditHook('// terum-skills managed hook: PostToolUse\n')).toBe(true);
     expect(isManagedEditHook('#!/usr/bin/env node\n// terum-skills managed hook\n')).toBe(false);

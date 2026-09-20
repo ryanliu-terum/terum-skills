@@ -4,7 +4,7 @@ import type { WithForm } from '../lib/invocation.js';
 import { randomUUID } from 'node:crypto';
 import { mkdir, rename, rm, writeFile } from 'node:fs/promises';
 import { join as pathJoin } from 'node:path';
-import { askHandle, askUntilValid, assertBindable, AuthDependencies, authenticateCreator, bindTeam, collectIdentity, detectOrOfferGh, explainGhFailure, ghState, GhState, Identity, identityForJoiner, setIdentity, refuseSecondTeam, teamByRemote, Validation } from '../lib/auth.js';
+import { askHandle, askUntilValid, assertBindable, AuthDependencies, authenticateCreator, bindTeam, collectIdentity, creatorAuthenticationError, detectOrOfferGh, explainGhFailure, ghState, GhState, Identity, identityForJoiner, setIdentity, refuseSecondTeam, teamByRemote, Validation } from '../lib/auth.js';
 import { ConfigStore, createConfigStore, selectTeam } from '../lib/config.js';
 import { exists, mkdirPrivate } from '../lib/fs.js';
 import { defaultHookOptions, HookOptions, offerHook } from '../lib/hook.js';
@@ -26,7 +26,11 @@ import { run as move, type MoveArgs, type MoveResult } from './teamMove.js';
  * The §8 hook offer is shared with setup; a setup invocation suppresses it until its final step.
  */
 export interface TeamDependencies extends AuthDependencies { config?: ConfigStore; runner?: Runner; hook?: HookOptions; }
-export interface CreateArgs extends TeamDependencies { name?: string; org?: string; remote?: string; repo?: string; offerHook?: boolean; }
+export interface CreateArgs extends TeamDependencies {
+  name?: string; org?: string; remote?: string; repo?: string; offerHook?: boolean;
+  /** An identity the caller already collected and validated (setup's form): used as is, never asked again. gh is still required for a GitHub create. */
+  identity?: Identity;
+}
 export interface JoinArgs extends TeamDependencies {
   target: string;
   as?: string;
@@ -274,14 +278,20 @@ export async function create(args: CreateArgs, io: Prompter): Promise<Result<Cre
       const bound = teamByRemote(config, remote);
       if (bound) throw new Error(`${normalizeRemote(remote)} is already configured as team ${bound[0]}.`);
       if (hasEmbeddedCredentials(args.remote)) io.print(credentialNotice(remote));
-      identity = await collectIdentity(io, config, runner, { gh: await ghState(runner) });
+      identity = args.identity ?? await collectIdentity(io, config, runner, { gh: await ghState(runner) });
       const heads = await runner.run('git', ['ls-remote', '--heads', '--', remoteToGitUrl(remote)]);
       if (heads.code !== 0) throw new Error(`Cannot reach ${remote}: ${(heads.stderr || heads.stdout).trim()}`);
       if (heads.stdout.trim()) throw new Error(`${remote} already has branches; \`${invocation(args.form, 'team create --remote')}\` needs an empty repository. To join an existing team run \`${invocation(args.form, 'team join', remote)}\`.`);
     } else {
       // gh and identity first (the wizard's step 2), then the repository question (its step 3): a
-      // machine without gh hears about gh before it is asked anything.
-      identity = (await authenticateCreator(io, { form: args.form, config: store, runner })).identity;
+      // machine without gh hears about gh before it is asked anything. An identity the caller already
+      // collected skips the questions, never the gh requirement.
+      if (args.identity) {
+        const gh = await detectOrOfferGh(io, runner);
+        const authenticationError = creatorAuthenticationError(gh, args.form);
+        if (authenticationError) throw new Error(authenticationError);
+        identity = args.identity;
+      } else identity = (await authenticateCreator(io, { form: args.form, config: store, runner })).identity;
       let repo: string;
       if (args.repo !== undefined) repo = parseOrExplain(teamNameSchema, args.repo, 'repository name');
       else {

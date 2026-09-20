@@ -5,16 +5,19 @@ import { estimateFromReceipts, estimateLine } from '../lib/evals/estimate.js';
 import { enqueueEvals } from '../lib/evals/queue.js';
 import { invocation } from '../lib/invocation.js';
 import type { WithForm } from '../lib/invocation.js';
-import { creatorAuthenticationError, detectOrOfferGh, refuseSecondTeam, teamByRemote } from '../lib/auth.js';
+import { creatorAuthenticationError, detectOrOfferGh, identityDefaults, refuseSecondTeam, teamByRemote, type Identity } from '../lib/auth.js';
+import { claudeCodeIntegration as defaultClaudeCode } from '../lib/claudeCode.js';
+import { CREATE_FORM_TITLE, createFields, createValuesFrom, IDENTITY_FORM_TITLE, identityFields, identityValues, identityValuesFrom, INVITE_FORM_TITLE, inviteFields, inviteLogins, validateCreate, validateIdentity, type CreateValues } from '../lib/setupForms.js';
+import { SUCCESSOR_LOOKUP_DEADLINE_MS } from '../lib/successor.js';
 import { addLibraryProject } from '../lib/projects.js';
 import { nearestRepoRoot } from '../lib/local-skills.js';
 import { COMMUNITY_URL } from '../lib/community.js';
 import { ConfigStore, createConfigStore } from '../lib/config.js';
 import { preflight as systemPreflight } from '../lib/evals/agent.js';
-import { defaultHookOptions, HookOptions, offerHook as defaultOfferHook } from '../lib/hook.js';
-import { defaultWrapperOptions, offerWrapper as defaultOfferWrapper, WrapperOptions } from '../lib/wrapper.js';
-import { defaultEditHookOptions, type EditHookOptions, offerEditHook as defaultOfferEditHook } from '../lib/editHook.js';
-import { MAX_SELECT_ATTEMPTS, Prompter } from '../lib/prompt.js';
+import { defaultHookOptions, HookOptions } from '../lib/hook.js';
+import { defaultWrapperOptions, WrapperOptions } from '../lib/wrapper.js';
+import { defaultEditHookOptions, type EditHookOptions } from '../lib/editHook.js';
+import { askForm, MAX_FORM_ATTEMPTS, MAX_SELECT_ATTEMPTS, Prompter } from '../lib/prompt.js';
 import { readRoster } from '../lib/skills.js';
 import { repositoryUrl, githubOwnerRepo, isGitHubRemote, normalizeRemote, stripRemoteCredentials } from '../lib/remote.js';
 import { fromError, Result, success } from '../lib/result.js';
@@ -22,6 +25,7 @@ import { Runner, systemRunner } from '../lib/runner.js';
 import { describeClone } from '../lib/teamRepo.js';
 import { repositoryIsGone } from '../lib/successor.js';
 import { readFile } from 'node:fs/promises';
+import { exists } from '../lib/fs.js';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import type { Launch } from '../lib/launch.js';
@@ -30,15 +34,14 @@ import { run as runApp } from './app.js';
 import { reconcileHasRows, run as runReconcile } from './reconcile.js';
 import { run as evalRun, queueItemsFor, skillsWithoutReceipt, type EvalArgs } from './eval.js';
 import { FIXABLE_INVITE_REASONS, joinCommand, run as invite } from './invite.js';
-import { ensureClone, parseJoinTarget, requireGitConfig, run as team } from './team.js';
+import { ensureClone, parseJoinTarget, requireGitConfig, run as team, suggestedRepoName } from './team.js';
 
 export interface SetupVerbs {
   team: typeof team;
   app: typeof runApp;
   invite: typeof invite;
-  offerHook: typeof defaultOfferHook;
-  offerWrapper: typeof defaultOfferWrapper;
-  offerEditHook: typeof defaultOfferEditHook;
+  /** The one Claude Code question: three checkboxes, one Install (src/lib/claudeCode.ts). */
+  claudeCode: typeof defaultClaudeCode;
   eval: typeof evalRun;
   reconcile: typeof runReconcile;
   /**
@@ -90,7 +93,7 @@ export interface SetupResult {
 const WELCOME = [
   'Welcome to terum-skills.',
   "Your team's skills live in one private git repository the team controls; each member installs what they want and publishes local skills explicitly.",
-  'This wizard helps you create a team, join one, invite teammates, and offer the session hook, the /terum-skills Claude Code skill and a reminder to publish a skill after Claude edits one; re-run it any time to continue, and leave the invitation question blank to skip it.',
+  'This wizard helps you create a team, join one, invite teammates, and offer the session hook, the /terum-skills Claude Code skill and a reminder to publish a skill after Claude edits one; re-run it any time to continue, and skip the invitation step if you have nobody to invite yet.',
 ];
 
 export const PROJECTS_QUESTION = 'Add a project?';
@@ -142,7 +145,7 @@ function unfinishedAtInvite(teamName: string, invited: readonly string[], form: 
     invited.length === 0
       ? `Team ${teamName} is set up; no invitation was sent.`
       : `Team ${teamName} is set up and ${invited.length} invitation${invited.length === 1 ? '' : 's'} ${invited.length === 1 ? 'was' : 'were'} sent; that stands.`,
-    `Setup stopped here, so the project, eval, session hook, /terum-skills and edit-hook steps were not offered — run \`${invocation(form, 'setup')}\` again to finish.`,
+    `Setup stopped here, so the project, eval and Claude Code steps were not offered — run \`${invocation(form, 'setup')}\` again to finish.`,
   ];
 }
 
@@ -150,11 +153,25 @@ function resolvedHook(store: ConfigStore, home: string | undefined, partial: Hoo
   return { ...defaultHookOptions(store.root, home, form), ...partial };
 }
 
+/**
+ * Whether `<login>/<repo>` already exists on GitHub, read before `gh repo create` so a taken name is marked on
+ * the form the person is looking at instead of surfacing as a stray question mid-create. Bounded and
+ * non-throwing; anything but a clear "yes, that repository" reads as free, and create's own retry still
+ * catches the race.
+ */
+async function repositoryTaken(runner: Runner, login: string, repo: string): Promise<boolean> {
+  if (login === '') return false;
+  try {
+    const probe = await runner.run('gh', ['api', `repos/${login}/${repo}`, '-q', '.full_name'], { deadlineMs: SUCCESSOR_LOOKUP_DEADLINE_MS });
+    return probe.code === 0 && probe.stdout.trim().toLowerCase() === `${login}/${repo}`.toLowerCase();
+  } catch { return false; }
+}
+
 export async function run(args: SetupArgs, io: Prompter): Promise<Result<SetupResult>> {
   const role: SetupResult['role'] = args.target === undefined ? 'creator' : 'joiner';
   const store = args.config ?? createConfigStore();
   const runner = args.runner ?? systemRunner;
-  const verbs: SetupVerbs = { team, app: runApp, invite, offerHook: defaultOfferHook, offerWrapper: defaultOfferWrapper, offerEditHook: defaultOfferEditHook, eval: evalRun, reconcile: runReconcile, preflight: systemPreflight, ...args.verbs };
+  const verbs: SetupVerbs = { team, app: runApp, invite, claudeCode: defaultClaudeCode, eval: evalRun, reconcile: runReconcile, preflight: systemPreflight, ...args.verbs };
   const steps: SetupResult['steps'] = {};
   let teamName = '';
   let remote = '';
@@ -172,6 +189,8 @@ export async function run(args: SetupArgs, io: Prompter): Promise<Result<SetupRe
     confirm: (question, options) => { openSection(); return output.confirm(question, { ...options, decorated }); },
     text: (question, fallback, options) => { openSection(); return output.text(question, fallback, { ...options, decorated }); },
     select: (question, choices, fallback, options) => { openSection(); return output.select(question, choices, fallback, { ...options, decorated }); },
+    // A channel that draws forms keeps drawing them through the decoration; dropping this would silently turn every form back into one question per field.
+    ...(output.form ? { form: (title, fields, options) => { openSection(); return output.form!(title, fields, { ...options, decorated }); } } : {}),
   };
   const bullet = (line: string): void => io.print(decorated ? `  • ${line.trimStart()}` : line);
   const say = (line: string): void => { if (!args.quiet) io.print(line); };
@@ -256,7 +275,26 @@ export async function run(args: SetupArgs, io: Prompter): Promise<Result<SetupRe
         teamName = configured[0]; remote = configured[1].remote;
         steps.team = 'skipped';
       } else {
-        const result = await verbs.team({ form: args.form, kind: 'create', offerHook: false, config: store, runner }, io);
+        // One form (Ryan, 2026-09-19): team, repository and identity together, validated as a whole, re-shown
+        // with the fields marked until it passes. Only then does `team create` run, with every answer supplied,
+        // so it asks nothing itself. A taken repository name is probed first for the same reason.
+        const defaults = await identityDefaults(before, runner, { gh });
+        let values: CreateValues = { team: '', repo: '', ...identityValues(defaults) };
+        let errors: Record<string, string> = {};
+        let create: { name: string; repo: string; identity: Identity } | undefined;
+        for (let attempt = 1; attempt <= MAX_FORM_ATTEMPTS && !create; attempt++) {
+          const answers = await askForm(io, CREATE_FORM_TITLE, createFields(values, { githubKnown: defaults.githubKnown }), { submit: 'Create team', errors });
+          if (answers === null) throw new Error(`${CREATE_FORM_TITLE} was cancelled.`);
+          // A cleared repository field takes the suggestion `team create` would have offered (the name rule decides whether the suffix fits).
+          if (typeof answers.repo === 'string' && answers.repo.trim() === '' && typeof answers.team === 'string' && answers.team.trim() !== '') answers.repo = suggestedRepoName(answers.team.trim());
+          const validated = await validateCreate(answers, { teams: Object.keys(before.teams), cloneExists: async (name) => exists(store.teamClone(name)) });
+          values = createValuesFrom(answers, values);
+          if (!validated.ok) { errors = validated.errors; continue; }
+          if (await repositoryTaken(runner, validated.value.identity.github, validated.value.repo)) { errors = { repo: `${validated.value.identity.github}/${validated.value.repo} already exists on GitHub; pick another name` }; continue; }
+          create = validated.value;
+        }
+        if (!create) throw new Error(`${CREATE_FORM_TITLE} was not completed after ${MAX_FORM_ATTEMPTS} attempts.`);
+        const result = await verbs.team({ form: args.form, kind: 'create', name: create.name, repo: create.repo, identity: create.identity, offerHook: false, config: store, runner }, io);
         if (!result.ok) return failed(result, role, teamName, remote, steps);
         teamName = result.value.team;
         remote = 'remote' in result.value ? result.value.remote : (await store.read()).teams[teamName]!.remote;
@@ -272,7 +310,22 @@ export async function run(args: SetupArgs, io: Prompter): Promise<Result<SetupRe
         say(`Team ${teamName} is already configured on this machine.`);
         steps.team = 'skipped';
       } else {
-        const result = await verbs.team({ form: args.form, kind: 'join', target: args.target!, offerHook: false, config: store, runner }, io);
+        // The joiner's one form: the identity fields alone. A roster collision on the handle is still re-asked by
+        // `team join` itself, against the freshly reset roster, which is the one place that can judge it.
+        const defaults = await identityDefaults(before, runner, { gh });
+        let values = identityValues(defaults);
+        let errors: Record<string, string> = {};
+        let identity: Identity | undefined;
+        for (let attempt = 1; attempt <= MAX_FORM_ATTEMPTS && !identity; attempt++) {
+          const answers = await askForm(io, IDENTITY_FORM_TITLE, identityFields(values, { githubKnown: defaults.githubKnown }), { submit: 'Join team', errors });
+          if (answers === null) throw new Error(`${IDENTITY_FORM_TITLE} was cancelled.`);
+          const validated = validateIdentity(answers);
+          values = identityValuesFrom(answers);
+          if (!validated.ok) { errors = validated.errors; continue; }
+          identity = validated.value;
+        }
+        if (!identity) throw new Error(`${IDENTITY_FORM_TITLE} was not completed after ${MAX_FORM_ATTEMPTS} attempts.`);
+        const result = await verbs.team({ form: args.form, kind: 'join', target: args.target!, identity, offerHook: false, config: store, runner }, io);
         if (!result.ok) return failed(result, role, teamName, remote, steps);
         teamName = result.value.team;
         remote = (await store.read()).teams[teamName]!.remote;
@@ -317,12 +370,19 @@ export async function run(args: SetupArgs, io: Prompter): Promise<Result<SetupRe
       // validated before anything is sent, so a re-ask can never double-invite. Whichever way it ends, an
       // exit here names what is already durable and how to finish, because §6.1's recovery — re-run setup —
       // was real but had never been said out loud anywhere in the output.
+      // Its own form, right after the team exists: invitations email other people, which is not what the team
+      // form's Confirm agreed to, and GitHub can only add collaborators to a repository that exists.
+      const ownerRepo = githubOwnerRepo(remote) ?? stripRemoteCredentials(remote);
+      let typed = '';
       for (let attempt = 0; ; attempt++) {
-        const answer = await io.text(attempt === 0
-          ? 'Invite teammates by inputting their GitHub usernames (comma or space separated; blank to skip)'
-          : 'Those GitHub usernames could not be invited; enter them again (comma or space separated; blank to skip)', '');
-        const logins = answer.split(/[\s,]+/).filter(Boolean);
+        const answers = await askForm(io, INVITE_FORM_TITLE, inviteFields(typed), {
+          submit: 'Invite', skippable: true, skipLabel: 'Skip for now',
+          detail: [`Send them: ${joinCommand(ownerRepo)}`],
+          ...(attempt === 0 ? {} : { errors: { logins: 'those GitHub usernames could not be invited; enter them again' } }),
+        });
+        const logins = inviteLogins(answers);
         if (logins.length === 0) { steps.invite = 'skipped'; break; }
+        typed = logins.join(' ');
         const result = await verbs.invite({ form: args.form, logins, team: teamName, config: store, runner }, io);
         if (result.ok) { steps.invite = 'done'; break; }
         const failures = result.value?.failed ?? [];
@@ -501,25 +561,20 @@ export async function run(args: SetupArgs, io: Prompter): Promise<Result<SetupRe
     if (communityUrl === '' || args.quiet) steps.community = 'skipped';
     else { section('community'); io.print(`Feedback and requests: ${communityUrl}`); steps.community = 'printed'; }
 
+    // The Claude Code pieces — the session hook, the bundled /terum-skills skill (npm-first, Ryan 2026-09-08)
+    // and the publish reminder after an edit — are one question with three checkboxes and one Install
+    // (Ryan, 2026-09-19), each piece named for what it does and where it writes. The three steps are kept
+    // in the result so a shell's progress card reads as before; `hook` is the one the card draws.
     section('hook');
-    const hookOutcome = await verbs.offerHook(io, resolvedHook(store, args.home, args.hook, args.form));
-    steps.hook = hookOutcome === 'installed' || hookOutcome === 'replaced' ? 'done' : 'skipped';
-
-    // The /terum-skills Claude Code skill ships inside this package, and setup is the one onboarding
-    // step (npm-first, Ryan 2026-09-08), so the skill that lets Claude Code run these verbs is offered
-    // here, right after the hook and in the hook's shape: one offer with its own y/N on the same io,
-    // a copy the tool recognises by its frontmatter marker (refreshed on a re-run without asking,
-    // removed by machine uninstall), and anything else at that path left alone (src/lib/wrapper.ts).
-    section('wrapper');
-    const wrapperOutcome = await verbs.offerWrapper(io, { ...defaultWrapperOptions(args.home, args.form), ...args.wrapper });
-    steps.wrapper = wrapperOutcome === 'installed' || wrapperOutcome === 'replaced' ? 'done' : 'skipped';
-
-    // The edit hook gets its OWN y/N, deliberately, instead of riding the session hook's. That one
-    // fetches on a schedule; this one runs after every Write and Edit the agent makes and reads the
-    // path it touched. Folding it into a yes already given would install something else entirely.
-    section('editHook');
-    const editHookOutcome = await verbs.offerEditHook(io, { ...defaultEditHookOptions(store.root, args.home), ...args.editHook });
-    steps.editHook = editHookOutcome === 'installed' || editHookOutcome === 'replaced' ? 'done' : 'skipped';
+    const outcomes = await verbs.claudeCode(io, {
+      hook: resolvedHook(store, args.home, args.hook, args.form),
+      wrapper: { ...defaultWrapperOptions(args.home, args.form), ...args.wrapper },
+      editHook: { ...defaultEditHookOptions(store.root, args.home), ...args.editHook },
+    });
+    const installed = (outcome: string): StepOutcome => outcome === 'installed' || outcome === 'replaced' ? 'done' : 'skipped';
+    steps.hook = installed(outcomes.hook);
+    steps.wrapper = installed(outcomes.wrapper);
+    steps.editHook = installed(outcomes.editHook);
 
     if (args.quiet) steps.done = 'skipped';
     else {

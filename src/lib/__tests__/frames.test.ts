@@ -3,8 +3,8 @@ import { buildProgram } from '../../cli.js';
 import type { Command } from 'commander';
 import { PassThrough } from 'node:stream';
 import { describe, expect, it } from 'vitest';
-import { FRAME_FEATURES, FRAME_PROTOCOL, FRAME_VERBS, frameChannel, attemptedVerb, type Frame } from '../frames.js';
-import { PromptClosedError, terminalPrompter } from '../prompt.js';
+import { FRAME_FEATURES, FRAME_PROTOCOL, FRAME_VERBS, frameChannel, framesFromArgv, attemptedVerb, type Frame } from '../frames.js';
+import { askForm, PromptClosedError, terminalPrompter } from '../prompt.js';
 
 /** A shell on the other end: collects every frame the CLI writes and answers questions on cue. */
 function shell() {
@@ -36,7 +36,7 @@ describe('frame mode — the Prompter serialised (docs/frame-protocol.md)', () =
       memberRole: true, localIdentity: true, libraryProjects: true, projects: true, roles: true,
       favorites: false, follow: false, lastSeen: false, installScope: true, inviteScoping: false,
       disablePerMachine: true, projectMembers: false, liftOnCards: true, runEvalInApp: true, perCase: true, progress: true,
-      refresh: true, appUpdate: true, reconcile: true, serve: true, usage: true,
+      refresh: true, appUpdate: true, reconcile: true, serve: true, usage: true, form: true,
     });
   });
 
@@ -263,4 +263,56 @@ describe('W-02 progress channel', () => {
     expect(terminalPrompter({ input, output }).progress).toBeUndefined(); expect(output.read()).toBeNull();
   });
   it('keeps the protocol at 1', () => { expect(FRAME_PROTOCOL).toBe(1); });
+});
+
+describe('form asks (protocol 2, 2026-09-19)', () => {
+  const fields = [
+    { id: 'team', kind: 'text' as const, label: 'Team name', required: true },
+    { id: 'login', kind: 'text' as const, label: 'GitHub login', default: 'alice', readOnly: true },
+    { id: 'hook', kind: 'checkbox' as const, label: 'Session hook', default: true },
+    { id: 'wrapper', kind: 'checkbox' as const, label: 'Skill', default: true, disabled: true },
+  ];
+
+  it('framesFromArgv: a bare --frames is protocol 1, --frames=2 declares forms, both spellings are stripped before the operand separator only', () => {
+    expect(framesFromArgv(['node', 'cli', 'setup'])).toEqual({ frames: false, shellProtocol: 0, argv: ['node', 'cli', 'setup'] });
+    expect(framesFromArgv(['node', 'cli', '--frames', 'setup'])).toEqual({ frames: true, shellProtocol: 1, argv: ['node', 'cli', 'setup'] });
+    expect(framesFromArgv(['node', 'cli', '--frames', 'setup', '--frames=2', '--', '--frames'])).toEqual({ frames: true, shellProtocol: 2, argv: ['node', 'cli', 'setup', '--', '--frames'] });
+    expect(framesFromArgv(['node', 'cli', '--frames=2', 'setup'])).toEqual({ frames: true, shellProtocol: 2, argv: ['node', 'cli', 'setup'] });
+  });
+
+  it('a shell that did not declare protocol 2 gets no `form`, so askForm falls back to one question per field', async () => {
+    const s = shell();
+    expect(s.channel.io.form).toBeUndefined();
+    const answers = askForm(s.channel.io, 'Create your team', fields);
+    expect((await s.answer('alpha')).question).toBe('Team name');
+    expect((await s.answer(true))).toMatchObject({ kind: 'confirm', question: 'Use these values?', detail: ['[x] Session hook'] });
+    expect(await answers).toEqual({ team: 'alpha', login: 'alice', hook: true, wrapper: true });
+    expect(s.frames.filter((frame) => frame.t === 'print').map((frame) => (frame as { line: string }).line)).toEqual(['Create your team', 'GitHub login: alice']);
+  });
+
+  it('a shell on protocol 2 gets one form ask carrying fields, submit, skippable and errors, answered with one object; read-only and disabled fields keep their defaults whatever it sends', async () => {
+    const input = new PassThrough(); const output = new PassThrough();
+    const frames: Frame[] = []; let buffer = '';
+    output.on('data', (chunk: Buffer) => { buffer += chunk.toString('utf8'); let index = buffer.indexOf('\n'); while (index !== -1) { frames.push(JSON.parse(buffer.slice(0, index)) as Frame); buffer = buffer.slice(index + 1); index = buffer.indexOf('\n'); } });
+    const channel = frameChannel({ input, output, shellProtocol: 2 });
+    const answers = askForm(channel.io, 'Create your team', fields, { submit: 'Create team', skippable: true, skipLabel: 'Skip for now', errors: { team: 'taken' }, detail: ['One repository.'] });
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(frames).toEqual([{ t: 'ask', id: 'q1', kind: 'form', question: 'Create your team', fields, submit: 'Create team', skippable: true, skipLabel: 'Skip for now', errors: { team: 'taken' }, detail: ['One repository.'] }]);
+    input.write(`${JSON.stringify({ t: 'answer', id: 'q1', value: { team: 'alpha', login: 'mallory', hook: false, wrapper: false, extra: 'ignored' } })}\n`);
+    expect(await answers).toEqual({ team: 'alpha', login: 'alice', hook: false, wrapper: true });
+    // null is Skip on a skippable form, and a cancellation otherwise.
+    const skipped = askForm(channel.io, 'Invite teammates', [{ id: 'logins', kind: 'text', label: 'GitHub logins' }], { skippable: true });
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    input.write(`${JSON.stringify({ t: 'answer', id: 'q2', value: null })}\n`);
+    expect(await skipped).toBeNull();
+    const cancelled = askForm(channel.io, 'Your identity', [{ id: 'name', kind: 'text', label: 'Your name' }]);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    input.write(`${JSON.stringify({ t: 'answer', id: 'q3', value: null })}\n`);
+    await expect(cancelled).rejects.toThrow('Your identity was cancelled.');
+    // null to a plain text ask is still a missing value, ignored with a diagnostic, and the question stays open.
+    const diagnostics: string[] = [];
+    const strict = frameChannel({ input: new PassThrough(), output: new PassThrough(), diagnostic: (line) => diagnostics.push(line) });
+    void strict.io.text('Team name').catch(() => undefined);
+    expect(diagnostics).toEqual([]);
+  });
 });
