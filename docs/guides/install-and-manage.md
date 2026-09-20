@@ -146,15 +146,14 @@ ever empties it, so clean it up by hand.
 If a kept copy is already there, install refuses rather than overwriting it: `<path> already exists;
 move the kept copy elsewhere before retrying.`
 
-**Your profile.** After the install lands:
+**Your profile.** After the install lands, the skill is added to your profile with no question,
+interactive or not, the same way `publish` adds what you publish. `profile --remove deploy-check`
+takes it off again. If the profile write fails after the skill is already on disk, the install still
+succeeds and one line says so:
 
 ```
-Add deploy-check to your profile?
+Installed deploy-check, but could not add it to your profile: <reason>
 ```
-
-The default is no, and a non-interactive run declines rather than failing. `--yes-profile`
-pre-answers it yes. Installing someone else's skill is a copy onto a machine, not a statement about
-the skill, which is why this is asked here and not at publish.
 
 ### Adopting a folder you already have
 

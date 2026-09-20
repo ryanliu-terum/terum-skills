@@ -810,7 +810,7 @@ Arguments: both optional, and four shapes share them.
 
 | Flag | Argument | Default | Meaning |
 | --- | --- | --- | --- |
-| `--yes-profile` | none | off | Add the installed skill to your profile without asking. |
+| `--yes-profile` (hidden) | none | off | Accepted and ignored: the installed skill is always added to your profile. Kept so older desktop builds that pass it keep working. |
 | `--into` | `<global\|root>` | asked | Where to place it. `global`, or a registered project root. |
 | `--adopt` | `<path>` | none | Record this existing Library folder as installed without copying it. |
 | `--team` (hidden) | `<team>` | the configured team | Configured team. |
@@ -825,9 +825,10 @@ Asks:
 - `Approve these tools for <name>?` with the skill's `allowed-tools` list as detail, remembered by grants hash so it is not asked again for the same content
 - `Install <name> despite malformed allowed-tools?` when the list cannot be parsed
 - `Replace it with Version K?` when a folder of that name is already at the destination, with the detail lines `You already have a skill named <name>.` and `Your copy is kept at <root-parent>/old-skills/<name>.`
-- `Add <name> to your profile?`, unless `--yes-profile` pre-answers it
 
-`--adopt` takes a different path through the verb and reaches only the two consent questions. It never asks where to install, because it installs nowhere, and never offers your profile.
+The installed skill is added to your profile without a question. When that write fails after the skill is on disk, the install still succeeds and prints `Installed <name>, but could not add it to your profile: <reason>`.
+
+`--adopt` takes a different path through the verb and reaches only the two consent questions. It never asks where to install, because it installs nowhere, and never touches your profile.
 
 Writes: the destination folder; `config.pending` before and after; `config.placements`; `config.approvals`, which is what keeps the tool question from repeating; receipts under `~/.terum/skills/evals/local/<digest>/<runId>/receipt.json`; `.git/info/exclude` in a project checkout; and `people/<handle>.json` in the team repository.
 

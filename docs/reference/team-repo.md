@@ -107,7 +107,7 @@ Active membership is two conditions, both required: `people/<handle>.json` exist
 
 An `installed[]` entry is `{ "id": <skill uuid>, "version": "v3", "scope": <scope>, "since": "YYYY-MM-DD" }`. `scope` is either `{ "kind": "global" }` or `{ "kind": "project", "project": "<team project name>" }`. There is one entry per (id, scope) per person: install filters the matching entry out and pushes a fresh one, so re-running it is a no-op rather than a duplicate. `version` may also be a 40-character tree hash written by a pre-layout-3 CLI, or `null`; both are read-only history.
 
-A `profile[]` entry is `{ "id": <skill uuid>, "name": "<skill name>", "version": "v2", "added": "YYYY-MM-DD", "via": "publish" | "install" }`. There is one entry per id: re-adding updates it in place. Publish adds one without asking. Install asks once and defaults to no.
+A `profile[]` entry is `{ "id": <skill uuid>, "name": "<skill name>", "version": "v2", "added": "YYYY-MM-DD", "via": "publish" | "install" }`. There is one entry per id: re-adding updates it in place. Publish and install both add one without asking.
 
 `installed[]` and `profile[]` mean different things and are used differently. `installed[]` is automatic and says a copy is on a machine; `install member <handle>` reads the other one, `profile[]`, because that is the curated list.
 

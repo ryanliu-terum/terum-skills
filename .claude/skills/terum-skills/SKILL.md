@@ -27,8 +27,8 @@ registry's newest release.
 Setup also offers a Write/Edit hook, separately and with its own y/N. Where the user accepted it, a
 note beginning *"You edited <name>, a skill in this machine's terum-skills Library"* appears after an
 edit inside a `.claude/skills/` folder, once per skill per session. It is this tool talking, not the
-user: treat it as the reminder it is, finish what you were asked to do first, and then offer the
-publish hand-off it names. A skill edited and never published is a skill only that machine has.
+user: treat it as the reminder it is, finish what you were asked to do first, and then offer to run
+the `publish` it names here. A skill edited and never published is a skill only that machine has.
 
 Arguments: everything after the command (in Claude Code this arrives as "$ARGUMENTS"). The command
 path can have several tokens (`skill move`, `team project create`); pass the remaining arguments
@@ -82,6 +82,7 @@ reporting the outcome. So:
 | `sync` | say it fetches and resets each disposable team clone to `origin/main`; it never uploads, places, or edits the user's skill folders | show the board; disclose each team reported as not refreshed. Run it in the background when your shell tool can |
 | `sync --hook` | do not run by hand; this is the SessionStart entry and refuses `--format` | stdout is the reload directive, notices go to stderr; only Terum's managed skills may be refreshed |
 | `install <ref> [--into global\|<project root>]`, `install member <h> [--into global\|<project root>]`, `install project <n> [--into global\|<project root>]` | confirm the skill/list and destination: this places files and writes install records. Use an explicitly chosen `--into`; an unregistered project path refuses and needs `project add` first | installs the highest numbered version in the clone. A tool-grant question or replace question needs a terminal; report any completed work from the board's **Notes** before handing off |
+| `publish <ref> [--project <p>] [--category <c>]` | confirm the local skill, the team when more than one is configured, and any `--project` or `--category` the user chose; say that it rewrites the folder's managed frontmatter and writes an immutable version to team main. Omit optional flags the user has not chosen | show the fenced block, including the version line and any category disclosure. Its only question is a confirm when the latest local eval of these exact bytes failed; without a TTY that refuses before the local write-back or the team write, so quote the refusal and hand the same command to a terminal |
 | `invite <github-login…>` | confirm with the user: sends GitHub collaborator invitations | show the fenced block and the teammate join line |
 | `profile [--name <display>] [--bio <text>] [--role <role>] [--project <name>]… [--remove <skill>]` | confirm the profile changes; project membership names team projects; `--remove` takes one skill off the profile list | show the fenced block |
 | `login --set <key=value>` | confirm the identity change; keys are `name`, `email`, `default-handle`; repeat the flag for multiple fields | show the identity notice; published versions keep their recorded author |
@@ -105,9 +106,8 @@ at the targeted root's sibling `.claude/old-skills/<name>` and placing the new v
 copy stays under that project. If the kept-copy path already exists, the command refuses; move
 that backup elsewhere yourself before retrying. Neither the Library nor `prune` cleans old-skills.
 Install seeds local eval receipts under each receipt's own content digest, preserving the runner's
-attribution. A receipt without a digest is skipped with a notice. Interactive install offers adding
-the skill to your profile (default no); noninteractive install skips that offer unless the user
-explicitly requests `--yes-profile`.
+attribution. A receipt without a digest is skipped with a notice. Install adds the skill to your
+profile with no question, interactive or not; `profile --remove <name>` takes it off again.
 
 Output handling for every verb in Table A:
 
@@ -121,8 +121,9 @@ Output handling for every verb in Table A:
 - **The report's last line may be the next step; act on it.** When the evaluated bytes are not a
   published version, the run ends with either *To share these results, publish the skill again:*
   and the command, or — on a FAIL verdict — the same command with the reason not to use it yet.
-  Publishing is Table B: prepare that command for the user's terminal and say why it goes there.
-  Offer it after a PASS or NEUTRAL; after the FAIL line, report the verdict and stop.
+  Publishing is Table A: after a PASS or NEUTRAL, offer to run that command here and run it once the
+  user agrees. After the FAIL line, report the verdict and stop; running it would only reach the
+  regression confirm, which needs a terminal.
 - No update-notice tail appears when stderr has no TTY.
 
 ## Table B: verbs that are handed to the user
@@ -134,7 +135,6 @@ the CLI will ask you questions the session cannot answer.*
 | Verb | Free dry run first | Command to hand over |
 |---|---|---|
 | `project add` (no path) | none | `npx -y terum-skills@latest project add` — asks for a folder |
-| `publish <ref> [--project <p>] [--category <c>]` | none; confirm the local skill and team with the user | `npx -y terum-skills@latest publish <ref> --project <p> --category <c>` — omit optional flags the user has not chosen |
 | `unpublish <skill> [--yes]` | none; confirm the skill and team with the user | `npx -y terum-skills@latest unpublish <skill>` — it asks the user to type the skill's name; use `--yes` only after an explicit confirmation |
 | `skill move <abs-path> --to global\|<project root>` | none | `npx -y terum-skills@latest skill move <abs-path> --to <destination>` |
 | `skill copy <abs-path> --to global\|<project root>` | none | `npx -y terum-skills@latest skill copy <abs-path> --to <destination>` — the source folder stays where it is |

@@ -34,7 +34,6 @@ export interface InstallArgs extends WithForm {
   member?: string;
   project?: string;
   team?: string;
-  yesProfile?: boolean;
   config?: ConfigStore;
   runner?: Runner;
   cwd?: string;
@@ -78,11 +77,11 @@ export async function run(args: InstallArgs, io: Prompter): Promise<Result<Insta
       // `profile` is optional in the schema (people files written before it shipped have none), and an
       // empty curated list is refused by name rather than silently installing nothing.
       const profile = person.profile ?? [];
-      if (!profile.length) throw new Error(`${operation.member} has nothing on their profile yet, so there is nothing to install. A teammate adds a skill to their profile when they publish it or when install asks.`);
+      if (!profile.length) throw new Error(`${operation.member} has nothing on their profile yet, so there is nothing to install. A teammate adds a skill to their profile when they publish or install it.`);
       const destination = await destinationFor(team);
       const results: InstalledResult[] = [];
       for (const item of profile) {
-        const result = await installOne({ team, destination, id: item.id, yesProfile: args.yesProfile, store, runner, cwd: args.cwd, home: args.home, safeWrite: args.safeWrite }, io);
+        const result = await installOne({ team, destination, id: item.id, store, runner, cwd: args.cwd, home: args.home, safeWrite: args.safeWrite }, io);
         results.push(result);
       }
       return success(results);
@@ -94,7 +93,7 @@ export async function run(args: InstallArgs, io: Prompter): Promise<Result<Insta
       if (!project) throw new Error(`Unknown project ${operation.project}.`);
       const destination = await destinationFor(team, operation.project);
       const results: InstalledResult[] = [];
-      for (const id of project.skills) results.push(await installOne({ team, destination, id, project: operation.project, yesProfile: args.yesProfile, store, runner, cwd: args.cwd, home: args.home, safeWrite: args.safeWrite }, io));
+      for (const id of project.skills) results.push(await installOne({ team, destination, id, project: operation.project, store, runner, cwd: args.cwd, home: args.home, safeWrite: args.safeWrite }, io));
       return success(results);
     }
     const reference = parseRef(operation.ref);
@@ -116,7 +115,7 @@ export async function run(args: InstallArgs, io: Prompter): Promise<Result<Insta
       return bootstrapped.value.team;
     });
     const destination = await destinationFor(team);
-    return success([await installOne({ team, destination, reference: reference.name, yesProfile: args.yesProfile, store, runner, cwd: args.cwd, home: args.home, safeWrite: args.safeWrite }, io)]);
+    return success([await installOne({ team, destination, reference: reference.name, store, runner, cwd: args.cwd, home: args.home, safeWrite: args.safeWrite }, io)]);
   } catch (error) { return fromError(error); }
 }
 
@@ -135,7 +134,6 @@ export interface PlacingInstallInput extends InstallOneCommon {
   id?: string;
   project?: string;
   scope?: { kind: 'global' } | { kind: 'project'; project: string };
-  yesProfile?: boolean;
 }
 export interface AdoptInstallInput extends InstallOneCommon {
   adopt: string;
@@ -234,8 +232,18 @@ export async function installOne(input: AdoptInstallInput | PlacingInstallInput,
   }), { action: 'install', handle: binding.handle, message: `${binding.handle}: install ${skill.name}`, ...input.safeWrite, ...lockWait(io) });
   io.progress?.({ step: 'Recording your install', current: 4, total: 4 });
   await input.store.update((fresh) => { fresh.pending = fresh.pending.filter((entry) => !samePending(entry, pending)); });
-  const profiled = await recordProfileEntry({ store: input.store, clone, team: input.team, handle: binding.handle, remote: binding.remote, runner: input.runner,
-    id: skill.id, name: skill.name, version: latest, via: 'install', preAnswered: input.yesProfile, localSkills, safeWrite: input.safeWrite }, io);
+  // D77 extended to install (2026-09-18): the profile entry is written with no question. It is a
+  // SECOND safeWrite after the skill is placed and the install is recorded, so its failure is
+  // reported on its own line and in `profiled: false` — never as a failed install, which would
+  // contradict the copy already on disk and the record already pushed (mirrors publish).
+  let profiled = false;
+  try {
+    await recordProfileEntry({ store: input.store, clone, team: input.team, handle: binding.handle, remote: binding.remote, runner: input.runner,
+      id: skill.id, name: skill.name, version: latest, via: 'install', localSkills, safeWrite: input.safeWrite }, io);
+    profiled = true;
+  } catch (error) {
+    io.print(`Installed ${skill.name}, but could not add it to your profile: ${error instanceof Error ? error.message : String(error)}`);
+  }
   return { id: skill.id, team: input.team, path: placed.path, version: latest, profiled };
 
 }

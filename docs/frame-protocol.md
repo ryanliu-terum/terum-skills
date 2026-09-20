@@ -137,7 +137,7 @@ A second-team binding refused before any side effect:
 
 ## Versioning
 
-The current package reports version `0.20.1`, protocol `1`. The re-recorded 0.14.0
+The current package reports version `0.21.0`, protocol `1`. The re-recorded 0.14.0
 hello lines under `.planning/codex-runs/*/frames/` precede B5's three skill verbs;
 `src/lib/frames.ts` now advertises this complete verb list:
 
@@ -263,8 +263,9 @@ After any tool-grant consent, a collision emits this ask (paths and Version N co
 Only an affirmative answer moves the existing folder to old-skills and places the new copy.
 A pre-existing kept copy causes a refusal; it is never overwritten. Old-skills is a sibling of
 the targeted skills root, is excluded locally for a project, and is neither scanned nor pruned.
-The optional profile confirm follows placement and the install-record write; `--yes-profile`
-pre-answers only that offer. Install seeds receipts under their own `content_digest`, preserving
+After placement and the install-record write, install adds the skill to the installer's profile
+with no question (D77, extended to install 2026-09-18); `--yes-profile` is accepted and ignored so
+older desktop builds keep working. Install seeds receipts under their own `content_digest`, preserving
 runner attribution. A receipt lacking a digest is skipped with `Skipped <runId>: no content digest (pre-migration receipt).`
 Pending intent may already exist when replacement is declined; retry the matching install to drain it.
 The result is an array of `{ id, team, path, version, profiled }`.

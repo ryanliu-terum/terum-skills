@@ -1,6 +1,8 @@
 # Eval purpose suites — cases that test what a skill is for (IE7)
 
-**Status:** DRAFT rev 2 (harden r1 applied 2026-09-16 by the overnight build session — the
+**Status:** DRAFT rev 3 (rev 3: §6.1 staging narrowed to named scripts, Ryan 2026-09-16,
+release check, Terum d31ae2da, with the same day's review corrections — links, nested
+`.claude` trees, spellings, how a case seeds a `.claude/` path; rev 2: harden r1 applied 2026-09-16 by the overnight build session — the
 clear BLOCKER/DRIFT fixes only; rev 1 Ryan, 2026-09-15, in session with Claude). Building: PR A open.
 Supersedes nothing yet; revises engine spec §4.3 (session cap), §7.1 (dead-arm row
 rule), adds a §5.1 sibling asset (suite), and adds a second generator mode to the
@@ -386,7 +388,8 @@ timer counts sleep on macOS is unverified). The contact line is an open question
 Some skills do not do their work in the agent's context. Their SKILL.md tells the
 agent to call the Workflow tool on a script that lives in the **repository**, not in
 the skill folder (`hybrid-review`, `ultrareview`, `harden`; the Codex-side skills
-read `.claude/codex/` the same way). The eval sandbox holds only the skill folder and
+also read docs, rules and schemas under `.claude/codex/`, which §6.1 rev 3 does not
+stage — see its "Not done here"). The eval sandbox holds only the skill folder and
 the case's seeds, so the call dies with `Workflow script file not found` and the
 skill degrades to prose — the 2026-09-16 run in §1. The path is right there in the
 SKILL.md; the engine can stage it. Ryan, 2026-09-15: *"if the skill.md calls
@@ -395,37 +398,108 @@ workflow, shouldn't we be able to access that workflow script? it's in the skill
 ### 6.1 Dependency staging (chunk 8) — engine
 
 **Scan.** After hygiene, scan the SKILL.md body for repo-relative path tokens
-(`[\w.-]+(/[\w.-]+)+`, no leading `/`, no `..`). Keep each token that resolves to an
-existing file or directory under the **eval's repo root** and lies **outside the
-skill folder** (inside is already copied). Repo root: for a local or `--working`
-skill, the nearest `.git` ancestor of the skill folder; for a team-library skill,
-the `.git` ancestor of the eval's cwd **[veto cheap]**.
+(`[\w.-]+(/[\w.-]+)+`, no `..`), dropping a sentence-ending period (`engine.js.` is
+`engine.js`). A token right after a `/` is skipped (an absolute, `~/` or URL path is
+not repo-relative) unless the `/` ends a root placeholder: `${VAR}/`, `$VAR/`,
+`"$VAR"/` or `<name>/` stands for the repo root, except for `HOME`. Two spellings of
+one path (`./scripts/x.sh`, `scripts/x.sh`) are one script, shown under the first. A
+SKILL.md with no script token is done: nothing is walked or staged. Keep a token only
+when it names a **script** (`.js .mjs .cjs .ts .sh .py`) that exists as a file under
+the **eval's repo root**; that file may be a link, and its real path may lie outside
+the root. Never kept, whatever the SKILL.md says, with names compared without case
+(APFS is case-insensitive): a path through `.git` or `node_modules`; anything in a
+`.claude/skills` tree at any depth (the root one belongs to skill staging, and another
+skill's files are not this skill's method); a script whose **real** path, resolved
+from the repo root, lies in the skill folder, a `.claude/skills` tree or `.git`, so
+`.claude/skills/<self>/run.sh`, a global skill under a git-tracked HOME, and a link
+into a skill are all caught; and a script whose **file identity** (device and inode)
+belongs to the skill folder or to its answer key. The answer key is every file and
+directory the runner can read under the skill's `evals/` and `fixtures/`, through
+links to any depth; the skill folder is every file and directory that lies in it. An
+identity, unlike a path, is the same under every spelling (a macOS firmlink such as
+`/System/Volumes/Data/Users/…`), through every link, and for every hard link. The
+folder copy already carries a token that resolves to a file inside the skill folder,
+or that names `.claude/skills/<this skill>/<file>` for a file the folder has (except
+under `evals/` and `fixtures/`, which never travel). A script token that resolves
+nowhere, a dangling link, an unreadable script or another skill's absent script
+included, is missing; a script that exists but is never kept is withheld, unless it is
+spelled through `node_modules` (see Record). Repo root: for a local or `--working`
+skill, the nearest `.git` ancestor of the skill folder; for a team-library skill, the
+`.git` ancestor of the eval's cwd **[veto cheap]**.
 
-**Stage.** In `seedSandbox`, after skill staging, for each kept path: a directory is
-copied whole; a file is copied, and if it is a script (`.js .mjs .cjs .ts .sh .py`)
-its **parent directory** is copied too (workflow engines import sibling helpers).
-Always excluded: `node_modules`, `.git`, `__tests__`, anything the token itself does
-not name. Total staged bytes capped at 20 MB **[veto cheap]**; over the cap the run
-prints the offending path and stages nothing from it. Staged into **candidate and
-incumbent arms only** — the files are the skill's method; §7.1's "baseline stages
-nothing" stands.
+**Why scripts only (rev 3).** The staged files are the skill's **method**, and the
+North Star compares the skill with a bare agent **on the same input**. A data path
+the skill names (`.claude/handoff.md`, `.planning/specs`, `.codex/config.toml`, a
+settings file) is the task's input: staging it gives the candidate and incumbent
+something the baseline never sees. A case that needs such a file seeds it: through
+`files` for a path outside `.claude/`, or through an authored case's `fixture` for a
+`.claude/` path (`files` refuses keys under the sandbox's `.claude/`, and a generated
+case carries no fixture). Staging the skill's own folder, or an ancestor of it, is worse:
+it brings back `evals/` and `fixtures/` (the answer key) and overwrites the
+incumbent's SKILL.md with the candidate's. Rev 2 staged any existing path, and the
+2026-09-16 release check found live plans that staged `state` over itself, all of
+`.claude/skills` for `terum-skills`, and `.claude/settings.json` for
+`codex-implement`.
 
-**Record.** `run.jsonl` meta gains `staged_dependencies: string[]`; the run prints
-one line per staged path. No receipt change. A token that resolves nowhere prints
-`SKILL.md references <path>, which is not present here; the skill may not run` and
-is recorded under `missing_dependencies` — the honest result for a teammate who
-installed a skill whose method never travelled with it.
+**Stage.** In `seedSandbox`, after skill staging, each kept script is copied with its
+**parent directory** (workflow engines import sibling helpers; non-script siblings
+travel with them), and a directory shared by two scripts is copied once. The script
+travels alone when that directory is the repo root, any `.claude` directory (settings,
+notes and skills live there), or would carry the skill folder or `.claude/skills`,
+judged by path and by real path (`./build.sh`, `.claude/statusline.js`, a script
+beside a skill folder). Always excluded from a copy, at any depth: `node_modules`,
+`.git` and `__tests__` directories, anything landing in a `.claude/skills` tree,
+`.claude/settings*.json`, and every file and directory whose identity belongs to the
+skill folder or its answer key (see Scan); the directory around such a file still
+travels, with its other files. The copy writes only regular files and directories,
+never a link: `fs.cp` would write a link as an absolute path into the live repository.
+A link beneath a copied directory is not copied or followed, and an entry the eval
+cannot read is left out. A script or directory that is itself a link, even to a path
+outside the repo or into `node_modules`, is copied from its real target. The walk that
+collects the identities reads names, types, identities and real paths, never file
+contents. It follows links under `evals/` and `fixtures/`, since the runner reads
+through them, but not elsewhere in the skill folder, since a repository directory the
+skill folder links to is not the skill's own; it lists each directory once, so chains
+and loops end, and skips what the eval cannot reach. When it cannot finish (past
+200,000 entries, at a directory the eval may search but not list, or at a path too
+long to resolve), **nothing is staged**: a file it never saw may be the answer key,
+and a runner that knows its name still reads it (Terum d31ae2da). A directory the eval
+may not search at all hides nothing and does not stop the walk. The copy never
+overwrites a path already in the sandbox: the case's seeds and the staged skill win.
+Total staged bytes capped at 20 MB **[veto cheap]**, counted as what the copy writes
+(the real bytes of the whole parent directory under the same exclusions, a shared
+directory once); over the cap the run prints the named script and stages nothing from
+its directory. Staged into **candidate and incumbent arms only** — the files are the
+skill's method; §7.1's "baseline stages nothing" stands.
+
+**Record.** `run.jsonl` meta gains `staged_dependencies: string[]` (the named
+scripts); the run prints one line per staged script. No receipt change. A script token
+that resolves nowhere prints
+`SKILL.md references <path>, which is not present here; the skill may not run` and is
+recorded under `missing_dependencies` — the honest result for a teammate who installed
+a skill whose method never travelled with it. A token that is not a script is neither
+staged nor reported: `built/fixed/changed.` is prose, and a data path is the case
+author's to seed. The plan also carries `withheld` (each existing script a fence
+refused, with the reason: the skill's own file, its answer key, `.git`, a
+`.claude/skills` tree, or the repo root) and, when the identity walk could not finish,
+`incomplete` (why nothing was staged). The run prints both; neither is recorded. The
+two lines in `commands/eval.ts` are owed by the heavy-mode wiring.
 
 **Hygiene warning HYG8 [veto cheap]** (rev 2: HYG7 is already the off-list category warning) — warning tier, like rev 16's HYG6: *"this
 skill references N repository paths outside its folder; it depends on files it does
-not carry"*. Printed by validate, share, publish, and eval; gates nothing. The
+not carry"* (rev 3: N counts the named scripts, staged or over the cap). Printed by
+validate, share, publish, and eval; gates nothing. The
 author's fix is to move the script into the skill folder and reference it there —
 the Workflow tool accepts any in-repo path — after which the ordinary folder copy
 stages everything and the scan finds nothing to add.
 
 **Not done here:** import-following beyond the parent directory; staging into the
-baseline arm; any change to the §7.3 contamination check (it asserts skill-list
-membership, not files).
+baseline arm; staging a named data path (rev 3: the case seeds it); staging
+non-script method files outside a staged script's directory (rev 3: the docs, rules
+and schemas under `.claude/codex/` stay behind; a skill that needs them carries them,
+or an authored case's `fixture` seeds them); a generated case seeding a `.claude/`
+path (rev 3: only an authored case's `fixture` can); any change to the §7.3
+contamination check (it asserts skill-list membership, not files).
 
 ### 6.2 Authored hybrid-review suite (chunk 7) — assets only
 
@@ -514,9 +588,19 @@ file shape, proven by one real run.
 5. Suite mode default k = 1; the notice's checkbox is k-per-case mode with the
    skill's authored/generated cases.
 6. Generated suite: 2–6 defects, exactly 1 distractor, 3–6 files.
-7. Dependency staging (§6.1): repo root = `.git` ancestor of the skill folder, else
-   of the cwd; script files bring their parent directory; 20 MB cap; candidate and
-   incumbent arms only; HYG8 is warning tier.
+7. Dependency staging (§6.1, rev 3): repo root = `.git` ancestor of the skill folder,
+   else of the cwd; only named script files are staged, each with its parent
+   directory, siblings included (the script alone when that directory is the repo
+   root, a `.claude` directory, or would carry the skill folder or `.claude/skills`);
+   never the skill folder or an ancestor of it, a `.claude/skills` tree, `.git`, or
+   `.claude/settings*.json` (all at any depth), a link beneath a copied directory
+   (neither copied nor followed), or a data path the SKILL.md names; no file or
+   directory of the skill folder or of its answer key (anything the runner can read
+   under `evals/` and `fixtures/`) reaches an arm, matched by file identity whatever
+   the path; nothing is staged when that identity walk cannot finish (200,000 entries,
+   or a directory it may search but not list); the copy never overwrites a seeded
+   file; 20 MB cap on the real bytes copied; candidate and incumbent arms only; HYG8
+   is warning tier.
 8. `spawns_agents`, `staged_dependencies`, `missing_dependencies` recorded in
    `run.jsonl` meta, not the receipt.
 

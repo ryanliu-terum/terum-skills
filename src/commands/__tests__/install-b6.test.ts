@@ -17,13 +17,13 @@ async function fixture() {
   await store.update(c => { c.teams.team = { remote: f.bare, handle: 'seed' }; });
   return { ...f, home, store, id, bytes, clone, args: { ref: 'sample', config: store, home }, target: join(home, '.claude/skills/sample') };
 }
-it('asks even when Global is the only interactive destination; headless defaults to Global', async () => {
-  const f = await fixture(), io = new ScriptedPrompter([''], [false], true);
-  expect(await run(f.args, io)).toMatchObject({ ok: true, value: [{ profiled: false }] });
+it('asks even when Global is the only interactive destination, never about the profile; headless defaults to Global', async () => {
+  const f = await fixture(), io = new ScriptedPrompter([''], [], true);
+  expect(await run(f.args, io)).toMatchObject({ ok: true, value: [{ profiled: true }] });
   expect(io.offered).toEqual([['Global (~/.claude/skills)']]);
-  expect(io.asked).toContain('Add sample to your profile?');
+  expect(io.asked.filter(question => /profile/i.test(question))).toEqual([]);
   const other = await fixture();
-  expect(await run(other.args, new NonInteractivePrompter())).toMatchObject({ ok: true });
+  expect(await run(other.args, new NonInteractivePrompter())).toMatchObject({ ok: true, value: [{ profiled: true }] });
 });
 it.each(['global', 'project'])('keeps a collision in %s old-skills, copies whole version, and never quarantines', async mode => {
   const f = await fixture(), root = mode === 'global' ? f.home : f.seed;
@@ -96,14 +96,14 @@ it.each(['install', 'uninstall'] as const)('%s replaces duplicate pending rows w
   expect(await invoke(f.args, new ScriptedPrompter([], [true]))).toMatchObject({ ok: true });
   expect((await f.store.read()).pending).toEqual([other]);
 });
-it('profiles only on explicit yes, refreshes one profile entry, and uninstall preserves it without writing declined', async () => {
+it('adds to the profile with no question, refreshes one profile entry, and uninstall preserves it without writing declined', async () => {
   const f = await fixture();
-  expect(await run({ ...f.args, yesProfile: true }, new ScriptedPrompter())).toMatchObject({ ok: true, value: [{ profiled: true }] });
+  expect(await run(f.args, new ScriptedPrompter())).toMatchObject({ ok: true, value: [{ profiled: true }] });
   const path = join(f.clone, 'people/seed.json');
   const before = JSON.parse(await readFile(path, 'utf8'));
   expect(before.profile).toEqual([expect.objectContaining({ id: f.id, name: 'sample', version: 'v1', via: 'install' })]);
   expect(before.local_skills).toBe(1);
-  expect(await run({ ...f.args, yesProfile: true }, new ScriptedPrompter([], [true]))).toMatchObject({ ok: true });
+  expect(await run(f.args, new ScriptedPrompter([], [true]))).toMatchObject({ ok: true });
   expect(JSON.parse(await readFile(path, 'utf8')).profile).toHaveLength(1);
   const io = new ScriptedPrompter([], [true]);
   expect(await uninstall(f.args, io)).toMatchObject({ ok: true });
@@ -131,7 +131,7 @@ it('self-drains the sole interrupted project destination even after its ledger r
   expect(await uninstall(f.args, new ScriptedPrompter([], [true]))).toMatchObject({ ok: true });
   expect((await f.store.read()).pending).toEqual([]);
 });
-it('refuses retired --force and forwards explicit profile consent in CLI grammar', async () => {
+it('refuses retired --force and accepts the retired --yes-profile without effect in CLI grammar', async () => {
   const { buildProgram } = await import('../../cli.js');
   let received: unknown;
   const program = buildProgram(async invoke => { await invoke(new ScriptedPrompter()); }, {
@@ -142,5 +142,18 @@ it('refuses retired --force and forwards explicit profile consent in CLI grammar
   await expect(program.parseAsync(['install', 'sample', '--force'], { from: 'user' })).rejects.toMatchObject({ code: 'commander.unknownOption' });
   expect(received).toBeUndefined();
   await program.parseAsync(['install', 'sample', '--yes-profile', '--into', 'global'], { from: 'user' });
-  expect(received).toMatchObject({ ref: 'sample', yesProfile: true, into: 'global' });
+  expect(received).toMatchObject({ ref: 'sample', into: 'global' });
+});
+it('a failed profile write after the install landed reports itself on one line and in profiled: false, never as a failed install', async () => {
+  const f = await fixture();
+  // The install record is the first push; the profile entry is a second, separate safeWrite. Only the second push goes offline.
+  let pushes = 0;
+  const runner = wrapRunner(systemRunner, async (_command, args, _options, next) => args[0] === 'push' && ++pushes === 2 ? { code: 1, stdout: '', stderr: 'offline' } : next());
+  const io = new ScriptedPrompter();
+  expect(await run({ ...f.args, runner, safeWrite: { deadlineMs: 0 } }, io)).toMatchObject({ ok: true, value: [{ id: f.id, version: 'v1', profiled: false }] });
+  expect(io.lines.filter(line => line.startsWith('Installed sample, but could not add it to your profile: '))).toHaveLength(1);
+  expect(await readFile(join(f.target, 'SKILL.md'), 'utf8')).toBe(f.bytes);
+  const person = JSON.parse(await readFile(join(f.clone, 'people/seed.json'), 'utf8'));
+  expect(person.installed).toEqual([expect.objectContaining({ id: f.id, version: 'v1' })]);
+  expect(person.profile ?? []).toEqual([]);
 });

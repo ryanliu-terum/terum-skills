@@ -8,9 +8,12 @@
  * D77 (Ryan, 2026-09-14): **publish writes the entry with no question.** Typing `publish` IS the
  * endorsement — the publisher chose the skill, the team and the project by hand — so a second
  * "Add <name> to your profile?" asked for consent that was already given, and its default-no
- * meant the ordinary path left the publisher's own profile empty. `install` still asks: installing
- * someone else's skill is a copy onto a machine, not a statement about the skill. Either entry is
- * reversible with `profile --remove`.
+ * meant the ordinary path left the publisher's own profile empty.
+ *
+ * D77 extended to install (Ryan, 2026-09-18): **install writes the entry with no question too.**
+ * The same reasoning applies — typing `install <name>` chose the skill by hand — and in practice the
+ * question was a pop-up every install had to click through, whose default-no left most profiles
+ * empty. Both verbs now write; either entry is reversible with `profile --remove`.
  */
 import { Prompter } from './prompt.js';
 import { parseJson, personSchema, type Person } from './schema.js';
@@ -30,20 +33,17 @@ export interface ProfileEntryRequest {
   /** The `v<N>` the skill now sits at — the minted one, or the identical one. Never null. */
   version: string;
   via: 'publish' | 'install';
-  /** Pre-answers `install`'s prompt for the desktop and for tests; `publish` never asks (D77). */
-  preAnswered?: boolean;
   localSkills?: number | null;
   safeWrite?: Pick<SafeWriteOptions, 'deadlineMs' | 'backoff' | 'now' | 'sleep'>;
 }
 
 /**
- * Writes the entry: unconditionally for `publish` (D77), and for `install` after asking once,
- * default NO — a non-interactive install declines rather than throwing on a question it cannot ask.
- * One entry per id: a re-add updates `version` and `added` in place rather than appending a duplicate.
+ * Writes the entry unconditionally for both verbs (D77, extended to install 2026-09-18); nothing is
+ * asked, so a non-interactive run writes exactly what an interactive one does. One entry per id: a
+ * re-add updates `version` and `added` in place rather than appending a duplicate. `io` is only the
+ * lock-wait reporter.
  */
-export async function recordProfileEntry(request: ProfileEntryRequest, io: Prompter): Promise<boolean> {
-  const yes = request.via === 'publish' || (request.preAnswered ?? (io.interactive ? await io.confirm(`Add ${request.name} to your profile?`) : false));
-  if (!yes) return false;
+export async function recordProfileEntry(request: ProfileEntryRequest, io: Prompter): Promise<void> {
   const added = new Date().toISOString().slice(0, 10);
   await openTeamRepo(request.clone, request.remote, request.runner).safeWrite((tree) => {
     writePersonFile(tree, request.handle, person => {
@@ -51,7 +51,6 @@ export async function recordProfileEntry(request: ProfileEntryRequest, io: Promp
       if (request.localSkills != null) person.local_skills = request.localSkills;
     });
   }, { action: request.via, handle: request.handle, ...request.safeWrite, ...lockWait(io) });
-  return true;
 }
 
 /** Pure read/validate/write path for the caller's people file; reads the current post-image. */
