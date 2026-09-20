@@ -40,6 +40,17 @@ export function verdictBand(wins: number, losses: number, ties: number): Verdict
   return 'NEUTRAL';
 }
 
+/**
+ * IE6 §4: the head-to-head row. Same record, same sign test, no net-lift percentage — a
+ * signed percentage between two skills is the one quotable cross-skill number this mode
+ * could emit, and D29 bans a surface that orders skills. The p-value stays because it is
+ * the reader's only calibration once the verdict band is gone: 11W-9L is p=0.824.
+ */
+export function summarizePaired(wins: number, losses: number, ties: number): string {
+  const n = wins + losses + ties;
+  return `${wins}W ${losses}L ${ties}T over ${n} comparison${n === 1 ? '' : 's'}, sign test p=${signTest(wins, losses).toFixed(3)}`;
+}
+
 export function summarize(wins: number, losses: number, ties: number): string {
   const p = signTest(wins, losses);
   const n = wins + losses + ties;

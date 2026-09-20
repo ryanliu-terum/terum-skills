@@ -129,7 +129,7 @@ describe('brief-seeded case generation (§3.2)', () => {
     expect(prompts[0]).not.toContain('CANDIDATE FILE LISTING');
     // The prompt is assembled from escapes; a literal backslash-n would reach the model as text.
     expect(prompts[0]).not.toContain(String.raw`\n`);
-    expect(prompts[0].split('\n').length).toBeGreaterThan(3);
+    expect((prompts[0] ?? '').split('\n').length).toBeGreaterThan(3);
   });
 
   it('rejects a brief-seeded set with three cases, a missing rubric, or a rubric naming a skill', async () => {
@@ -137,7 +137,12 @@ describe('brief-seeded case generation (§3.2)', () => {
     expect(await generate({ ...briefOpts, agent: agent([three, three, three]), brief: 'b', rivalNames: [] }))
       .toMatchObject({ ok: false, error: expect.stringContaining('exactly 5 cases') });
 
-    const noRubric = { cases: fiveCases.cases.map(({ judge: _judge, ...rest }) => rest) };
+    const stripJudge = (entry: Record<string, unknown>): Record<string, unknown> => {
+      const copy = { ...entry };
+      delete copy['judge'];
+      return copy;
+    };
+    const noRubric = { cases: fiveCases.cases.map(stripJudge) };
     expect(await generate({ ...briefOpts, agent: agent([noRubric, noRubric, noRubric]), brief: 'b', rivalNames: [] }))
       .toMatchObject({ ok: false, error: expect.stringContaining("needs a 'judge' rubric") });
 

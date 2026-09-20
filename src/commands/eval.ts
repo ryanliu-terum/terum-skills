@@ -293,7 +293,7 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
         if (output.skipped) environmentSkips[name] = output.skipped;
       }
     }
-    const summary = aggregate(rows, arms, expectedRows, environmentSkips);
+    const summary = aggregate(rows, arms, expectedRows, environmentSkips, rival === undefined ? 'standard' : 'head-to-head');
     await writeRunTree(runDir, {
       team: teamName, skill_id: record.id, skill_name: record.name, run_id: runId,
       cc_version: preflight.value.ccVersion, model, judge_model: args.judgeModel ?? model,
@@ -317,7 +317,14 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
       io.print(`eval assets: ${sets.join(' · ')}`);
       io.print(`Generated assets: ${join(runDir, 'generated')} — review before trusting; save or copy reviewed files into the skill before committing a receipt.`);
     }
-    io.print(renderReport(summary, triggers));
+    io.print(renderReport(summary, triggers, rival === undefined || brief === undefined ? null : {
+      candidate: record.name,
+      rival: rival.record.name,
+      cases: caseNames.length,
+      k,
+      briefPath: args.brief === undefined ? join(runDir, 'brief.md') : resolve(args.brief),
+      briefSource: brief.source,
+    }));
     let committedPath: string | undefined;
     if (args.commit) {
       const armSkillLists = Object.fromEntries([...new Set(arms.map((arm) => arm.arm))]

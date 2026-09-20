@@ -86,3 +86,64 @@ describe('report rendering (§6)', () => {
     expect(renderReport(out, null)).toContain('[partial — 1/2 scored]');
   });
 });
+
+describe('head-to-head report mode (IE6 §4)', () => {
+  const head = { candidate: 'codex-spec', rival: 'ultraspec', cases: 5, k: 5, briefPath: '/runs/brief.md', briefSource: 'derived' as const };
+
+  // §4's own sample: 14W 6L 5T against baseline, 11W 9L 5T against the rival.
+  const sampleRows = [
+    ...Array.from({ length: 14 }, () => row('win')), ...Array.from({ length: 6 }, () => row('loss')), ...Array.from({ length: 5 }, () => row('tie')),
+    ...Array.from({ length: 11 }, () => row('win', 'judge', 'candidate-vs-rival')),
+    ...Array.from({ length: 9 }, () => row('loss', 'judge', 'candidate-vs-rival')),
+    ...Array.from({ length: 5 }, () => row('tie', 'judge', 'candidate-vs-rival')),
+  ];
+  const sampleArms = [sample('candidate', 0.82), sample('rival', 0.71), sample('baseline', 0.61)];
+
+  it('prints no verdict and no why line, and carries the sign test instead of net lift', () => {
+    const out = aggregate(sampleRows, sampleArms, 50, {}, 'head-to-head');
+    expect(out.verdict).toBeNull();
+    const report = renderReport(out, null, head);
+    expect(report).not.toMatch(/^verdict:/m);
+    expect(report).not.toMatch(/^why:/m);
+    expect(report).not.toMatch(/net lift/);
+    expect(report).not.toMatch(/NEUTRAL|PASS|FAIL/);
+    expect(report).toContain('head-to-head: codex-spec vs ultraspec — 5 cases · k=5');
+    // 11W-9L is a coin flip; the p-value is what says so once the band is gone.
+    expect(report).toContain('candidate-vs-rival: 11W 9L 5T over 25 comparisons, sign test p=0.824');
+    expect(report).toContain('candidate-vs-baseline: 14W 6L 5T over 25 comparisons, sign test p=0.115');
+  });
+
+  it('states the denominator on a complete run and flags it on a partial one (D2)', () => {
+    const complete = renderReport(aggregate(sampleRows, sampleArms, 50, {}, 'head-to-head'), null, head);
+    expect(complete).toContain('scored: 50/50 rows');
+    expect(complete).not.toContain('[partial]');
+
+    // The state the line exists for: without it, a third of the matrix dying is invisible.
+    const partial = renderReport(aggregate(sampleRows.slice(0, 37), sampleArms, 50, {}, 'head-to-head'), null, head);
+    expect(partial).toContain('scored: 37/50 rows [partial]');
+  });
+
+  it('orders arms candidate · rival · baseline regardless of sample order', () => {
+    const shuffled = [sample('baseline', 0.61), sample('rival', 0.71), sample('candidate', 0.82)];
+    const report = renderReport(aggregate(sampleRows, shuffled, 50, {}, 'head-to-head'), null, head);
+    expect(report).toContain('arm scores: candidate 0.82 · rival 0.71 · baseline 0.61');
+  });
+
+  it('names the brief and its provenance, and keeps the caveat in front of the reader', () => {
+    expect(renderReport(aggregate(sampleRows, sampleArms, 50, {}, 'head-to-head'), null, head))
+      .toContain('brief: /runs/brief.md (human-confirmed)');
+    expect(renderReport(aggregate(sampleRows, sampleArms, 50, {}, 'head-to-head'), null, { ...head, briefSource: 'supplied' }))
+      .toContain('brief: /runs/brief.md (supplied)');
+    expect(renderReport(aggregate(sampleRows, sampleArms, 50, {}, 'head-to-head'), null, head))
+      .toContain('not a ranking');
+  });
+
+  it('leaves standard mode untouched — verdict, why, and net lift all still print', () => {
+    const out = aggregate(sampleRows.filter((r) => r.comparison === 'candidate-vs-baseline'), sampleArms, 25);
+    const report = renderReport(out, null);
+    expect(out.verdict).toBe('NEUTRAL');
+    expect(report).toMatch(/^verdict: NEUTRAL/m);
+    expect(report).toMatch(/^why:/m);
+    expect(report).toContain('net lift');
+  });
+});
