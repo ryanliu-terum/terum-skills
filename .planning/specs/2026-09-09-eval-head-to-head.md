@@ -173,8 +173,14 @@ emitted: it would invite a lift-vs-lift subtraction, which is the r = 0.35 quant
 ### 3.1 `deriveBrief`
 
 New export. The prompt receives both `SKILL.md` files and both file listings, **aliased to
-`Skill 1` / `Skill 2` in an order drawn from the run's seeded RNG** (`makeRng(0)`, already
-threaded through `runCase`). Rev 1 fed them A-then-B by name: §7.5 swaps A/B orderings for
+`Skill 1` / `Skill 2`, ordered by skill name (ASCII, ascending) rather than by which one was
+typed first**. Rev 2 first specified a seeded-RNG order; that was wrong, and implementation
+caught it — the seed is fixed at 0, so the first draw is constant and the CLI's first
+argument would land in the same alias slot on every run, which is exactly the systematic
+tilt the swap exists to remove. Name order is deterministic and reproducible like a seed,
+but it is uncorrelated with which skill the caller is championing: the candidate takes the
+`Skill 1` slot in roughly half of all pairs instead of all of them. Rev 1 fed them
+A-then-B by name: §7.5 swaps A/B orderings for
 the judge precisely because position bias was a top-two noise source in the 2026-09-04
 probe, and the deriver is the one place the two skills are read side by side — its output
 seeds every case, so a fixed order is a systematic tilt in every rep. Aliasing also makes
@@ -296,7 +302,7 @@ note: arm scores correlate across skills better than their difference does, but 
   id, with `_meta` gaining `mode: "head-to-head"`, `rival_skill_id`, `rival_skill_name`,
   `rival_version` (the rival's head tree in the refreshed clone), `brief_source:
   "derived" | "supplied"`, and `brief_order` — which of the two was `Skill 1` in the
-  derivation prompt (§3.1), without which the seeded order is unauditable.
+  derivation prompt (§3.1), without which the aliasing is unauditable.
 
 ## 5. What this spec deliberately does not do
 
@@ -354,8 +360,8 @@ reviewed by a human who agrees the brief is fair to both.
    `checkBriefNeutrality`, refusing on multi-token names and warning on single-token ones
    (§3.1).
 8. **Comparison rows print the sign test, never net lift** (§4).
-9. **The derivation prompt's skill order is seeded, not fixed** (§3.1), and recorded in
-   `_meta.brief_order`.
+9. **The derivation prompt orders the two skills by name, not by argument position**
+   (§3.1), recorded in `_meta.brief_order`.
 
 **Cost, for the record, not as a decider:** 5 cases × k=5 × 3 arms = 75 agent runs per
 head-to-head, plus two generation calls, plus judge calls on check-ties — which in this
