@@ -1,0 +1,13 @@
+[1mEval report — diagnose[0m
+⚠ invalid receipt
+
+  placed:       —
+  team current: Version 1
+  evaluated:    —
+  id:           33333333-3333-4333-8333-333333333333
+
+[1mNotes[0m
+  • The newest receipt at the current version is invalid; older receipts are listed in history only.
+  • warning: the newest receipt is invalid (schema-invalid receipt <ROOT>/state/teams/acme/evals/33333333-3333-4333-8333-333333333333/v1/20260903T100000Z.json: invalid JSON.); older receipts are listed in history only.
+
+[1mNext:[0m [36m/eval diagnose --k 3[0m · [36m/terum-skills publish diagnose[0m

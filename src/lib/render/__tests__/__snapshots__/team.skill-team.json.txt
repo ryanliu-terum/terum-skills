@@ -1,0 +1,321 @@
+{
+  "verb": "ls",
+  "ok": true,
+  "exitCode": 0,
+  "value": {
+    "roster": [
+      {
+        "handle": "mira",
+        "active": true,
+        "role": null,
+        "projects": []
+      },
+      {
+        "handle": "ravi",
+        "active": true,
+        "role": "Debugging",
+        "projects": []
+      },
+      {
+        "handle": "seed",
+        "active": true,
+        "role": "Platform",
+        "projects": [
+          "terum"
+        ]
+      }
+    ],
+    "skills": [
+      {
+        "id": "11111111-1111-4111-8111-111111111111",
+        "name": "deploy-check",
+        "description": "Use this when a deploy needs a checklist. Walks rollback, canary and smoke steps.",
+        "author": "Mira Chen <mira@example.com>",
+        "category": "ops",
+        "characters": 376,
+        "installs": 2,
+        "latest": "v2",
+        "versionCount": 2,
+        "endorsement": "project: Global",
+        "grants": "none",
+        "grantsHash": "sha256:140bedbf9c3f6d56a9846d2ba7088798683f4da0c248231336e6a05679e4fdfe",
+        "installedBy": [
+          {
+            "handle": "seed",
+            "displayName": "Seed",
+            "scope": {
+              "kind": "global"
+            },
+            "since": "2026-08-20T09:00:00Z",
+            "version": "v1"
+          },
+          {
+            "handle": "mira",
+            "displayName": "Mira Chen",
+            "scope": {
+              "kind": "global"
+            },
+            "since": "2026-08-25T09:00:00Z",
+            "version": "v1"
+          }
+        ],
+        "body": "# Deploy check\n\n1. Confirm the rollback path.\n2. Canary one host.\n3. Smoke test.\n4. Watch the alerts for ten minutes.\n",
+        "frontmatter": "---\nname: deploy-check\ndescription: \"Use this when a deploy needs a checklist. Walks rollback, canary and smoke steps.\"\nlicense: UNLICENSED\nmetadata:\n  id: 11111111-1111-4111-8111-111111111111\n  author: Mira Chen <mira@example.com>\n  terum-category: ops\n---",
+        "updated": "2026-09-05T10:00:00Z",
+        "latestVersion": "v2",
+        "evalVersion": 2,
+        "latestEvalState": "ok",
+        "receipt": {
+          "run_id": "20260905T100000Z",
+          "verdict": "NEUTRAL",
+          "execution_status": "partial",
+          "expected_rows": 8,
+          "scored_rows": 6,
+          "comparisons": {
+            "candidate-vs-baseline": {
+              "win": 2,
+              "loss": 2,
+              "tie": 2,
+              "net_lift": 0,
+              "sign_p": 0.03125
+            }
+          },
+          "arm_scores": {
+            "candidate": 0.8,
+            "baseline": 0.5
+          },
+          "provenance": {
+            "model": "sonnet",
+            "k": 1,
+            "cc_version": "2.1.0",
+            "timestamp": "2026-09-05T11:00:00Z",
+            "runner_handle": "seed"
+          }
+        }
+      }
+    ],
+    "projects": [
+      {
+        "remotes": [],
+        "skills": [
+          "11111111-1111-4111-8111-111111111111"
+        ],
+        "name": "Global"
+      }
+    ],
+    "problems": [],
+    "local": [
+      {
+        "root": "<HOME>/.claude/skills",
+        "scope": "global",
+        "registered": false,
+        "rootState": "scanned",
+        "label": "Global",
+        "remote": null,
+        "counts": {
+          "skillFolders": 5,
+          "connectable": 1
+        },
+        "rows": [
+          {
+            "skillId": "11111111-1111-4111-8111-111111111111",
+            "placed": true,
+            "name": "deploy-check",
+            "path": "<HOME>/.claude/skills/deploy-check",
+            "state": "placement recorded from acme (Version 1)",
+            "tracked": true,
+            "placement": {
+              "id": "11111111-1111-4111-8111-111111111111",
+              "team": "acme",
+              "version": "v1"
+            },
+            "health": "unknown",
+            "enabled": true,
+            "edited": false,
+            "localEval": {
+              "schema_version": 2,
+              "skill_id": "11111111-1111-4111-8111-111111111111",
+              "skill_name": "deploy-check",
+              "version": null,
+              "content_digest": "sha256:c321de0607c98eff4e7514f7cd5b0a797d324bbe937cf52cec527d5fb0d63899",
+              "run_id": "20260912T100000Z",
+              "verdict": "FAIL",
+              "attribution": "The candidate answered every case with the checklist; the baseline skipped the rollback step twice.",
+              "execution_status": "complete",
+              "expected_rows": 6,
+              "scored_rows": 6,
+              "comparisons": {
+                "candidate-vs-baseline": {
+                  "win": 1,
+                  "loss": 4,
+                  "tie": 1,
+                  "net_lift": -0.5,
+                  "sign_p": 0.03125
+                }
+              },
+              "arm_scores": {
+                "candidate": 0.8,
+                "baseline": 0.5
+              },
+              "environment_skips": {},
+              "triggers": {
+                "recall": 0.8,
+                "precision": 1,
+                "tp": 4,
+                "fn": 1,
+                "fp": 0,
+                "tn": 5
+              },
+              "efficiency": {
+                "candidate": {
+                  "turns": 6.5,
+                  "duration_ms": 30000,
+                  "cost_usd": 0.4
+                },
+                "baseline": {
+                  "turns": 5,
+                  "duration_ms": 20000,
+                  "cost_usd": 0.3
+                }
+              },
+              "provenance": {
+                "engine_version": "0.16.0",
+                "engine_commit": "abc1234",
+                "cc_version": "2.1.0",
+                "model": "sonnet",
+                "judge_model": "opus",
+                "k": 1,
+                "cases": [
+                  "rollback",
+                  "canary",
+                  "smoke",
+                  "alerts",
+                  "rollout",
+                  "audit"
+                ],
+                "arm_skill_lists": {
+                  "candidate": [
+                    "deploy-check"
+                  ],
+                  "baseline": null
+                },
+                "timestamp": "2026-09-12T10:00:00Z",
+                "runner_handle": "seed"
+              },
+              "path": "<ROOT>/state/evals/local/c321de0607c98eff4e7514f7cd5b0a797d324bbe937cf52cec527d5fb0d63899/20260912T100000Z/receipt.json",
+              "mine": true
+            },
+            "localEvalStale": false,
+            "teamEval": {
+              "schema_version": 2,
+              "skill_id": "11111111-1111-4111-8111-111111111111",
+              "skill_name": "deploy-check",
+              "version": "v1",
+              "content_digest": "sha256:c321de0607c98eff4e7514f7cd5b0a797d324bbe937cf52cec527d5fb0d63899",
+              "run_id": "20260901T100000Z",
+              "verdict": "PASS",
+              "attribution": "The candidate answered every case with the checklist; the baseline skipped the rollback step twice.",
+              "execution_status": "complete",
+              "expected_rows": 6,
+              "scored_rows": 6,
+              "comparisons": {
+                "candidate-vs-baseline": {
+                  "win": 4,
+                  "loss": 2,
+                  "tie": 0,
+                  "net_lift": 0.3333333333333333,
+                  "sign_p": 0.03125
+                }
+              },
+              "arm_scores": {
+                "candidate": 0.8,
+                "baseline": 0.5
+              },
+              "environment_skips": {},
+              "triggers": {
+                "recall": 0.8,
+                "precision": 1,
+                "tp": 4,
+                "fn": 1,
+                "fp": 0,
+                "tn": 5
+              },
+              "efficiency": {
+                "candidate": {
+                  "turns": 6.5,
+                  "duration_ms": 30000,
+                  "cost_usd": 0.4
+                },
+                "baseline": {
+                  "turns": 5,
+                  "duration_ms": 20000,
+                  "cost_usd": 0.3
+                }
+              },
+              "provenance": {
+                "engine_version": "0.16.0",
+                "engine_commit": "abc1234",
+                "cc_version": "2.1.0",
+                "model": "sonnet",
+                "judge_model": "opus",
+                "k": 1,
+                "cases": [
+                  "rollback",
+                  "canary",
+                  "smoke",
+                  "alerts",
+                  "rollout",
+                  "audit"
+                ],
+                "arm_skill_lists": {
+                  "candidate": [
+                    "deploy-check"
+                  ],
+                  "baseline": null
+                },
+                "timestamp": "2026-09-01T11:00:00Z",
+                "runner_handle": "mira"
+              },
+              "path": "<ROOT>/state/teams/acme/evals/11111111-1111-4111-8111-111111111111/v1/20260901T100000Z.json",
+              "team": "acme",
+              "mine": false
+            },
+            "matchedVersion": "v1",
+            "matchedName": "deploy-check",
+            "matchedTeam": "acme",
+            "knownToTeam": true,
+            "description": "Use this when a deploy needs a checklist. Walks rollback, canary and smoke steps.",
+            "frontmatter": "---\nname: deploy-check\ndescription: \"Use this when a deploy needs a checklist. Walks rollback, canary and smoke steps.\"\nlicense: UNLICENSED\nmetadata:\n  id: 11111111-1111-4111-8111-111111111111\n  author: Mira Chen <mira@example.com>\n  terum-category: ops\n---",
+            "body": "# Deploy check\n\n1. Confirm the rollback path.\n2. Canary one host.\n3. Smoke test.\n",
+            "category": "ops",
+            "characters": 339,
+            "updated": "2026-09-13T12:00:00.000Z"
+          }
+        ],
+        "notOffered": [],
+        "problems": []
+      }
+    ],
+    "viewer": {
+      "handle": "seed",
+      "team": "acme"
+    },
+    "selection": {
+      "kind": "skill",
+      "name": "deploy-check",
+      "source": "team",
+      "path": "<HOME>/.claude/skills/deploy-check"
+    }
+  },
+  "lines": [
+    "acme/diagnose: unreadable receipt v1/20260903T100000Z.json; not considered.",
+    "  deploy-check — Mira Chen <mira@example.com>; ops; 2 installs; Version 2; project: Global; 2026-09-05T10:00:00Z",
+    "Use this when a deploy needs a checklist. Walks rollback, canary and smoke steps.",
+    "# Deploy check",
+    "",
+    "1. Confirm the rollback path.",
+    "2. Canary one host.",
+    "3. Smoke test.",
+    "4. Watch the alerts for ten minutes."
+  ]
+}

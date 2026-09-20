@@ -1,0 +1,9 @@
+## Library projects
+**2 projects**
+
+| Label | Path | State | Skill folders |
+|---|---|---|---:|
+| terum | `~/work/terum` | ✓ scanned | 2 |
+| gone | `~/work/gone` | ✗ absent | 0 |
+
+**Next:** `/terum-skills project add` · `/list-skills --local`

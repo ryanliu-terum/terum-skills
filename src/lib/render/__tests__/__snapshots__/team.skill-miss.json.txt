@@ -1,0 +1,11 @@
+{
+  "verb": "ls",
+  "ok": false,
+  "exitCode": 1,
+  "error": "No skill named ghost.",
+  "lines": []
+}
+
+--- stderr ---
+No skill named ghost.
+--- exit 1 ---

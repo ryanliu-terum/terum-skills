@@ -1,0 +1,29 @@
+[1mEval queue — drain[0m
+Evaluated 1 of 2; 1 failed.
+
+[1mOutcomes[0m
+╭────────────┬──────────┬──────────────╮
+│ [1mSkill     [0m │ [1mOutcome [0m │ [1mDetail      [0m │
+├────────────┼──────────┼──────────────┤
+│ acme/tdd   │ [32m✓ ok[0m     │ —            │
+│ acme/notes │ [31m✗ failed[0m │ probe failed │
+╰────────────┴──────────┴──────────────╯
+
+[1mStill queued[0m
+╭───────┬──────┬──────────────┬───────────┬────────┬──────────────╮
+│ [1mSkill[0m │ [1mTeam[0m │ [1mDigest      [0m │ [1mWindow   [0m │ [1mQueued[0m │ [1mLast error  [0m │
+├───────┼──────┼──────────────┼───────────┼────────┼──────────────┤
+│ notes │ acme │ bbbbbbbbbbbb │ overnight │ today  │ probe failed │
+╰───────┴──────┴──────────────┴───────────┴────────┴──────────────╯
+
+[31m✗ 1 queued evals failed; they remain queued. (partial result above)[0m
+
+[1mNotes[0m
+  • ── tdd ──
+  • verdict: PASS
+
+[1mNext:[0m [36m/eval-report tdd[0m · [36m/eval --drain[0m
+
+--- stderr ---
+1 queued evals failed; they remain queued.
+--- exit 1 ---

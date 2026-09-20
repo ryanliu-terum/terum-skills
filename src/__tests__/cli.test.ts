@@ -172,6 +172,8 @@ describe('CLI wiring (§3: commander wiring only)', () => {
     expect(await parse(['team', 'remove', 'cy', '--team', 't'])).toEqual([{ verb: 'team', kind: 'remove', handle: 'cy', team: 't' }]);
     expect(await parse(['ls', '--team', 't'])).toEqual([{ verb: 'ls', cwd: process.cwd(), kind: 'all', team: 't' }]);
     expect(await parse(['ls', '--team', 't', 'member', 'amy'])).toEqual([{ verb: 'ls', cwd: process.cwd(), kind: 'member', value: 'amy', team: 't' }]);
+    expect(await parse(['ls', 'skill', 'deploy'])).toEqual([{ verb: 'ls', cwd: process.cwd(), kind: 'skill', value: 'deploy' }]);
+    expect(await parse(['ls', 'skill'])).toEqual([{ verb: 'ls', cwd: process.cwd(), kind: 'skill' }]);
   });
 
   it('wires publish (bare and with every flag) and team leave, and routes their failing Results to execute', async () => {
@@ -196,12 +198,14 @@ describe('CLI wiring (§3: commander wiring only)', () => {
     const calls: unknown[] = [];
     const program = buildProgram(async (invoke) => { await invoke(new ScriptedPrompter()); }, {
       login: async () => success({ gh: { installed: true, authenticated: true }, handle: 'me', updated: [], notice: null }), team: async () => success({ team: 't', remote: 'r' }),
-      validate: async (args) => { calls.push(args); return success({ name: args.target, findings: 0, warnings: 0, repairable: 0, repairs: [] }); },
+      validate: async (args) => { calls.push(args); return success({ name: args.target ?? 'sample', findings: 0, warnings: 0, repairable: 0, repairs: [], directory: '/skill' }); },
     });
     program.configureOutput({ writeErr: () => undefined, writeOut: () => undefined });
     await program.parseAsync(['validate', 'sample', '--team', 't'], { from: 'user' });
     await program.parseAsync(['validate', 'sample', '--cwd', '/checkout'], { from: 'user' });
-    expect(calls).toEqual([{ target: 'sample', team: 't' }, { target: 'sample', cwd: '/checkout' }]);
+    await program.parseAsync(['validate'], { from: 'user' });
+    expect(calls).toEqual([{ target: 'sample', workingDirectory: process.cwd(), team: 't' }, { target: 'sample', workingDirectory: process.cwd(), cwd: '/checkout' }, { workingDirectory: process.cwd() }]);
+    expect(Object.keys(calls[2] as object)).not.toContain('target');
     const validate = program.commands.find((command) => command.name() === 'validate');
     expect(validate?.description()).toContain('by name or its local source folder by path');
     expect(validate?.description()).toContain('requires a configured team');
@@ -210,6 +214,19 @@ describe('CLI wiring (§3: commander wiring only)', () => {
     validate?.configureOutput({ writeOut: (text) => { help += text; } });
     validate?.outputHelp();
     expect(help).toContain('Deterministic and offline');
+  });
+
+  it('wires eval-report with its skill and team selection', async () => {
+    const calls: unknown[] = [];
+    const program = buildProgram(async (invoke) => { await invoke(new ScriptedPrompter()); }, {
+      login: async () => success({ gh: { installed: true, authenticated: true }, handle: 'me', updated: [], notice: null }), team: async () => success({ team: 't', remote: 'r' }),
+      evalReport: async (args) => { calls.push(args); return success({ skill: { id: 'id', name: args.ref ?? 'sample' }, versions: { placed: null, teamCurrent: null, evaluated: null }, latest: null, latestState: 'none', fallbackFrom: null, history: [], localRuns: [] }); },
+    });
+    program.configureOutput({ writeErr: () => undefined, writeOut: () => undefined });
+    await program.parseAsync(['eval-report', 'sample', '--team', 't'], { from: 'user' });
+    await program.parseAsync(['eval-report'], { from: 'user' });
+    expect(calls).toEqual([{ ref: 'sample', cwd: process.cwd(), team: 't' }, { cwd: process.cwd() }]);
+    expect(Object.keys(calls[1] as object)).not.toContain('ref');
   });
 
   it('wires team project create with its optional remote and team selection', async () => {
@@ -257,7 +274,7 @@ describe('CLI wiring (§3: commander wiring only)', () => {
     const calls: unknown[] = [];
     const program = buildProgram(async (invoke) => { await invoke(new ScriptedPrompter()); }, {
       login: async () => success({ gh: { installed: true, authenticated: true }, handle: 'me', updated: [], notice: null }), team: async () => success({ team: 't', remote: 'r' }),
-      eval: async (args) => { calls.push(args); return success({ team: 't', id: 'id', name: args.ref, runDir: '/tmp/run', ccVersion: 'stub', executionStatus: 'complete', shareHint: true as const }); },
+      eval: async (args) => { calls.push(args); return success({ team: 't', id: 'id', name: args.ref ?? 'sample', runDir: '/tmp/run', ccVersion: 'stub', executionStatus: 'complete', shareHint: true as const }); },
     });
     program.configureOutput({ writeErr: () => undefined, writeOut: () => undefined });
     await program.parseAsync(['eval', 'sample', '--k', '2', '--triggers-only', '--case', 'happy', '--model', 'sonnet', '--judge-model', 'opus', '--team', 't'], { from: 'user' });
@@ -265,9 +282,23 @@ describe('CLI wiring (§3: commander wiring only)', () => {
     expect(calls).toEqual([
       // D29 deleted `--gen`; commander still models `--no-gen` as `gen: false`, and false is now the
       // only value it can carry, so the absent case passes nothing at all.
-      { ref: 'sample', k: 2, triggersOnly: true, case: 'happy', model: 'sonnet', judgeModel: 'opus', team: 't' },
-      { ref: 'sample', noGen: true },
+      { ref: 'sample', cwd: process.cwd(), k: 2, triggersOnly: true, case: 'happy', model: 'sonnet', judgeModel: 'opus', team: 't' },
+      { ref: 'sample', cwd: process.cwd(), noGen: true },
     ]);
+  });
+
+  it('routes bare eval to the injected eval verb, while queue-list stays on the queue path', async () => {
+    const calls: unknown[] = [];
+    const program = buildProgram(async (invoke) => { await invoke(new ScriptedPrompter()); }, {
+      login: async () => success({ gh: { installed: true, authenticated: true }, handle: 'me', updated: [], notice: null }),
+      team: async () => success({ team: 't', remote: 'r' }),
+      eval: async (args) => { calls.push({ verb: 'eval', ...args }); return success({ team: 't', id: 'id', name: args.ref ?? 'sample', runDir: '/tmp/run', ccVersion: 'stub', executionStatus: 'complete', shareHint: true as const }); },
+    });
+    program.configureOutput({ writeErr: () => undefined, writeOut: () => undefined });
+    await program.parseAsync(['eval'], { from: 'user' });
+    expect(calls).toEqual([{ verb: 'eval', cwd: process.cwd() }]);
+    await program.parseAsync(['eval', '--queue-list'], { from: 'user' });
+    expect(calls).toEqual([{ verb: 'eval', cwd: process.cwd() }]);
   });
 });
 
@@ -296,7 +327,7 @@ describe('machine uninstall wiring', () => {
       login: async () => success({ gh: { installed: true, authenticated: true }, handle: 'me', updated: [], notice: null }),
       team: async () => success({ team: 't', remote: 'r' }),
       uninstall: async (args) => { calls.push(args); return success([]); },
-      uninstallMachine: async (args) => { calls.push(args); return success({ teams: [], removedPlacements: 0, hookRemoved: false, wrapperRemoved: false, configRemoved: false, kept: [], record: '', advice: [], launch: args.launch ?? null }); },
+      uninstallMachine: async (args) => { calls.push(args); return success({ teams: [], removedPlacements: 0, hookRemoved: false, wrapperRemoved: false, wrappersRemoved: [], configRemoved: false, kept: [], record: '', advice: [], launch: args.launch ?? null }); },
     }, launch ? { launch } : {});
     program.configureOutput({ writeErr: () => undefined, writeOut: () => undefined });
     return { program, calls, outcomes, errors };
@@ -396,6 +427,26 @@ it('hides team and local-name overrides from help while keeping their parsers', 
   for (const name of ['install', 'ls', 'status']) expect(program.commands.find(command => command.name() === name)!.helpInformation()).not.toContain('--team');
   const team = program.commands.find(command => command.name() === 'team')!;
   expect(team.commands.find(command => command.name() === 'join')!.helpInformation()).not.toContain('--as');
+});
+
+it('documents board output flags in root and rendered-verb help, with a blank line before Output: at every joint (R3)', () => {
+  const program = buildProgram(async () => {});
+  let rootHelp = '';
+  program.configureOutput({ writeOut: (text) => { rootHelp += text; } });
+  program.outputHelp();
+  expect(rootHelp).toContain('--format <plain|md|pretty|json|auto>');
+  expect(rootHelp).toContain('\n\nOutput:');
+  for (const name of ['status', 'ls', 'search', 'eval-report', 'eval', 'update', 'sync', 'validate', 'install', 'uninstall-skill']) {
+    let help = '';
+    const command = program.commands.find((candidate) => candidate.name() === name)!;
+    command.configureOutput({ writeOut: (text) => { help += text; } });
+    command.outputHelp();
+    expect(help, name).toContain('Output:');
+    // R3: root and validate build their help text by string concatenation, so OUTPUT_HELP's own leading blank
+    // line does not automatically survive — every joint (concatenated or addHelpText('after', OUTPUT_HELP) alone)
+    // must still land on a real blank line before the paragraph starts.
+    expect(help, name).toContain('\n\nOutput:');
+  }
 });
 
 describe('app-update commander registration', () => {

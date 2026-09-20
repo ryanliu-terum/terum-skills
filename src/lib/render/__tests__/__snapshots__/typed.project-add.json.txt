@@ -1,0 +1,13 @@
+{
+  "verb": "project add",
+  "ok": true,
+  "exitCode": 0,
+  "value": {
+    "path": "<HOME>/work/terum",
+    "label": "terum",
+    "added": true
+  },
+  "lines": [
+    "Added <HOME>/work/terum to your library."
+  ]
+}

@@ -1,0 +1,19 @@
+terum-skills 0.16.0
+A newer release is advertised: 0.17.0
+
+  latest:      ⚠ 0.17.0
+  observation: newer
+  launch:      local
+
+Release check
+  Latest advertised release: 0.17.0 (observed 2026-09-13T08:00:00Z)
+
+How to update
+  If managed with npm, run in <HOME>/work/app:
+    npm install terum-skills@latest
+
+Notes
+  • This copy: <HOME>/work/app/node_modules/terum-skills
+  • Declared dependency of: <HOME>/work/app
+
+Next: npm install terum-skills@latest

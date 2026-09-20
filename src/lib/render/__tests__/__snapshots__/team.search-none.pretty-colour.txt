@@ -1,0 +1,5 @@
+[1mSearch "zzz"[0m
+No skills found.
+
+[1mNotes[0m
+  • acme may be stale; run `npx -y terum-skills@latest sync`.

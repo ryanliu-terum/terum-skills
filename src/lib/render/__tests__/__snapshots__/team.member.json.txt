@@ -1,0 +1,156 @@
+{
+  "verb": "ls",
+  "ok": true,
+  "exitCode": 0,
+  "value": {
+    "roster": [
+      {
+        "handle": "mira",
+        "active": true,
+        "role": null,
+        "projects": []
+      },
+      {
+        "handle": "ravi",
+        "active": true,
+        "role": "Debugging",
+        "projects": []
+      },
+      {
+        "handle": "seed",
+        "active": true,
+        "role": "Platform",
+        "projects": [
+          "terum"
+        ]
+      }
+    ],
+    "skills": [
+      {
+        "id": "22222222-2222-4222-8222-222222222222",
+        "name": "tdd",
+        "description": "Red, green, refactor. Use when adding behaviour to code with tests.",
+        "author": "Seed <seed@example.com>",
+        "category": "engineering",
+        "characters": 301,
+        "installs": 1,
+        "latest": "v2",
+        "versionCount": 2,
+        "endorsement": "project: terum",
+        "grants": "none",
+        "grantsHash": "sha256:140bedbf9c3f6d56a9846d2ba7088798683f4da0c248231336e6a05679e4fdfe",
+        "installedBy": [
+          {
+            "handle": "mira",
+            "displayName": "Mira Chen",
+            "scope": {
+              "kind": "project",
+              "project": "terum"
+            },
+            "since": "2026-08-26T09:00:00Z",
+            "version": "v1"
+          }
+        ],
+        "body": "# TDD\n\nWrite the failing test first. Then the smallest change.\n",
+        "frontmatter": "---\nname: tdd\ndescription: \"Red, green, refactor. Use when adding behaviour to code with tests.\"\nlicense: UNLICENSED\nmetadata:\n  id: 22222222-2222-4222-8222-222222222222\n  author: Seed <seed@example.com>\n  terum-category: engineering\n---",
+        "updated": "2026-09-04T10:00:00Z",
+        "latestVersion": "v2",
+        "evalVersion": 1,
+        "latestEvalState": "none",
+        "receipt": {
+          "run_id": "20260902T100000Z",
+          "verdict": "PASS",
+          "execution_status": "complete",
+          "expected_rows": 6,
+          "scored_rows": 6,
+          "comparisons": {
+            "candidate-vs-baseline": {
+              "win": 5,
+              "loss": 1,
+              "tie": 0,
+              "net_lift": 0.6666666666666666,
+              "sign_p": 0.03125
+            }
+          },
+          "arm_scores": {
+            "candidate": 0.8,
+            "baseline": 0.5
+          },
+          "provenance": {
+            "model": "sonnet",
+            "k": 1,
+            "cc_version": "2.1.0",
+            "timestamp": "2026-09-02T11:00:00Z",
+            "runner_handle": "seed"
+          }
+        }
+      }
+    ],
+    "projects": [
+      {
+        "remotes": [],
+        "skills": [
+          "11111111-1111-4111-8111-111111111111"
+        ],
+        "name": "Global"
+      },
+      {
+        "remotes": [
+          "github.com/acme/terum"
+        ],
+        "skills": [
+          "22222222-2222-4222-8222-222222222222"
+        ],
+        "name": "terum"
+      }
+    ],
+    "problems": [
+      {
+        "source": "evals/33333333-3333-4333-8333-333333333333",
+        "message": "schema-invalid receipt <ROOT>/state/teams/acme/evals/33333333-3333-4333-8333-333333333333/v1/20260903T100000Z.json: invalid JSON."
+      }
+    ],
+    "viewer": {
+      "handle": "seed",
+      "team": "acme"
+    },
+    "selection": {
+      "kind": "member",
+      "handle": "seed"
+    },
+    "member": {
+      "handle": "seed",
+      "displayName": "Seed",
+      "role": "Platform",
+      "projects": [
+        "terum"
+      ],
+      "installed": [
+        {
+          "id": "11111111-1111-4111-8111-111111111111",
+          "name": "deploy-check",
+          "version": "v1",
+          "scope": {
+            "kind": "global"
+          },
+          "since": "2026-08-20T09:00:00Z"
+        }
+      ],
+      "profile": [
+        {
+          "id": "11111111-1111-4111-8111-111111111111",
+          "name": "deploy-check",
+          "version": "v1",
+          "added": "2026-08-20T09:00:00Z",
+          "via": "install"
+        }
+      ]
+    }
+  },
+  "lines": [
+    "diagnose: schema-invalid receipt <ROOT>/state/teams/acme/evals/33333333-3333-4333-8333-333333333333/v1/20260903T100000Z.json: invalid JSON.",
+    "Member seed:",
+    "  Authored: tdd",
+    "  Installed: deploy-check"
+  ]
+}

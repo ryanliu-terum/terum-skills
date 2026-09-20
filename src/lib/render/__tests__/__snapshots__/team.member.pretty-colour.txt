@@ -1,0 +1,24 @@
+[1m@seed — Seed[0m
+
+  role:     Platform
+  projects: terum
+  authored: tdd
+
+[1mInstalled[0m
+╭──────────────┬───────────┬────────┬─────────╮
+│ [1mSkill       [0m │ [1mVersion  [0m │ [1mScope [0m │ [1mSince  [0m │
+├──────────────┼───────────┼────────┼─────────┤
+│ deploy-check │ Version 1 │ global │ 24d ago │
+╰──────────────┴───────────┴────────┴─────────╯
+
+[1mProfile[0m
+╭──────────────┬───────────┬─────────┬─────────╮
+│ [1mSkill       [0m │ [1mVersion  [0m │ [1mVia    [0m │ [1mAdded  [0m │
+├──────────────┼───────────┼─────────┼─────────┤
+│ deploy-check │ Version 1 │ install │ 24d ago │
+╰──────────────┴───────────┴─────────┴─────────╯
+
+[1mNotes[0m
+  • diagnose: schema-invalid receipt <ROOT>/state/teams/acme/evals/33333333-3333-4333-8333-333333333333/v1/20260903T100000Z.json: invalid JSON.
+
+[1mNext:[0m [36m/skill-info tdd[0m

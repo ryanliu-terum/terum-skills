@@ -58,14 +58,14 @@ export function installCounts(people: readonly Person[]): Map<string, number> {
   return installs;
 }
 
-export interface Installer { handle: string; displayName: string; scope: Person['installed'][number]['scope']; since: string; }
+export interface Installer { handle: string; displayName: string; scope: Person['installed'][number]['scope']; since: string; version: string | null; }
 
 /** One entry per install record, including archived members; counts still dedupe by person. */
 export function installersById(people: readonly Person[]): Map<string, Installer[]> {
   const installers = new Map<string, Installer[]>();
   for (const person of people) for (const item of person.installed) {
     const rows = installers.get(item.id) ?? [];
-    rows.push({ handle: person.handle, displayName: person.display_name, scope: item.scope, since: item.since });
+    rows.push({ handle: person.handle, displayName: person.display_name, scope: item.scope, since: item.since, version: item.version });
     installers.set(item.id, rows);
   }
   for (const rows of installers.values()) rows.sort((a, b) => a.since < b.since ? -1 : a.since > b.since ? 1 : a.handle < b.handle ? -1 : a.handle > b.handle ? 1 : 0);

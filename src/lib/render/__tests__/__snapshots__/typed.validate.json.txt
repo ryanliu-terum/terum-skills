@@ -1,0 +1,16 @@
+{
+  "verb": "validate",
+  "ok": true,
+  "exitCode": 0,
+  "value": {
+    "name": "deploy-check",
+    "findings": 0,
+    "warnings": 1,
+    "repairable": 0,
+    "directory": "<HOME>/.claude/skills/deploy-check"
+  },
+  "lines": [
+    "warning HYG6 SKILL.md: description is over 20,000 characters",
+    "deploy-check: hygiene passed (1 warning)."
+  ]
+}

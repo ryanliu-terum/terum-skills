@@ -1,0 +1,29 @@
+Eval queue — drain
+Evaluated 1 of 2; 1 failed.
+
+Outcomes
+╭────────────┬──────────┬──────────────╮
+│ Skill      │ Outcome  │ Detail       │
+├────────────┼──────────┼──────────────┤
+│ acme/tdd   │ ✓ ok     │ —            │
+│ acme/notes │ ✗ failed │ probe failed │
+╰────────────┴──────────┴──────────────╯
+
+Still queued
+╭───────┬──────┬──────────────┬───────────┬────────┬──────────────╮
+│ Skill │ Team │ Digest       │ Window    │ Queued │ Last error   │
+├───────┼──────┼──────────────┼───────────┼────────┼──────────────┤
+│ notes │ acme │ bbbbbbbbbbbb │ overnight │ today  │ probe failed │
+╰───────┴──────┴──────────────┴───────────┴────────┴──────────────╯
+
+✗ 1 queued evals failed; they remain queued. (partial result above)
+
+Notes
+  • ── tdd ──
+  • verdict: PASS
+
+Next: /eval-report tdd · /eval --drain
+
+--- stderr ---
+1 queued evals failed; they remain queued.
+--- exit 1 ---

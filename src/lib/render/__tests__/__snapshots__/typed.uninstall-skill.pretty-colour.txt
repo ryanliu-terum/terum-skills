@@ -1,0 +1,13 @@
+[1mUninstall[0m
+1 folder removed
+
+╭──────────┬──────┬─────────╮
+│ [1mId      [0m │ [1mTeam[0m │ [1mRemoved[0m │
+├──────────┼──────┼─────────┤
+│ 11111111 │ acme │       1 │
+╰──────────┴──────┴─────────╯
+
+[1mNotes[0m
+  • Your profile is unchanged.
+
+[1mNext:[0m [36m/list-skills --local[0m

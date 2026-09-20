@@ -1,0 +1,124 @@
+{
+  "verb": "ls",
+  "ok": true,
+  "exitCode": 0,
+  "value": {
+    "roster": [
+      {
+        "handle": "mira",
+        "active": true,
+        "role": null,
+        "projects": []
+      },
+      {
+        "handle": "ravi",
+        "active": true,
+        "role": "Debugging",
+        "projects": []
+      },
+      {
+        "handle": "seed",
+        "active": true,
+        "role": "Platform",
+        "projects": [
+          "terum"
+        ]
+      }
+    ],
+    "skills": [
+      {
+        "id": "33333333-3333-4333-8333-333333333333",
+        "name": "diagnose",
+        "description": "Narrow a failure to one cause before changing anything.",
+        "author": "Ravi Patel <ravi@example.com>",
+        "category": "debugging",
+        "characters": 271,
+        "installs": 0,
+        "latest": "v1",
+        "versionCount": 1,
+        "endorsement": "—",
+        "grants": "none",
+        "grantsHash": "sha256:140bedbf9c3f6d56a9846d2ba7088798683f4da0c248231336e6a05679e4fdfe",
+        "installedBy": [],
+        "body": "# Diagnose\n\nReproduce, bisect, fix.\n",
+        "frontmatter": "---\nname: diagnose\ndescription: \"Narrow a failure to one cause before changing anything.\"\nlicense: UNLICENSED\nmetadata:\n  id: 33333333-3333-4333-8333-333333333333\n  author: Ravi Patel <ravi@example.com>\n  terum-category: debugging\n---",
+        "updated": "2026-09-03T10:00:00Z",
+        "latestVersion": "v1",
+        "evalVersion": null,
+        "latestEvalState": "invalid",
+        "receipt": null
+      }
+    ],
+    "projects": [],
+    "problems": [
+      {
+        "source": "evals/33333333-3333-4333-8333-333333333333",
+        "message": "schema-invalid receipt <ROOT>/state/teams/acme/evals/33333333-3333-4333-8333-333333333333/v1/20260903T100000Z.json: invalid JSON."
+      }
+    ],
+    "local": [
+      {
+        "root": "<ROOT>/proj/.claude/skills",
+        "scope": "project",
+        "repoRoot": "<ROOT>/proj",
+        "registered": true,
+        "label": "proj",
+        "rootState": "scanned",
+        "remote": null,
+        "counts": {
+          "skillFolders": 1,
+          "connectable": 1
+        },
+        "rows": [
+          {
+            "skillId": "33333333-3333-4333-8333-333333333333",
+            "placed": false,
+            "name": "diagnose",
+            "path": "<ROOT>/proj/.claude/skills/diagnose",
+            "state": "untracked locally",
+            "tracked": false,
+            "placement": null,
+            "health": "unknown",
+            "enabled": true,
+            "edited": false,
+            "localEval": null,
+            "localEvalStale": false,
+            "teamEval": null,
+            "matchedVersion": "v1",
+            "matchedName": "diagnose",
+            "matchedTeam": "acme",
+            "knownToTeam": true,
+            "description": "Narrow a failure to one cause before changing anything.",
+            "frontmatter": "---\nname: diagnose\ndescription: \"Narrow a failure to one cause before changing anything.\"\nlicense: UNLICENSED\nmetadata:\n  id: 33333333-3333-4333-8333-333333333333\n  author: Ravi Patel <ravi@example.com>\n  terum-category: debugging\n---",
+            "body": "# Diagnose\n\nReproduce, bisect, fix.\n",
+            "category": "debugging",
+            "characters": 271,
+            "updated": "2026-09-13T12:00:00.000Z"
+          }
+        ],
+        "notOffered": [],
+        "problems": []
+      }
+    ],
+    "viewer": {
+      "handle": "seed",
+      "team": "acme"
+    },
+    "selection": {
+      "kind": "skill",
+      "name": "diagnose",
+      "source": "team",
+      "path": "<ROOT>/proj/.claude/skills/diagnose"
+    }
+  },
+  "lines": [
+    "Resolved: \"DIAG\" → diagnose (unique prefix)",
+    "acme/diagnose: unreadable receipt v1/20260903T100000Z.json; not considered.",
+    "diagnose: schema-invalid receipt <ROOT>/state/teams/acme/evals/33333333-3333-4333-8333-333333333333/v1/20260903T100000Z.json: invalid JSON.",
+    "  diagnose — Ravi Patel <ravi@example.com>; debugging; 0 installs; Version 1; —; 2026-09-03T10:00:00Z",
+    "Narrow a failure to one cause before changing anything.",
+    "# Diagnose",
+    "",
+    "Reproduce, bisect, fix."
+  ]
+}

@@ -19,7 +19,7 @@ import { findSuccessors, type Successor, successorSummary, type SuccessorSearch 
 import { CloneBusy, type CloneState, describeClone, refreshClone, RemoteAccessError } from '../lib/teamRepo.js';
 import { invocation } from '../lib/invocation.js';
 import { run as move, type MoveResult } from './teamMove.js';
-import { defaultWrapperOptions, installWrapper, wrapperState } from '../lib/wrapper.js';
+import { defaultWrapperOptions, refreshManagedSkills, type WrapperOptions } from '../lib/wrapper.js';
 import { defaultEditHookOptions, editHookState, installEditHook } from '../lib/editHook.js';
 import { defaultHookOptions, migrateHook, stampIsFresh, writeStamp, type HookOptions } from '../lib/hook.js';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
@@ -34,8 +34,10 @@ export interface SyncArgs extends WithForm {
   lockStale?: number;
   /** How long the fetch may run before it is killed; default REFRESH_DEADLINE_MS. */
   deadlineMs?: number;
-  /** Session-start hook mode; it may refresh only Terum's own files: the managed manual, the edit hook, and its own SessionStart entry. */
+  /** Session-start hook mode; it may add or refresh only Terum's own files: the managed bundled skills, the edit hook, and its own SessionStart entry. */
   hook?: boolean;
+  /** Test knob: where the bundled skills are read from and placed; defaults to defaultWrapperOptions(). */
+  wrapper?: WrapperOptions;
   /** Test knob: where the SessionStart entry lives; defaults to ~/.claude/settings.json. */
   settings?: HookOptions;
   /** Test knob: the successor lookup for a team whose repository no longer exists. Defaults to lib/successor's GitHub lookup. */
@@ -171,9 +173,9 @@ export async function run(args: SyncArgs, io: Prompter): Promise<Result<SyncResu
       try { if (await migrateHook(target) === 'migrated') notices.push(`Pinned your session hook to this copy of terum-skills (${target.command}); it no longer fetches the newest release at session start. Re-run \`${invocation(args.form, 'setup')}\` after an update to move it.`); }
       catch (error) { notices.push(`Could not pin the session hook in ${target.settingsFile}: ${error instanceof Error ? error.message : String(error)}`); }
     }
-    if (args.hook && await wrapperState(defaultWrapperOptions(undefined, args.form)) === 'outdated') {
-      await installWrapper(defaultWrapperOptions(undefined, args.form));
-      notices.push('Updated your /terum-skills manual for this CLI.');
+    if (args.hook) {
+      const written = await refreshManagedSkills({ ...defaultWrapperOptions(undefined, args.form), ...args.wrapper });
+      if (written.length) notices.push('Updated your terum-skills skills for this CLI.');
     }
     // Same rule for the edit hook's script, and only the same case: a copy of OUR OWN that this CLI
     // has moved past. `absent` means the user declined it, or never saw the offer — an hourly hook

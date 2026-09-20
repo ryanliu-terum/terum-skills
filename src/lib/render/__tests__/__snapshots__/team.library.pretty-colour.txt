@@ -1,0 +1,34 @@
+[1mLibrary[0m
+4 skills across 2 roots · attention 1 failing · 3 not evaluated · 1 edited
+
+[1mGlobal — ~/.claude/skills[0m
+╭──────────────┬──────────────────┬─────────────────────────────────╮
+│ [1mSkill       [0m │ [1mState           [0m │ [1mEval                           [0m │
+├──────────────┼──────────────────┼─────────────────────────────────┤
+│ tdd          │ edited ✎         │ [33m⚠ stale — edited since the eval[0m │
+│ deploy-check │ placed Version 1 │ [31m✗ FAIL −50%[0m                     │
+│ notes        │ untracked        │ [2m— not evaluated[0m                 │
+╰──────────────┴──────────────────┴─────────────────────────────────╯
+[2m(columns not shown at this width: Desc, Path)[0m
+
+[1mCannot be connected[0m
+╭──────────┬───────────────────────────────────────────────────────────────────────────────────────╮
+│ [1mSkill   [0m │ [1mReason                                                                               [0m │
+├──────────┼───────────────────────────────────────────────────────────────────────────────────────┤
+│ bad-yaml │ SKILL.md frontmatter is not valid YAML: Flow sequence in block collection must be su… │
+│ linked   │ symbolic link                                                                         │
+╰──────────┴───────────────────────────────────────────────────────────────────────────────────────╯
+[2m(columns not shown at this width: Path)[0m
+
+[1mproj — <ROOT>/proj/.claude/skills[0m
+╭──────────┬────────────────────┬─────────────────╮
+│ [1mSkill   [0m │ [1mState             [0m │ [1mEval           [0m │
+├──────────┼────────────────────┼─────────────────┤
+│ diagnose │ shared = Version 1 │ [2m— not evaluated[0m │
+╰──────────┴────────────────────┴─────────────────╯
+[2m(columns not shown at this width: Desc, Path)[0m
+
+[1mNotes[0m
+  • acme/diagnose: unreadable receipt v1/20260903T100000Z.json; not considered.
+
+[1mNext:[0m [36m/skill-info notes[0m · [36m/eval notes[0m

@@ -1,0 +1,23 @@
+{
+  "verb": "validate",
+  "ok": false,
+  "exitCode": 1,
+  "error": "Hygiene failed for notes:\nHYG1 SKILL.md:2: description must be quoted\nHYG4 bin/run.sh: executable",
+  "value": {
+    "name": "notes",
+    "findings": 2,
+    "warnings": 0,
+    "repairable": 1,
+    "directory": "<HOME>/.claude/skills/notes"
+  },
+  "lines": [
+    "HYG1 SKILL.md:2: description must be quoted",
+    "HYG4 bin/run.sh: executable"
+  ]
+}
+
+--- stderr ---
+Hygiene failed for notes:
+HYG1 SKILL.md:2: description must be quoted
+HYG4 bin/run.sh: executable
+--- exit 1 ---

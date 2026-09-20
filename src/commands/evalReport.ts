@@ -12,10 +12,11 @@ import { listVersions } from '../lib/teamRepo.js';
 import { newestReceiptAt, receiptFiles } from '../lib/evals/receipt-store.js';
 import { parseVersionFolder } from '../lib/versions.js';
 import { resolveLibrarySkill } from '../lib/local-skills.js';
+import { resolveSkillRef } from '../lib/resolve-ref.js';
 import { sourceFiles } from '../lib/skill-source.js';
 import { homedir } from 'node:os';
 
-export interface EvalReportArgs extends WithForm { ref: string; team?: string; config?: ConfigStore; runner?: Runner; /** The home the Library roots derive from (tests); defaults to homedir(). */ home?: string; }
+export interface EvalReportArgs extends WithForm { ref?: string; /** Where a bare eval-report looks for the skill folder; defaults to process.cwd(). */ cwd?: string; team?: string; config?: ConfigStore; runner?: Runner; /** The home the Library roots derive from (tests); defaults to homedir(). */ home?: string; }
 export interface ReceiptView extends Receipt { path: string; }
 export interface EvalReport {
   skill: { id: string; name: string };
@@ -44,8 +45,14 @@ export async function run(args: EvalReportArgs, io: Prompter): Promise<Result<Ev
     const config = await store.read();
     const [teamName] = selectTeam(config.teams, args.team, args.form);
     const clone = resolve(store.teamClone(teamName));
-    const record = await findSkill(clone, teamName, args.ref);
-    if (!record) return failure(`No skill named or identified by ${args.ref} exists in team ${teamName}.`);
+    const miss = (ref: string) => `No skill named or identified by ${ref} exists in team ${teamName}.`;
+    const home = args.home ?? homedir();
+    // §6.1 rungs 0–4 over the Library and the team; the report itself is a team fact, so a name that
+    // resolves only to a Library folder still has to be a team record.
+    const resolved = await resolveSkillRef({ ref: args.ref, cwd: args.cwd ?? process.cwd(), home, config, stateRoot: store.root, team: { clone, name: teamName }, rungs: 4, print: (line) => io.print(line), miss });
+    if (!resolved.ok) return failure(resolved.error);
+    const record = resolved.value.source === 'team' ? resolved.value.record : await findSkill(clone, teamName, resolved.value.name);
+    if (!record) return failure(miss(args.ref ?? resolved.value.name));
     // §6.4(1): no published version is an ordinary answer now, not a throw — the local runs are
     // still worth showing for a skill nobody has published yet.
     const teamCurrent = (await listVersions(clone, record.name))[0]?.folder ?? null;
@@ -99,7 +106,7 @@ export async function run(args: EvalReportArgs, io: Prompter): Promise<Result<Ev
     // digest of what is on disk locates `evals/local/<digest>`, and whether the folder would pass eval
     // is eval's question, not the report's. A folder the scan could not read makes `sourceFiles`
     // throw; best-effort means that costs the content-keyed merge, never the report.
-    const local = await resolveLibrarySkill(args.home ?? homedir(), config, store.root, record.name).catch(() => undefined);
+    const local = await resolveLibrarySkill(home, config, store.root, record.name).catch(() => undefined);
     const files = local === undefined ? undefined : await sourceFiles(local.path).then((source) => source.files, () => undefined);
     if (files !== undefined) localRoots.unshift(resolve(store.root, 'evals', 'local', skillContentDigest(files).replace(/^sha256:/, '')));
     const localRuns: EvalReport['localRuns'] = [];

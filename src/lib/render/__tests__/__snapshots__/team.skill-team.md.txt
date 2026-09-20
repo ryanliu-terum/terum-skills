@@ -1,0 +1,44 @@
+## deploy-check — Version 2 (2 versions)
+
+Use this when a deploy needs a checklist. Walks rollback, canary and smoke steps.
+
+- **id:** 11111111-1111-4111-8111-111111111111
+- **author:** Mira Chen <mira@example.com>
+- **category:** ops
+- **endorsement:** project: Global
+- **grants:** none
+- **installs:** 2
+- **updated:** 8d ago
+- **latest:** Version 2
+- **eval:** ● NEUTRAL ±0% · 2W 2L 2T (n=6) · p=0.031 · partial 6/8 · sonnet k=1 · @seed · 8d ago
+
+### Installed by
+
+| Handle | Version | Scope | Since |
+|---|---|---|---|
+| @seed | Version 1 | global | 24d ago |
+| @mira | Version 1 | global | 19d ago |
+
+### Your copy
+
+- **state:** placed Version 1
+- **path:** `~/.claude/skills/deploy-check`
+- **health:** ✓ unchanged or untracked
+- **local eval:** ✗ FAIL −50% · 1W 4L 1T (n=6) · p=0.031 · complete · sonnet k=1 · @seed · 1d ago
+- **team eval for these bytes:** ✓ PASS +33% · 4W 2L 0T (n=6) · p=0.031 · complete · sonnet k=1 · @mira · 12d ago
+
+### Body preview
+
+```md
+# Deploy check
+
+1. Confirm the rollback path.
+2. Canary one host.
+3. Smoke test.
+4. Watch the alerts for ten minutes.
+```
+
+**Notes**
+- acme/diagnose: unreadable receipt v1/20260903T100000Z.json; not considered.
+
+**Next:** `/eval deploy-check` · `/eval-report deploy-check`

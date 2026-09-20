@@ -1,0 +1,22 @@
+## @seed — Seed
+
+- **role:** Platform
+- **projects:** terum
+- **authored:** tdd
+
+### Installed
+
+| Skill | Version | Scope | Since |
+|---|---|---|---|
+| deploy-check | Version 1 | global | 24d ago |
+
+### Profile
+
+| Skill | Version | Via | Added |
+|---|---|---|---|
+| deploy-check | Version 1 | install | 24d ago |
+
+**Notes**
+- diagnose: schema-invalid receipt <ROOT>/state/teams/acme/evals/33333333-3333-4333-8333-333333333333/v1/20260903T100000Z.json: invalid JSON.
+
+**Next:** `/skill-info tdd`

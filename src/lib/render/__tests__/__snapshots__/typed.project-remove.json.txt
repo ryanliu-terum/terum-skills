@@ -1,0 +1,13 @@
+{
+  "verb": "project remove",
+  "ok": true,
+  "exitCode": 0,
+  "value": {
+    "path": "<HOME>/work/terum",
+    "placementsRemaining": 1
+  },
+  "lines": [
+    "Removed <HOME>/work/terum from your library.",
+    "1 placements recorded under <HOME>/work/terum stay in the ledger; uninstall-skill removes them."
+  ]
+}

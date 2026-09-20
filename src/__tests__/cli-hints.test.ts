@@ -9,7 +9,7 @@ it.each([undefined, 'bare'] as const)('threads form=%s into every CLI action, in
   const verbs: CliVerbs = { login: stub, team: stub, setup: stub, install: stub, uninstall: stub, uninstallMachine: stub, sync: stub, prune: stub, search: stub, invite: stub, ls: stub, status: stub, readme: stub, publish: stub, leave: stub, guardPush: stub, validate: stub, eval: stub, update: stub };
   for (const argv of [
     ['login'], ['setup'], ['team', 'create'], ['team', 'join', 'org/repo'], ['team', 'remove', 'amy'], ['team', 'leave', 'team'], ['team', 'workflow-update'], ['invite', 'amy'],
-    ['ls'], ['ls', 'member', 'amy'], ['ls', 'project', 'app'], ['status'], ['readme'], ['guard-push', 'origin', 'org/repo'], ['publish', 'sample'], ['validate', 'sample'], ['eval', 'sample'],
+    ['ls'], ['ls', 'member', 'amy'], ['ls', 'project', 'app'], ['ls', 'skill', 'x'], ['ls', 'skill'], ['status'], ['readme'], ['guard-push', 'origin', 'org/repo'], ['publish', 'sample'], ['validate', 'sample'], ['eval', 'sample'],
     ['install', 'sample'], ['install', 'member', 'amy'], ['install', 'project', 'app'], ['uninstall-skill', 'sample'], ['uninstall-skill', 'member', 'amy'], ['uninstall-skill', 'project', 'app'], ['uninstall'], ['sync'], ['sync', '--hook'], ['prune'], ['search', 'term'], ['update'],
   ]) {
     calls.length = 0;
@@ -36,6 +36,7 @@ it.each([undefined, 'bare'] as const)('routes help and refusal text with form=%s
   program.outputHelp();
   expect(help).toContain('Usage: terum-skills');
   expect(help).toContain(`  Create a team: ${prefix} setup`);
+  expect(help).toContain('Output:');
   expect(program.commands.find((command) => command.name() === 'team')?.description()).toContain(`run \`${prefix} team\``);
   await program.parseAsync(['uninstall', 'sample'], { from: 'user' });
   await program.parseAsync(['share'], { from: 'user' });

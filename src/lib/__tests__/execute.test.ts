@@ -31,14 +31,14 @@ describe('execute — the bin contract (§3)', () => {
 
 
 
-  it('sends a hook manual-refresh notice to stderr before a failed result, leaving verb stdout alone', async () => {
+  it('sends a hook skills-refresh notice to stderr before a failed result, leaving verb stdout alone', async () => {
     const lines: string[] = []; const codes: number[] = [];
     const execute = createExecute({ io: new ScriptedPrompter(), stderr: line => { lines.push(line); }, setExitCode: code => { codes.push(code); } });
-    await execute(async () => success({ changed: false, teams: [], notices: ['Updated your /terum-skills manual for this CLI.'], hook: true }), { verb: 'sync', notices: false });
-    expect(lines).toEqual(['Updated your /terum-skills manual for this CLI.']);
+    await execute(async () => success({ changed: false, teams: [], notices: ['Updated your terum-skills skills for this CLI.'], hook: true }), { verb: 'sync', notices: false });
+    expect(lines).toEqual(['Updated your terum-skills skills for this CLI.']);
     expect(codes).toEqual([]);
-    await execute(async () => failure('fetch failed', { changed: false, teams: [], notices: ['Updated your /terum-skills manual for this CLI.'], hook: true }), { verb: 'sync', notices: false });
-    expect(lines).toEqual(['Updated your /terum-skills manual for this CLI.', 'Updated your /terum-skills manual for this CLI.', 'fetch failed']);
+    await execute(async () => failure('fetch failed', { changed: false, teams: [], notices: ['Updated your terum-skills skills for this CLI.'], hook: true }), { verb: 'sync', notices: false });
+    expect(lines).toEqual(['Updated your terum-skills skills for this CLI.', 'Updated your terum-skills skills for this CLI.', 'fetch failed']);
     expect(codes).toEqual([1]);
   });
 });

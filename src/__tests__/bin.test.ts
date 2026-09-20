@@ -1,5 +1,5 @@
 import { execFile, spawn } from 'node:child_process';
-import { cp, chmod, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import { access, cp, chmod, mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { delimiter, dirname, relative, resolve, sep } from 'node:path';
@@ -10,7 +10,8 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createConfigStore } from '../lib/config.js';
 import { systemRunner } from '../lib/runner.js';
 import { installPushGuard } from '../lib/teamRepo.js';
-import { bareTeam, cloneWithIdentity, exists, git, pushFromSeed, SYMLINKS_SUPPORTED } from '../lib/__tests__/fixtures.js';
+import { readBundledSkills } from '../lib/wrapper.js';
+import { bareTeam, CANONICAL_SKILLS, cloneWithIdentity, dashboardTeam, exists, git, pushFromSeed, SYMLINKS_SUPPORTED } from '../lib/__tests__/fixtures.js';
 
 const run = promisify(execFile);
 const MINE = '11111111-1111-4111-8111-111111111111';
@@ -75,6 +76,81 @@ describe.skipIf(!SYMLINKS_SUPPORTED)('the built bin (dist/index.js)', () => {
     expect(hook.stdout).not.toContain('"t":');
   });
 
+  it.each([
+    [['--format', 'yaml', 'status'], '--format must be one of plain, md, pretty, json, auto.'],
+    [['--rows', '5', 'status'], '--rows, --width, --host and --no-color need --format.'],
+    [['serve', '--format', 'md'], 'serve answers over --frames; drop --format.'],
+    [['sync', '--hook', '--format', 'md'], "sync --hook's stdout is the reload directive; drop --format."],
+  ])('refuses %j with one stderr line and exit 1, writing nothing to stdout', async (args, line) => {
+    const failed = await run(process.execPath, [bin, ...args], { cwd: out, env }).then(() => { throw new Error('expected failure'); }, (error: { code: number; stdout: string; stderr: string }) => error);
+    expect(failed.code).toBe(1); expect(failed.stdout).toBe(''); expect(failed.stderr.trim()).toBe(line);
+  });
+  it('--frames with --format is one framed refusal', async () => {
+    const failed = await framedRun(['--frames', '--format', 'md', 'status']).then(() => { throw new Error('expected failure'); }, (error: { code: number; stdout: string }) => error);
+    const frames = failed.stdout.trim().split('\n').map((l) => JSON.parse(l));
+    expect(frames[0].t).toBe('hello');
+    expect(frames.at(-1)).toMatchObject({ t: 'result', verb: 'status', ok: false, error: '--frames is already a machine format; drop --format.', exitCode: 1 });
+  });
+  it('--frames sync --hook --format is the same framed refusal, never the plain stderr line', async () => {
+    const failed = await framedRun(['--frames', 'sync', '--hook', '--format', 'md']).then(() => { throw new Error('expected failure'); }, (error: { code: number; stdout: string; stderr: string }) => error);
+    expect(failed.code).toBe(1);
+    const frames = failed.stdout.trim().split('\n').map((l) => JSON.parse(l));
+    expect(frames[0].t).toBe('hello');
+    expect(frames.at(-1)).toMatchObject({ t: 'result', verb: 'sync', ok: false, error: '--frames is already a machine format; drop --format.', exitCode: 1 });
+    expect(failed.stderr).not.toContain("sync --hook's stdout is the reload directive");
+  });
+  it('renders md and json boards for the read verbs against dashboardTeam()', async () => {
+    const f = await dashboardTeam({ storeUnderHome: true, localRemote: true });
+    const child = { ...env, HOME: f.home, USERPROFILE: f.home, GH_CONFIG_DIR: resolve(f.home, '.config', 'gh') };
+    for (const [argv, heading] of [[['status'], '## terum-skills '], [['ls', '--local'], '## Library'], [['ls'], '## Marketplace — acme'], [['ls', 'skill', 'deploy-check'], '## deploy-check — Version 2 (2 versions)'], [['search', 'deploy'], '## Search "deploy"'], [['eval-report', 'tdd'], '## Eval report — tdd'], [['update'], '## terum-skills ']] as const) {
+      const md = await run(process.execPath, [bin, ...argv, '--format', 'md'], { cwd: f.home, env: child });
+      expect(md.stdout.startsWith(heading), argv.join(' ')).toBe(true);
+      expect(md.stdout).not.toMatch(/\x1b/);
+      const json = await run(process.execPath, [bin, '--format', 'json', ...argv], { cwd: f.home, env: child });
+      expect(JSON.parse(json.stdout)).toMatchObject({ verb: argv[0], ok: true, exitCode: 0 });
+    }
+    // plain is untouched: the same status bytes as without any flag.
+    const plain = await run(process.execPath, [bin, 'status'], { cwd: f.home, env: child });
+    const explicit = await run(process.execPath, [bin, 'status', '--format', 'plain'], { cwd: f.home, env: child });
+    expect(explicit.stdout).toBe(plain.stdout);
+  });
+
+  // R1 (fix round 1): a verb flag that survives argv stripping must reach BOTH commander (else this would be an
+  // "unknown option" usage error) AND ctx.argv (else the board heading would not name the filter). format-cli.test.ts's
+  // harness cannot prove this — its sink is built with a fixed `argv: []` regardless of what is run through it — so
+  // this runs the real built bin end to end instead.
+  it('threads a surviving verb flag through both commander and ctx.argv (R1)', async () => {
+    const f = await dashboardTeam({ storeUnderHome: true, localRemote: true });
+    const child = { ...env, HOME: f.home, USERPROFILE: f.home, GH_CONFIG_DIR: resolve(f.home, '.config', 'gh') };
+    const result = await run(process.execPath, [bin, 'search', 'tdd', '--category', 'testing', '--format', 'md'], { cwd: f.home, env: child });
+    expect(result.stdout).toContain('## Search "tdd" · category testing');
+  });
+  // R6: a term that itself looks like a flag survives via a literal `--`; describe() must skip that marker, not treat
+  // it as the term, and the render-option prefix scan (which stops at the first `--`) means --format has to precede it.
+  it("a search term that looks like a flag survives a literal -- separator (R1, R6)", async () => {
+    const f = await dashboardTeam({ storeUnderHome: true, localRemote: true });
+    const child = { ...env, HOME: f.home, USERPROFILE: f.home, GH_CONFIG_DIR: resolve(f.home, '.config', 'gh') };
+    const result = await run(process.execPath, [bin, 'search', '--format', 'md', '--', '--rows'], { cwd: f.home, env: child });
+    expect(result.stdout).toContain('## Search "--rows"');
+  });
+
+  it.skipIf(process.platform === 'win32')('prints a runnable uncapped footer command with board flags before a literal --', async () => {
+    const f = await dashboardTeam({ storeUnderHome: true, localRemote: true });
+    const child = { ...env, HOME: f.home, USERPROFILE: f.home, GH_CONFIG_DIR: resolve(f.home, '.config', 'gh') };
+    const capped = await run(process.execPath, [bin, '--format', 'md', '--rows', '1', 'ls', '--local', '--'], { cwd: f.home, env: child });
+    const footer = capped.stdout.match(/_… and \d+ more — run `([^`]+)`_/u)?.[1];
+    expect(footer).toBe('npx -y terum-skills@latest ls --local --format md --rows all --');
+
+    const shims = resolve(out, 'rows-all-shims');
+    await mkdir(shims, { recursive: true });
+    const npx = resolve(shims, 'npx');
+    await writeFile(npx, '#!/bin/sh\n[ "$1" = "-y" ] || exit 64\n[ "$2" = "terum-skills@latest" ] || exit 64\nshift 2\nexec "$ROWS_ALL_NODE" "$ROWS_ALL_BIN" "$@"\n');
+    await chmod(npx, 0o755);
+    const uncapped = await run('/bin/sh', ['-c', footer!], { cwd: f.home, env: { ...child, PATH: `${shims}${delimiter}${env.PATH}`, ROWS_ALL_NODE: process.execPath, ROWS_ALL_BIN: bin } });
+    expect(uncapped.stdout).toContain('## Library');
+    expect(uncapped.stdout).not.toMatch(/_… and \d+ more — run /u);
+  });
+
   it('keeps successful framed version and help requests as commander text without a result', async () => {
     const plain = await run(process.execPath, [bin, '--version'], { cwd: out, env });
     const framed = await framedRun(['--frames', '--version']);
@@ -85,26 +161,38 @@ describe.skipIf(!SYMLINKS_SUPPORTED)('the built bin (dist/index.js)', () => {
     expect(help.stdout).not.toContain('"t":"result"');
   });
 
-  it('the build bundles the canonical /terum-skills skill where the built wrapper module resolves it, byte for byte, marker intact', async () => {
+  it('the build bundles every marked canonical skill where the built wrapper module resolves it, byte for byte, markers intact', async () => {
     const bundle = await run(process.execPath, [resolve(root, 'scripts', 'bundle-skill.mjs'), '--out', resolve(out, 'dist')], { cwd: root });
-    const bundled = resolve(out, 'dist', 'claude', 'skills', 'terum-skills', 'SKILL.md');
+    const canonical = (await readBundledSkills(CANONICAL_SKILLS))!;
+    const names = [...canonical.keys()].sort();
+    const bundled = (name: string) => resolve(out, 'dist', 'claude', 'skills', name, 'SKILL.md');
     const bundledHook = resolve(out, 'dist', 'claude', 'hooks', 'terum-skills-edit.mjs');
     expect(bundle.stderr.trim().split('\n')).toEqual([
-      `Bundled ${resolve(root, '.claude', 'skills', 'terum-skills', 'SKILL.md')} -> ${bundled}`,
+      ...names.map((name) => `Bundled ${resolve(root, '.claude', 'skills', name, 'SKILL.md')} -> ${bundled(name)}`),
       `Bundled ${resolve(root, 'assets', 'claude', 'hooks', 'terum-skills-edit.mjs')} -> ${bundledHook}`,
     ]);
-    expect(await readFile(bundled, 'utf8')).toBe(await readFile(resolve(root, '.claude', 'skills', 'terum-skills', 'SKILL.md'), 'utf8'));
+    for (const name of names) expect(await readFile(bundled(name), 'utf8'), name).toBe(canonical.get(name));
     const wrapper = await import(pathToFileURL(resolve(out, 'dist', 'lib', 'wrapper.js')).href) as typeof import('../lib/wrapper.js');
-    expect(wrapper.BUNDLED_WRAPPER).toBe(bundled);
-    expect(wrapper.isManagedWrapper(await readFile(bundled, 'utf8'))).toBe(true);
-    const home = resolve(out, 'bundle-home');
-    expect(await wrapper.wrapperState(wrapper.defaultWrapperOptions(home))).toBe('absent');
-    expect(await wrapper.installWrapper(wrapper.defaultWrapperOptions(home))).toBe('installed');
-    // Placed in this machine's spelling: the built package pins the manual to its own version, never @latest.
-    const placed = await readFile(resolve(home, '.claude', 'skills', 'terum-skills', 'SKILL.md'), 'utf8');
-    expect(placed).toBe(wrapper.renderWrapper(await readFile(bundled, 'utf8'), `npx -y terum-skills@${JSON.parse(await readFile(resolve(root, 'package.json'), 'utf8')).version}`));
-    expect(placed).not.toContain('@latest');
-    expect(wrapper.isManagedWrapper(placed)).toBe(true);
+    expect(wrapper.BUNDLED_SKILLS).toBe(resolve(out, 'dist', 'claude', 'skills'));
+    const fromDist = await wrapper.readBundledSkills(wrapper.BUNDLED_SKILLS);
+    expect(fromDist && [...fromDist.keys()].sort()).toEqual(names);
+    const home = resolve(out, 'bundle-home'); await mkdir(resolve(home, '.codex'), { recursive: true });
+    const options = wrapper.defaultWrapperOptions(home, undefined, {});
+    expect(options.roots).toEqual([{ host: 'claude', root: resolve(home, '.claude', 'skills') }, { host: 'codex', root: resolve(home, '.codex', 'skills') }]);
+    // The built package pins every placed skill to its own version, never @latest.
+    const version = (JSON.parse(await readFile(resolve(root, 'package.json'), 'utf8')) as { version: string }).version;
+    expect(options.prefix).toBe(`npx -y terum-skills@${version}`);
+    expect(await wrapper.refreshManagedSkills(options)).toEqual([]);
+    const states = await wrapper.managedSkillStates(options);
+    if (states.kind !== 'ready') throw new Error(states.kind);
+    for (const name of names) expect(await wrapper.installManagedSkill(options.roots[0]!.root, name, states.bundled.get(name)!)).toBe('installed');
+    for (const name of names) {
+      const placed = await readFile(resolve(home, '.claude', 'skills', name, 'SKILL.md'), 'utf8');
+      expect(placed, name).toBe(wrapper.renderWrapper(canonical.get(name)!, options.prefix));
+      expect(placed, name).not.toContain('@latest');
+    }
+    expect(await wrapper.refreshManagedSkills(options)).toEqual([]);
+    expect((await wrapper.listManagedSkills(options.roots[1]!.root))).toEqual([]);
 
     // The edit hook ships on the same contract, from assets/ rather than .claude/ (it is run, not loaded).
     expect(await readFile(bundledHook, 'utf8')).toBe(await readFile(resolve(root, 'assets', 'claude', 'hooks', 'terum-skills-edit.mjs'), 'utf8'));
@@ -124,6 +212,56 @@ describe.skipIf(!SYMLINKS_SUPPORTED)('the built bin (dist/index.js)', () => {
     expect(await editHook.removeEditHook(hookOptions)).toBe('removed');
     expect(await editHook.editHookInstalled(hookOptions)).toBe(false);
     expect(JSON.parse(await readFile(resolve(home, '.claude', 'settings.json'), 'utf8'))).toEqual({});
+  });
+
+  it('the bundler refuses a marked skill whose frontmatter breaks the contract, names every problem, and bundles nothing', async () => {
+    const scratch = resolve(out, 'bundler-scratch');
+    await rm(scratch, { recursive: true, force: true });
+    const skills = resolve(scratch, '.claude', 'skills');
+    const write = async (folder: string, raw: string) => {
+      await mkdir(resolve(skills, folder), { recursive: true });
+      await writeFile(resolve(skills, folder, 'SKILL.md'), raw);
+    };
+    await write('good', '---\nname: good\ndescription: "quoted: fine"\nmetadata:\n  managed-by: terum-skills\n  short-description: "Good"\n---\nbody\n');
+    await write('review-tool', '---\nname: review-tool\ndescription: not ours\n---\nbody\n');
+    await write('misnamed', '---\nname: other\ndescription: "x"\nmetadata:\n  managed-by: terum-skills\n  short-description: "x"\n---\n');
+    await write('bare', '---\nname: bare\ndescription: bare scalar\nmetadata:\n  managed-by: terum-skills\n  short-description: "x"\n---\n');
+    await write('extra', '---\nname: extra\ndescription: "x"\nlicense: MIT\nmetadata:\n  managed-by: terum-skills\n  short-description: "x"\n---\n');
+    await write('short', '---\nname: short\ndescription: "x"\nmetadata:\n  managed-by: terum-skills\n---\n');
+    await write('broken', '---\nname: [\nmetadata:\n  managed-by: terum-skills\n---\n');
+    const script = await readFile(resolve(root, 'scripts', 'bundle-skill.mjs'), 'utf8');
+    // The script resolves its sources from its own location; run a copy planted beside the scratch tree.
+    await mkdir(resolve(scratch, 'scripts'), { recursive: true });
+    await writeFile(resolve(scratch, 'scripts', 'bundle-skill.mjs'), script);
+    await mkdir(resolve(scratch, 'assets', 'claude', 'hooks'), { recursive: true });
+    await cp(resolve(root, 'assets', 'claude', 'hooks', 'terum-skills-edit.mjs'), resolve(scratch, 'assets', 'claude', 'hooks', 'terum-skills-edit.mjs'));
+    await symlink(resolve(root, 'node_modules'), resolve(scratch, 'node_modules'), 'dir');
+    const attempt = await run(process.execPath, [resolve(scratch, 'scripts', 'bundle-skill.mjs'), '--out', resolve(scratch, 'dist')], { cwd: scratch }).then(
+      () => null,
+      (error: { code: number; stderr: string }) => error,
+    );
+    expect(attempt?.code).toBe(1);
+    const lines = attempt!.stderr.trim().split('\n');
+    expect(lines.at(-1)).toBe('5 problems; nothing bundled.');
+    expect(lines.filter((line) => line.startsWith(resolve(skills, 'misnamed', 'SKILL.md')))).toEqual([`${resolve(skills, 'misnamed', 'SKILL.md')}: name must equal the folder name misnamed (found "other")`]);
+    expect(lines.filter((line) => line.startsWith(resolve(skills, 'bare', 'SKILL.md')))).toEqual([`${resolve(skills, 'bare', 'SKILL.md')}: description must be a quoted or block scalar (HYG1: a bare scalar with a colon breaks YAML readers)`]);
+    expect(lines.filter((line) => line.startsWith(resolve(skills, 'extra', 'SKILL.md')))).toEqual([`${resolve(skills, 'extra', 'SKILL.md')}: top-level key license is not allowed (only name, description, metadata)`]);
+    expect(lines.filter((line) => line.startsWith(resolve(skills, 'short', 'SKILL.md')))).toEqual([`${resolve(skills, 'short', 'SKILL.md')}: metadata.short-description is required (Codex reads it)`]);
+    expect(lines.filter((line) => line.startsWith(resolve(skills, 'broken', 'SKILL.md')))).toEqual([`${resolve(skills, 'broken', 'SKILL.md')}: frontmatter is not valid YAML: Flow sequence in block collection must be sufficiently indented and end with a ] at line 2, column 1:`]);
+    expect(lines.some((line) => line.includes('review-tool'))).toBe(false);
+    await expect(access(resolve(scratch, 'dist', 'claude', 'skills'))).rejects.toMatchObject({ code: 'ENOENT' });
+    // With the faulty files gone, the good one bundles, the unmarked one is skipped, and a stale bundled folder is cleared.
+    for (const folder of ['misnamed', 'bare', 'extra', 'short', 'broken']) await rm(resolve(skills, folder), { recursive: true });
+    await mkdir(resolve(scratch, 'dist', 'claude', 'skills', 'stale'), { recursive: true });
+    await writeFile(resolve(scratch, 'dist', 'claude', 'skills', 'stale', 'SKILL.md'), 'old');
+    const ok = await run(process.execPath, [resolve(scratch, 'scripts', 'bundle-skill.mjs'), '--out', resolve(scratch, 'dist')], { cwd: scratch });
+    const hookSource = resolve(scratch, 'assets', 'claude', 'hooks', 'terum-skills-edit.mjs');
+    const hookDestination = resolve(scratch, 'dist', 'claude', 'hooks', 'terum-skills-edit.mjs');
+    expect(ok.stderr.trim().split('\n')).toEqual([
+      `Bundled ${resolve(skills, 'good', 'SKILL.md')} -> ${resolve(scratch, 'dist', 'claude', 'skills', 'good', 'SKILL.md')}`,
+      `Bundled ${hookSource} -> ${hookDestination}`,
+    ]);
+    expect(await readdir(resolve(scratch, 'dist', 'claude', 'skills'))).toEqual(['good']);
   });
 
   async function installedLayout(prefix: string) {

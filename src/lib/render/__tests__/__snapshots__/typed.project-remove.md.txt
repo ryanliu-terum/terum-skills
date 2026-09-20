@@ -1,0 +1,10 @@
+## Project removed
+**Removed <HOME>/work/terum from your library.**
+
+- **path:** `~/work/terum`
+- **placements still recorded:** 1
+
+**Notes**
+- 1 placement recorded under <HOME>/work/terum stays in the ledger; uninstall-skill removes them.
+
+**Next:** `/terum-skills uninstall-skill "<ref>"` · `/terum-skills project list`

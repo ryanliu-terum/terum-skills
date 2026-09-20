@@ -1,0 +1,24 @@
+{
+  "verb": "eval-report",
+  "ok": true,
+  "exitCode": 0,
+  "value": {
+    "skill": {
+      "id": "33333333-3333-4333-8333-333333333333",
+      "name": "diagnose"
+    },
+    "versions": {
+      "placed": null,
+      "teamCurrent": "v1",
+      "evaluated": null
+    },
+    "latest": null,
+    "latestState": "invalid",
+    "fallbackFrom": null,
+    "history": [],
+    "localRuns": []
+  },
+  "lines": [
+    "warning: the newest receipt is invalid (schema-invalid receipt <ROOT>/state/teams/acme/evals/33333333-3333-4333-8333-333333333333/v1/20260903T100000Z.json: invalid JSON.); older receipts are listed in history only."
+  ]
+}

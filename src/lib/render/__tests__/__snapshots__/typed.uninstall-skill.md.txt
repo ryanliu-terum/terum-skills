@@ -1,0 +1,11 @@
+## Uninstall
+**1 folder removed**
+
+| Id | Team | Removed |
+|---|---|---:|
+| 11111111 | acme | 1 |
+
+**Notes**
+- Your profile is unchanged.
+
+**Next:** `/list-skills --local`

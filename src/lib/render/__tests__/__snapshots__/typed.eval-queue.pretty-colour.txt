@@ -1,0 +1,12 @@
+[1mEval queue[0m
+2 queued
+
+[1mQueued[0m
+╭───────┬──────┬──────────────┬───────────┬────────┬───────────────╮
+│ [1mSkill[0m │ [1mTeam[0m │ [1mDigest      [0m │ [1mWindow   [0m │ [1mQueued[0m │ [1mLast error   [0m │
+├───────┼──────┼──────────────┼───────────┼────────┼───────────────┤
+│ tdd   │ acme │ bbbbbbbbbbbb │ overnight │ today  │ —             │
+│ notes │ acme │ bbbbbbbbbbbb │ overnight │ today  │ not signed in │
+╰───────┴──────┴──────────────┴───────────┴────────┴───────────────╯
+
+[1mNext:[0m [36m/eval --drain[0m

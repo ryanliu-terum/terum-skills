@@ -1,0 +1,62 @@
+[1mEval report — deploy-check[0m
+● NEUTRAL ±0% · 2W 2L 2T (n=6) · p=0.031 · partial 6/8 · sonnet k=1 · @seed · 8d ago
+
+  placed:       Version 1
+  team current: Version 2
+  evaluated:    Version 2
+  id:           11111111-1111-4111-8111-111111111111
+
+[1mComparisons[0m
+╭───────────────────────┬───┬───┬───┬──────┬───────┬────────╮
+│ [1mComparison           [0m │ [1mW[0m │ [1mL[0m │ [1mT[0m │ [1mLift[0m │ [1mp    [0m │ [1mRecord[0m │
+├───────────────────────┼───┼───┼───┼──────┼───────┼────────┤
+│ candidate-vs-baseline │ 2 │ 2 │ 2 │ ±0%  │ 0.031 │ [32mW[0m[32mW[0m[31mL[0m[31mL[0m[2mT[0m[2mT[0m │
+╰───────────────────────┴───┴───┴───┴──────┴───────┴────────╯
+
+[1mArm scores[0m
+  candidate ████████░░ 0.80
+  baseline  █████░░░░░ 0.50
+
+[1mEfficiency[0m
+╭───────────┬───────┬───────┬───────╮
+│ [1mArm      [0m │ [1mTurns[0m │ [1mTime [0m │ [1mCost [0m │
+├───────────┼───────┼───────┼───────┤
+│ candidate │   6.5 │ 30.0s │ $0.40 │
+│ baseline  │   5.0 │ 20.0s │ $0.30 │
+╰───────────┴───────┴───────┴───────╯
+
+[1mCost, over the costlier arm[0m
+  candidate ██████████ $0.40
+  baseline  ███████░░░ $0.30
+
+[1mTriggers[0m
+  recall 0.80 · precision 1.00 (tp 4 fn 1 fp 0 tn 5)
+
+[1mProvenance[0m
+  model:       sonnet
+  judge:       opus
+  k:           1
+  cases:       6
+  engine:      0.16.0 (abc1234)
+  claude code: 2.1.0
+  runner:      @seed
+  when:        8d ago
+
+[1mHistory[0m
+╭───────────┬──────────────────┬────────────────────────────┬──────┬───────┬────────┬────────╮
+│ [1mVersion  [0m │ [1mRun             [0m │ [1mVerdict                   [0m │ [1mLift[0m │ [1mW/L/T[0m │ [1mModel [0m │ [1mRunner[0m │
+├───────────┼──────────────────┼────────────────────────────┼──────┼───────┼────────┼────────┤
+│ Version 2 │ 20260905T100000Z │ [2m● NEUTRAL ±0% (6/8 scored)[0m │ ±0%  │ 2/2/2 │ sonnet │ @seed  │
+│ Version 1 │ 20260901T100000Z │ [32m✓ PASS +33%[0m                │ +33% │ 4/2/0 │ sonnet │ @mira  │
+╰───────────┴──────────────────┴────────────────────────────┴──────┴───────┴────────┴────────╯
+[2m(columns not shown at this width: When)[0m
+
+[1mLocal runs[0m
+╭──────────────────┬────────────┬───────────┬─────────────╮
+│ [1mRun             [0m │ [1mStatus    [0m │ [1mCommitted[0m │ [1mVerdict    [0m │
+├──────────────────┼────────────┼───────────┼─────────────┤
+│ 20260912T100000Z │ [32m✓ complete[0m │ no        │ [31m✗ FAIL −50%[0m │
+╰──────────────────┴────────────┴───────────┴─────────────╯
+[2m(columns not shown at this width: Run dir)[0m
+
+[1mNext:[0m [36m/eval deploy-check --k 3[0m · [36m/terum-skills publish deploy-check[0m

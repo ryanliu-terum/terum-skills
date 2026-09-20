@@ -1,0 +1,30 @@
+{
+  "verb": "eval",
+  "ok": true,
+  "exitCode": 0,
+  "value": {
+    "items": [
+      {
+        "skill": "tdd",
+        "path": "<HOME>/.claude/skills/tdd",
+        "contentHash": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "requestedAt": "2026-09-12T22:00:00Z",
+        "window": "overnight",
+        "team": "acme"
+      },
+      {
+        "skill": "notes",
+        "path": "<HOME>/.claude/skills/notes",
+        "contentHash": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "requestedAt": "2026-09-12T22:00:00Z",
+        "window": "overnight",
+        "team": "acme",
+        "lastError": "not signed in"
+      }
+    ]
+  },
+  "lines": [
+    "acme/tdd@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb · overnight · 2026-09-12T22:00:00Z",
+    "acme/notes@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb · overnight · 2026-09-12T22:00:00Z · not signed in"
+  ]
+}

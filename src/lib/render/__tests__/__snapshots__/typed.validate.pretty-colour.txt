@@ -1,0 +1,12 @@
+[1mValidate — deploy-check[0m
+0 findings · 1 warning · 0 repairable
+
+  folder:     ~/.claude/skills/deploy-check
+  findings:   0
+  warnings:   1
+  repairable: 0
+
+[1mNotes[0m
+  • warning HYG6 SKILL.md: description is over 20,000 characters
+
+[1mNext:[0m [36m/terum-skills publish deploy-check[0m

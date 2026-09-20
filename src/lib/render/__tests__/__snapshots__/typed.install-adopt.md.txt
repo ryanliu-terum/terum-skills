@@ -1,0 +1,11 @@
+## Install
+**Adopted where it is.**
+
+| Id | Version | Path | Team | Profiled |
+|---|---|---|---|---|
+| 11111111 | Version 2 | `~/.claude/skills/deploy-check` | acme | — no |
+
+**Notes**
+- Recorded deploy-check where it is.
+
+**Next:** `/list-skills --local`

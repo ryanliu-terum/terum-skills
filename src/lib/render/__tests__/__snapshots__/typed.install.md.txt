@@ -1,0 +1,11 @@
+## Install
+**1 skill placed**
+
+| Id | Version | Path | Team | Profiled |
+|---|---|---|---|---|
+| 11111111 | Version 2 | `~/.claude/skills/deploy-check` | acme | — no |
+
+**Notes**
+- Your copy is kept at <HOME>/.claude/old-skills/deploy-check.
+
+**Next:** `/list-skills --local`

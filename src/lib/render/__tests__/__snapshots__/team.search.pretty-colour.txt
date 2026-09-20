@@ -1,0 +1,14 @@
+[1mSearch "deploy" · category ops[0m
+1 hit
+
+╭──────────────┬───────────────────────────────────────────┬──────────┬───────────┬──────────╮
+│ [1mSkill       [0m │ [1mDesc                                     [0m │ [1mCategory[0m │ [1mVer      [0m │ [1mInstalls[0m │
+├──────────────┼───────────────────────────────────────────┼──────────┼───────────┼──────────┤
+│ deploy-check │ Use this when a deploy needs a checklist. │ ops      │ Version 2 │        2 │
+╰──────────────┴───────────────────────────────────────────┴──────────┴───────────┴──────────╯
+[2m(columns not shown at this width: Author, Updated)[0m
+
+[1mNotes[0m
+  • acme may be stale; run `npx -y terum-skills@latest sync`.
+
+[1mNext:[0m [36m/skill-info deploy-check[0m · [36m/terum-skills install deploy-check[0m

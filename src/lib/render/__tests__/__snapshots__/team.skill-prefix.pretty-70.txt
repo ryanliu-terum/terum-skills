@@ -1,0 +1,32 @@
+diagnose — Version 1 (1 version)
+Resolved: "DIAG" → diagnose (unique prefix)
+
+  Narrow a failure to one cause before changing anything.
+
+  id:          33333333-3333-4333-8333-333333333333
+  author:      Ravi Patel <ravi@example.com>
+  category:    debugging
+  endorsement: —
+  grants:      none
+  installs:    0
+  updated:     10d ago
+  latest:      Version 1
+  eval:        ⚠ invalid receipt at the latest version
+
+Your copy
+  state:                     shared = Version 1
+  path:                      <ROOT>/proj/.claude/skills/diagnose
+  health:                    ✓ unchanged or untracked
+  local eval:                — not evaluated
+  team eval for these bytes: —
+
+Body preview
+  # Diagnose
+  
+  Reproduce, bisect, fix.
+
+Notes
+  • acme/diagnose: unreadable receipt v1/20260903T100000Z.json; not considered.
+  • diagnose: schema-invalid receipt <ROOT>/state/teams/acme/evals/33333333-3333-4333-8333-333333333333/v1/20260903T100000Z.json: invalid JSON.
+
+Next: /eval diagnose · /eval-report diagnose

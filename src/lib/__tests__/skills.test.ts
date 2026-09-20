@@ -110,8 +110,8 @@ it('joinDates dates each member from the first commit that added their people fi
   await commit('a edits', '2026-09-01T10:00:00+00:00');
   const dates = await joinDates(seed);
   expect([dates.get('a'), dates.get('b')]).toEqual(['2026-06-12', '2026-08-03']);
-  // The fixture's own seed member was committed today, so every people file in the tree is dated.
-  expect(dates.get('seed')).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  // The fixture's seed member is pinned to 2026-09-01 (fixtures.ts at()), so every people file in the tree is dated.
+  expect(dates.get('seed')).toBe('2026-09-01');
   const { roster } = await readRoster(seed, { joined: dates });
   expect(roster.map((entry) => [entry.handle, entry.joined])).toEqual([['a', '2026-06-12'], ['b', '2026-08-03'], ['seed', dates.get('seed')]]);
 });

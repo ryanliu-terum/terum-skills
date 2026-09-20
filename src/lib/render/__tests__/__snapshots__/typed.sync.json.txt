@@ -1,0 +1,39 @@
+{
+  "verb": "sync",
+  "ok": true,
+  "exitCode": 0,
+  "value": {
+    "changed": true,
+    "teams": [
+      {
+        "team": "acme",
+        "state": "refreshed",
+        "changed": true,
+        "head": "a1b2c3d4e5f6"
+      },
+      {
+        "team": "old",
+        "state": "unreachable",
+        "changed": false,
+        "head": null,
+        "detail": "repository not found",
+        "missing": true,
+        "successors": [
+          {
+            "ownerRepo": "acme/team-2",
+            "source": "member"
+          }
+        ],
+        "summary": "old: the repository is gone; GitHub knows acme/team-2 (renamed)."
+      }
+    ],
+    "notices": [
+      "Updated your terum-skills skills for this CLI."
+    ]
+  },
+  "lines": [
+    "old: not refreshed (unreachable) — repository not found",
+    "old: the repository is gone; GitHub knows acme/team-2 (renamed).",
+    "To follow it, run `npx -y terum-skills@latest team move acme/team-2`."
+  ]
+}

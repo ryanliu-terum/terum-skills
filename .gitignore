@@ -8,11 +8,19 @@ CLAUDE.md
 CLAUDE.local.md
 AGENTS.local.md
 
-# .claude/ is untracked except the one file `npm run build` bundles into dist/
-# (scripts/bundle-skill.mjs reads .claude/skills/terum-skills/SKILL.md).
+# .claude/ is untracked except the eight skills `npm run build` bundles into dist/
+# (scripts/bundle-skill.mjs reads every .claude/skills/<name>/SKILL.md carrying
+# `metadata.managed-by: terum-skills`; each shipped skill is allow-listed here by name).
 .claude/*
 !.claude/skills/
 .claude/skills/*
+!.claude/skills/eval/
+!.claude/skills/eval-report/
+!.claude/skills/list-skills/
+!.claude/skills/search-skills/
+!.claude/skills/skill-info/
+!.claude/skills/skill-status/
+!.claude/skills/sync-skills/
 !.claude/skills/terum-skills/
 # ...plus the authored eval assets of the hybrid-review skill (eval-purpose-suites spec §6.2): the
 # suite and its fixture are data the engine measures with; the skill itself stays in the harness.

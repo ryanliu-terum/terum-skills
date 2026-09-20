@@ -1,0 +1,93 @@
+{
+  "verb": "ls",
+  "ok": true,
+  "exitCode": 0,
+  "value": {
+    "roster": [
+      {
+        "handle": "mira",
+        "active": true,
+        "role": null,
+        "projects": []
+      },
+      {
+        "handle": "ravi",
+        "active": true,
+        "role": "Debugging",
+        "projects": []
+      },
+      {
+        "handle": "seed",
+        "active": true,
+        "role": "Platform",
+        "projects": [
+          "terum"
+        ]
+      }
+    ],
+    "skills": [],
+    "projects": [],
+    "problems": [],
+    "local": [
+      {
+        "root": "<HOME>/.claude/skills",
+        "scope": "global",
+        "registered": false,
+        "rootState": "scanned",
+        "label": "Global",
+        "remote": null,
+        "counts": {
+          "skillFolders": 5,
+          "connectable": 1
+        },
+        "rows": [
+          {
+            "skillId": null,
+            "placed": false,
+            "name": "notes",
+            "path": "<HOME>/.claude/skills/notes",
+            "state": "untracked locally",
+            "tracked": false,
+            "placement": null,
+            "health": "unknown",
+            "enabled": true,
+            "edited": false,
+            "localEval": null,
+            "localEvalStale": false,
+            "teamEval": null,
+            "matchedVersion": null,
+            "matchedName": null,
+            "matchedTeam": null,
+            "knownToTeam": false,
+            "description": "Personal notes on how this team ships. Not shared; not a team skill.",
+            "frontmatter": "---\nname: notes\ndescription: \"Personal notes on how this team ships. Not shared; not a team skill.\"\n---",
+            "body": "# Notes\n\nKeep the release calendar here.\n",
+            "category": null,
+            "characters": 145,
+            "updated": "2026-09-13T12:00:00.000Z"
+          }
+        ],
+        "notOffered": [],
+        "problems": []
+      }
+    ],
+    "viewer": {
+      "handle": "seed",
+      "team": "acme"
+    },
+    "selection": {
+      "kind": "skill",
+      "name": "notes",
+      "source": "library",
+      "path": "<HOME>/.claude/skills/notes"
+    }
+  },
+  "lines": [
+    "acme/diagnose: unreadable receipt v1/20260903T100000Z.json; not considered.",
+    "  notes — untracked locally; path: <HOME>/.claude/skills/notes",
+    "Personal notes on how this team ships. Not shared; not a team skill.",
+    "# Notes",
+    "",
+    "Keep the release calendar here."
+  ]
+}
