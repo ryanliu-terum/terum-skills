@@ -60,6 +60,13 @@ export interface PublishResult {
   profileAdded: boolean;
   /** This publish appended the uuid to `projects[project].skills`; always false without `--project`. */
   projectAdded: boolean;
+  /**
+   * Why this skill alone was not published, when a batch refused it and published the rest. A shell
+   * driving one process for a whole selection has no other way to say which row failed and why —
+   * the reason is otherwise only a printed line, with nothing tying it to a row. Absent for a
+   * single publish, where a refusal is the run's own failure.
+   */
+  refused?: string;
 }
 
 /**
@@ -513,7 +520,7 @@ export async function runMany(args: PublishManyArgs, io: Prompter): Promise<Resu
     // one skill's question must leave every folder byte-identical, not just the ones after it (OF-2).
     const prepared: { prepared: PreparedPublish; regression: { against: string } | null; writeBack: () => Promise<void> }[] = [];
     for (const [index, ref] of args.refs.entries()) {
-      io.progress?.({ step: `Checking ${ref}`, current: index + 1, total: args.refs.length });
+      io.progress?.({ step: `Checking ${ref}`, item: ref, current: index + 1, total: args.refs.length });
       const source = await readLocalSource({ ...args, ref }, config, store);
       prepared.push(await preparePublish({ args: { ...args, ref }, store, config, binding, teamJson, catalogue, categoryFlag, abort, earlyAsk: null, source }, io));
     }
@@ -555,12 +562,14 @@ export async function runMany(args: PublishManyArgs, io: Prompter): Promise<Resu
           ? `Published ${entry.prepared.name} as ${label} to the ${team} marketplace. Attached ${result.attached} eval run(s).`
           : `${entry.prepared.name} is identical to ${label}, so no new version was minted.`);
       }
+      const refused = outcome.skipped.find(entry2 => entry2.index === index && !entry2.noop);
       results.push({
         team, id: entry.prepared.id, name: entry.prepared.name, project: entry.prepared.project,
         version: landed.version, created: landed.version !== null, identicalTo: landed.identicalTo,
         attachedEvals: landed.attached, evalAssets: landed.assets,
         profileAdded: result !== undefined && (landed.version ?? landed.identicalTo) !== null,
         projectAdded: landed.projectAdded,
+        ...(refused ? { refused: refused.reason } : {}),
       });
     }
     return success(results);
