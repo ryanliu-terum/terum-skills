@@ -12,7 +12,7 @@ import { fromError, CancelledError, Result, success } from '../lib/result.js';
 import { parseJson, parseSkillFrontmatter, teamSchema } from '../lib/schema.js';
 import { Runner, systemRunner } from '../lib/runner.js';
 import { declaredCategory, declaredSkillId, injectManagedFields, isEvalAsset, readTeam, skillContentDigest, skillRecords } from '../lib/skills.js';
-import { openTeamRepo, refreshClone, SafeWriteOptions, treeText, lockWait } from '../lib/teamRepo.js';
+import { MutableTree, openTeamRepo, refreshClone, SafeWriteOptions, treeText, lockWait } from '../lib/teamRepo.js';
 import { teamForReference } from './install.js';
 import { assertNotInsideStateRoot, assertSkillDirectory, sourceFiles } from '../lib/skill-source.js';
 import { assessHygiene, HygieneRefused, reportHygieneWarnings } from '../lib/evals/hygiene.js';
@@ -112,6 +112,121 @@ async function readLocalSource(args: PublishArgs, config: Config, store: ConfigS
  * It is the only bridge between the two mirrors and the only thing that can write a skill. Everything
  * before `safeWrite` reads and asks; the mutation itself is pure.
  */
+/** What a prepared publish carries into the team-repo write: bytes, identity, and the decisions already taken. */
+interface PreparedPublish {
+  name: string;
+  path: string;
+  files: Map<string, Buffer>;
+  executable: Set<string>;
+  injected: Buffer;
+  id: string;
+  candidate: string;
+  local: Awaited<ReturnType<typeof localReceiptsFor>>;
+  project: string | null;
+  assessment: ReturnType<typeof assessHygiene>;
+}
+
+export interface PublishOutcome { version: string | null; identicalTo: string | null; attached: number; projectAdded: boolean; assets: number }
+
+/**
+ * Steps 7-9a as a pure mutation over the post-image, so one skill's publish is the same code whether
+ * it is the only item of a `safeWrite` or one item of a `safeWriteBatch`. It returns its outcome
+ * rather than assigning one through a closure: a batch needs an outcome per item, and a retry
+ * re-runs every mutation, which a shared closure variable would quietly accumulate into.
+ */
+function publishIntoTree(tree: MutableTree, prepared: PreparedPublish): PublishOutcome {
+  const { name, files, executable, id, candidate, local, project } = prepared;
+    const teamSource = tree.before('team.json');
+    if (teamSource === undefined) throw new Error('This repository has no team.json; it is not a terum-skills team repo.');
+    const fresh = parseJson(teamSchema, treeText(teamSource), 'team.json');
+    if (project !== null && !Object.hasOwn(fresh.projects, project)) throw new Error(`Unknown project ${project}.`);
+
+    // 7. Enumerate this name's versions from the TREE, not with listVersions: a pure mutation may
+    //    only see the post-image. Walk descending and stop at the first digest equal to candidate.
+    const existing = versionsInTree(tree, name);
+    // 7a. This name already has a lineage: prove it is THIS skill's before appending to it.
+    //     `origin/main` refused here and the refusal was lost in the layout-3 rewrite. Row a' cannot
+    //     stand in for it — it proves the path is an add and says outright that ownership is not
+    //     consulted. Without this, two members whose Library both hold a folder called `deploy`
+    //     publish into one lineage: `skillRecords` resolves a name to its newest version, so the
+    //     team's `deploy` silently becomes the second member's skill, the first member's uuid stays
+    //     in team.json reachable through no name, their eval history drops out of `ls`, and every
+    //     machine holding their install reads `gone-from-repo`.
+    const incumbent = existing[0];
+    if (incumbent !== undefined) {
+      const head = tree.after(`skills/${name}/${incumbent.folder}/SKILL.md`);
+      const parsed = head === undefined ? undefined : parseSkillFrontmatter(treeText(head));
+      if (!parsed?.ok || parsed.data.metadata.id !== id) {
+        throw new Error(`${name} is no longer in the repository as ${id.slice(0, 8)}; run sync and retry.`);
+      }
+    }
+    let assetsWritten = 0; // the write may replay the mutation; this is a fresh count each attempt.
+    let identical: string | null = null;
+    for (const version of existing) {
+      const prefix = `skills/${name}/${version.folder}/`;
+      const committed = new Map<string, Buffer>();
+      for (const path of tree.paths(prefix)) {
+        const contents = tree.after(path);
+        // The prefix MUST be stripped: tree.paths() returns full repo-relative paths while §3.3's
+        // record stream is skill-folder-relative. Feed it unstripped and no version ever compares
+        // equal, so every publish mints forever and step 8's refusal is unreachable.
+        if (contents !== undefined) committed.set(path.slice(prefix.length), Buffer.isBuffer(contents) ? contents : Buffer.from(contents));
+      }
+      if (committed.size && skillContentDigest(committed) === candidate) { identical = version.folder; break; }
+    }
+
+    const target = identical ?? versionFolderName((existing[0]?.n ?? 0) + 1); // never count + 1
+    // §4.5/D10: carry the mode across with the bytes. `sourceFiles` already detects it
+    // (`skill-source.ts`'s `lstat(next).mode & 0o111`); before this the set was read for hygiene
+    // and then dropped, so every published `scripts/*.sh` arrived 0644 and would not run.
+    //
+    // Eval assets are filtered out here (`isEvalAsset`): they are not version bytes, and a version
+    // folder is immutable, so a case committed into `v3/` could never be corrected without minting
+    // `v4`. They go to the mutable `skills/<name>/evals/` below instead.
+    if (identical === null) for (const [key, contents] of files) {
+      if (isEvalAsset(key)) continue;
+      const path = `skills/${name}/${target}/${key}`;
+      tree.set(path, contents);
+      if (executable.has(key)) tree.setExecutable(path, true);
+    }
+
+    // 8a. The eval assets, written on EVERY publish — including one that minted nothing, which is
+    //     exactly how an eval-only change reaches the team now. Add-or-modify, never remove
+    //     (guard row a″), so a folder that happens to be missing a case cannot delete the team's.
+    for (const [key, contents] of files) {
+      if (!isEvalAsset(key)) continue;
+      const path = `skills/${name}/${key}`;
+      if (sameBytes(tree.before(path), contents)) continue;
+      tree.set(path, contents);
+      if (executable.has(key)) tree.setExecutable(path, true);
+      assetsWritten += 1;
+    }
+
+    // 9. Attach every local receipt taken of these exact bytes, as a COPY stamped with the publish
+    //    uuid and this version — never a plain file copy. The stamping is what makes §8.1's
+    //    misfiled check meaningful. The local run itself is not rewritten: it is local state.
+    let attached = 0;
+    for (const entry of local) {
+      const path = `evals/${id}/${target}/${entry.runId}.json`;
+      if (tree.before(path) !== undefined) continue;
+      tree.set(path, `${JSON.stringify({ ...entry.receipt, skill_id: id, version: target }, null, 2)}\n`);
+      attached += 1;
+    }
+
+    // 9a. Project membership, whether or not a version was minted — and only when one was asked
+    //     for. The version folder above IS the marketplace copy; a project list is a second,
+    //     optional place the team also names the skill, so `team.json` is untouched without
+    //     `--project` and a publish can now change nothing outside `skills/`.
+    let projectAdded = false;
+    if (project !== null) {
+      const list = fresh.projects[project]!.skills;
+      projectAdded = !list.includes(id);
+      if (projectAdded) { list.push(id); tree.set('team.json', `${JSON.stringify(fresh, null, 2)}\n`); }
+    }
+
+  return { version: identical === null ? target : null, identicalTo: identical, attached, projectAdded, assets: assetsWritten };
+}
+
 export async function run(args: PublishArgs, io: Prompter): Promise<Result<PublishResult>> {
   // Kills the category model call on EVERY exit path, including the failing ones. Without it, a
   // `git fetch` that fails while `claude` is still answering would hold this process open on the
@@ -263,107 +378,16 @@ export async function run(args: PublishArgs, io: Prompter): Promise<Result<Publi
 
     io.progress?.({ step: `Publishing ${found.name}`, current: 4, total: PUBLISH_STEPS });
     const repo = openTeamRepo(clone, binding.remote, runner);
-    let outcome: { version: string | null; identicalTo: string | null; attached: number; projectAdded: boolean; assets: number } = { version: null, identicalTo: null, attached: 0, projectAdded: false, assets: 0 };
-    let assetsWritten = 0;
-    const written = await repo.safeWrite((tree) => {
-      const teamSource = tree.before('team.json');
-      if (teamSource === undefined) throw new Error('This repository has no team.json; it is not a terum-skills team repo.');
-      const fresh = parseJson(teamSchema, treeText(teamSource), 'team.json');
-      if (project !== null && !Object.hasOwn(fresh.projects, project)) throw new Error(`Unknown project ${project}.`);
-
-      // 7. Enumerate this name's versions from the TREE, not with listVersions: a pure mutation may
-      //    only see the post-image. Walk descending and stop at the first digest equal to candidate.
-      const existing = versionsInTree(tree, found.name);
-      // 7a. This name already has a lineage: prove it is THIS skill's before appending to it.
-      //     `origin/main` refused here and the refusal was lost in the layout-3 rewrite. Row a' cannot
-      //     stand in for it — it proves the path is an add and says outright that ownership is not
-      //     consulted. Without this, two members whose Library both hold a folder called `deploy`
-      //     publish into one lineage: `skillRecords` resolves a name to its newest version, so the
-      //     team's `deploy` silently becomes the second member's skill, the first member's uuid stays
-      //     in team.json reachable through no name, their eval history drops out of `ls`, and every
-      //     machine holding their install reads `gone-from-repo`.
-      const incumbent = existing[0];
-      if (incumbent !== undefined) {
-        const head = tree.after(`skills/${found.name}/${incumbent.folder}/SKILL.md`);
-        const parsed = head === undefined ? undefined : parseSkillFrontmatter(treeText(head));
-        if (!parsed?.ok || parsed.data.metadata.id !== id) {
-          throw new Error(`${found.name} is no longer in the repository as ${id.slice(0, 8)}; run sync and retry.`);
-        }
-      }
-      assetsWritten = 0; // safeWrite may replay the mutation; this is a fresh count each attempt.
-      let identical: string | null = null;
-      for (const version of existing) {
-        const prefix = `skills/${found.name}/${version.folder}/`;
-        const committed = new Map<string, Buffer>();
-        for (const path of tree.paths(prefix)) {
-          const contents = tree.after(path);
-          // The prefix MUST be stripped: tree.paths() returns full repo-relative paths while §3.3's
-          // record stream is skill-folder-relative. Feed it unstripped and no version ever compares
-          // equal, so every publish mints forever and step 8's refusal is unreachable.
-          if (contents !== undefined) committed.set(path.slice(prefix.length), Buffer.isBuffer(contents) ? contents : Buffer.from(contents));
-        }
-        if (committed.size && skillContentDigest(committed) === candidate) { identical = version.folder; break; }
-      }
-
-      const target = identical ?? versionFolderName((existing[0]?.n ?? 0) + 1); // never count + 1
-      // §4.5/D10: carry the mode across with the bytes. `sourceFiles` already detects it
-      // (`skill-source.ts`'s `lstat(next).mode & 0o111`); before this the set was read for hygiene
-      // and then dropped, so every published `scripts/*.sh` arrived 0644 and would not run.
-      //
-      // Eval assets are filtered out here (`isEvalAsset`): they are not version bytes, and a version
-      // folder is immutable, so a case committed into `v3/` could never be corrected without minting
-      // `v4`. They go to the mutable `skills/<name>/evals/` below instead.
-      if (identical === null) for (const [key, contents] of files) {
-        if (isEvalAsset(key)) continue;
-        const path = `skills/${found.name}/${target}/${key}`;
-        tree.set(path, contents);
-        if (executable.has(key)) tree.setExecutable(path, true);
-      }
-
-      // 8a. The eval assets, written on EVERY publish — including one that minted nothing, which is
-      //     exactly how an eval-only change reaches the team now. Add-or-modify, never remove
-      //     (guard row a″), so a folder that happens to be missing a case cannot delete the team's.
-      for (const [key, contents] of files) {
-        if (!isEvalAsset(key)) continue;
-        const path = `skills/${found.name}/${key}`;
-        if (sameBytes(tree.before(path), contents)) continue;
-        tree.set(path, contents);
-        if (executable.has(key)) tree.setExecutable(path, true);
-        assetsWritten += 1;
-      }
-
-      // 9. Attach every local receipt taken of these exact bytes, as a COPY stamped with the publish
-      //    uuid and this version — never a plain file copy. The stamping is what makes §8.1's
-      //    misfiled check meaningful. The local run itself is not rewritten: it is local state.
-      let attached = 0;
-      for (const entry of local) {
-        const path = `evals/${id}/${target}/${entry.runId}.json`;
-        if (tree.before(path) !== undefined) continue;
-        tree.set(path, `${JSON.stringify({ ...entry.receipt, skill_id: id, version: target }, null, 2)}\n`);
-        attached += 1;
-      }
-
-      // 9a. Project membership, whether or not a version was minted — and only when one was asked
-      //     for. The version folder above IS the marketplace copy; a project list is a second,
-      //     optional place the team also names the skill, so `team.json` is untouched without
-      //     `--project` and a publish can now change nothing outside `skills/`.
-      let projectAdded = false;
-      if (project !== null) {
-        const list = fresh.projects[project]!.skills;
-        projectAdded = !list.includes(id);
-        if (projectAdded) { list.push(id); tree.set('team.json', `${JSON.stringify(fresh, null, 2)}\n`); }
-      }
-
-      outcome = { version: identical === null ? target : null, identicalTo: identical, attached, projectAdded, assets: assetsWritten };
-      return assessment;
-    }, {
+    const prepared: PreparedPublish = { name: found.name, path: found.path, files, executable, injected, id, candidate, local, project, assessment };
+    let outcome: PublishOutcome = { version: null, identicalTo: null, attached: 0, projectAdded: false, assets: 0 };
+    await repo.safeWrite((tree) => { outcome = publishIntoTree(tree, prepared); return outcome; }, {
       action: 'publish',
       handle: binding.handle,
       message: `${binding.handle}: publish ${found.name}`,
       ...args.safeWrite,
       ...lockWait(io),
     });
-    void written;
+
 
     const at = outcome.version ?? outcome.identicalTo!;
     const label = versionLabel(Number(at.slice(1)));
