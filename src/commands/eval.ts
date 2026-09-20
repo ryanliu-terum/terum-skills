@@ -33,6 +33,10 @@ export interface EvalArgs extends WithForm {
   judgeModel?: string;
   working?: boolean;
   commit?: boolean;
+  /** IE6 §1: the rival skill ref. Its presence is what enters head-to-head mode. */
+  vs?: string;
+  /** IE6 §3.1: a human-written brief, skipping derivation and the confirm gate. */
+  brief?: string;
   noGen?: boolean;
   gen?: boolean;
   save?: boolean;
@@ -52,6 +56,8 @@ export interface EvalResult {
   ccVersion: string;
   executionStatus: 'complete' | 'partial' | 'failed';
   receiptPath?: string;
+  /** IE6: present only in head-to-head mode. */
+  rival?: { id: string; name: string; version: string };
 }
 
 /** §6: fetch/read only from the team clone; --commit adds exactly one immutable receipt via safeWrite. */
@@ -63,7 +69,20 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
     // generated case sharing the stem would silently evaluate something else (review P2).
     if (args.gen && args.case !== undefined) return failure('--gen cannot be combined with --case: naming a case asserts an authored expectation, and generation would replace the set it selects from.');
     if (args.triggersOnly && args.executionOnly) return failure('--triggers-only and --execution-only cannot be used together.');
-    const k = args.k ?? 3;
+    // IE6 §1.2 — every head-to-head refusal is checked before any agent call.
+    const headToHead = args.vs !== undefined;
+    if (headToHead) {
+      if (args.commit) return failure('head-to-head runs are never committed: a receipt pins one skill id and one tree hash.');
+      if (args.case !== undefined) return failure('--vs cannot be combined with --case: a named case is an authored assertion belonging to one skill.');
+      if (args.save) return failure('--vs cannot be combined with --save: brief-derived cases belong to neither skill\'s folder.');
+      if (args.triggersOnly) return failure('--vs cannot be combined with --triggers-only: trigger evals are per-skill, and head-to-head is execution only.');
+      // Cases come from the brief in this mode, so --no-gen would leave the run with zero
+      // cases — and a zero-row expectation reports `complete` (engine §7.1), i.e. a clean
+      // report over no evidence.
+      if (args.noGen) return failure('--vs cannot be combined with --no-gen: head-to-head cases are generated from the shared brief, so --no-gen would run zero cases.');
+    }
+    // §7: the comparison is the noisier quantity, and reps are the cheapest mitigation.
+    const k = args.k ?? (headToHead ? 5 : 3);
     if (!Number.isInteger(k) || k < 1) return failure('--k must be a positive integer.');
     const store = args.config ?? createConfigStore();
     const runner = args.runner ?? systemRunner;
@@ -75,6 +94,9 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
     const team = await readTeam(clone);
     const record = await findSkill(clone, teamName, args.ref);
     if (!record) return failure(`No skill named or identified by ${args.ref} exists in team ${teamName}.`);
+    const rivalRecord = args.vs === undefined ? undefined : await findSkill(clone, teamName, args.vs);
+    if (args.vs !== undefined && !rivalRecord) return failure(`No skill named or identified by ${args.vs} exists in team ${teamName}.`);
+    if (rivalRecord && rivalRecord.id === record.id) return failure(`--vs ${args.vs} resolves to the same skill as ${args.ref}; a head-to-head needs two different skills.`);
 
     // Pin the evaluated version and materialize its immutable snapshot BEFORE anything reads
     // skill content: a concurrent sync can refresh the clone mid-run, and the receipt's tree
@@ -102,6 +124,24 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
       return failure(`Hygiene failed for ${record.name}:\n${error.message}`);
     }
 
+    // §1: the rival is always a committed version — mixing an uncommitted working tree into
+    // one side of a comparison makes the result unreproducible, and only one source can be
+    // --working anyway. Hygiene refuses name which of the two trees failed.
+    let rival: { record: NonNullable<typeof rivalRecord>; dir: string; version: string } | undefined;
+    if (rivalRecord) {
+      const rivalVersion = await resolveVersion(clone, rivalRecord.name, undefined, runner);
+      const rivalDir = await materializeVersion(store, teamName, clone, rivalRecord.name, rivalVersion, runner);
+      const rivalFiles = await sourceFiles(rivalDir);
+      try {
+        reportHygieneWarnings((line) => io.print(line), assessHygiene(rivalRecord.name, rivalFiles, team.policy.skill_license, true));
+      } catch (error) {
+        if (!(error instanceof HygieneRefused)) throw error;
+        reportHygieneWarnings((line) => io.print(line), error.assessment);
+        return failure(`Hygiene failed for the rival skill ${rivalRecord.name}:\n${error.message}`);
+      }
+      rival = { record: rivalRecord, dir: rivalDir, version: rivalVersion };
+    }
+
     const model = args.model ?? DEFAULT_MODEL;
     const preflight = await (args.preflight ?? systemPreflight)(model);
     if (!preflight.ok) return failure(preflight.error);
@@ -115,7 +155,8 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
     await mkdir(scratch, { recursive: true, mode: 0o700 });
 
     const wantsCases = !args.triggersOnly;
-    const wantsTriggers = !args.executionOnly;
+    // §1.2: --vs implies --execution-only; trigger evals are per-skill and catalog-wide.
+    const wantsTriggers = !args.executionOnly && !headToHead;
     const authoredCasesDir = join(candidateDir, 'evals', 'cases');
     const authoredCaseFiles = (await optionalDirectory(authoredCasesDir)).filter((name) => /\.ya?ml$/i.test(name)).sort();
     const authoredTrigger = candidateFiles.files.has('evals/triggers.yaml');
@@ -175,8 +216,12 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
       const selected = args.case === undefined ? caseFiles : caseFiles.filter((file) => file.replace(/\.ya?ml$/i, '') === args.case);
       if (args.case !== undefined && selected.length === 0) return failure(`No eval case named ${args.case} for ${record.name}.`);
       caseNames.push(...selected.map((file) => file.replace(/\.ya?ml$/i, '')));
-      const incumbent = await materializeIncumbent(store, teamName, clone, { name: record.name, id: record.id }, version, runner);
-      const opponents = incumbent === undefined ? 1 : 2;
+      // §2.1: the incumbent arm is skipped entirely in head-to-head — not materialized, and
+      // `candidate-vs-incumbent` is not produced. Opponents are baseline and rival.
+      const incumbent = rival !== undefined
+        ? undefined
+        : await materializeIncumbent(store, teamName, clone, { name: record.name, id: record.id }, version, runner);
+      const opponents = rival !== undefined || incumbent !== undefined ? 2 : 1;
       // Includes every selected authored case before requirement probes or setup failures.
       expectedRows = selected.length * k * opponents;
       for (const file of selected) {
@@ -186,7 +231,15 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
         const output = await runCase(
           { agent: args.agent ?? systemAgent, rng, model, judgeModel: args.judgeModel ?? model, log: (line) => io.print(line) },
           parsed.value,
-          { k, caseDir: casesDir, arms: { baseline: null, candidate: { name: record.name, dir: candidateDir }, ...(incumbent === undefined ? {} : { incumbent: { name: record.name, dir: incumbent } }) }, scratch, transcriptDir },
+          {
+            k, caseDir: casesDir, scratch, transcriptDir,
+            arms: {
+              baseline: null,
+              candidate: { name: record.name, dir: candidateDir },
+              ...(incumbent === undefined ? {} : { incumbent: { name: record.name, dir: incumbent } }),
+              ...(rival === undefined ? {} : { rival: { name: rival.record.name, dir: rival.dir } }),
+            },
+          },
         );
         rows.push(...output.rows); arms.push(...output.arms);
         if (output.skipped) environmentSkips[name] = output.skipped;
@@ -253,7 +306,12 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
       );
       io.print(`Committed eval receipt ${committedPath}.`);
     }
-    return success({ team: teamName, id: record.id, name: record.name, runDir, ccVersion: preflight.value.ccVersion, executionStatus: summary.execution_status, ...(committedPath === undefined ? {} : { receiptPath: committedPath }) });
+    return success({
+      team: teamName, id: record.id, name: record.name, runDir, ccVersion: preflight.value.ccVersion,
+      executionStatus: summary.execution_status,
+      ...(committedPath === undefined ? {} : { receiptPath: committedPath }),
+      ...(rival === undefined ? {} : { rival: { id: rival.record.id, name: rival.record.name, version: rival.version } }),
+    });
   } catch (error) { return failure(error instanceof Error ? error.message : String(error)); }
 }
 
