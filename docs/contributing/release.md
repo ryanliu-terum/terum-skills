@@ -53,7 +53,7 @@ Runs only when the plan says `publish`. It installs with `npm ci`, runs `npm run
 
 Before packing it runs `npm pkg set gitHead=<sha>` and restores `package.json` afterwards. npm records `gitHead` only when publishing from a directory with a real `.git`, and a tarball publish would otherwise leave the registry with no link back to a commit. That stamped `gitHead` is the source evidence the planner and the drift audit require.
 
-The tarball is then inspected. It must contain `package.json`, `README.md`, `SECURITY.md`, `LICENSE`, `NOTICE`, `dist/index.js` and `dist/claude/skills/terum-skills/SKILL.md`, and no path may contain `__tests__` or start with `src/`. `SECURITY.md` and the shipped manual are what make this check stricter than the equivalent one in `ci.yml`, which requires neither (`ci.yml:84`). The packed tarball is then installed into a fresh throwaway project and run from a foreign directory, and uploaded as the `release-tarball` artifact with the digest that `publish` later compares against.
+The tarball is then inspected. It must contain `package.json`, `README.md`, `SECURITY.md`, `LICENSE`, `NOTICE`, `dist/index.js`, `dist/claude/skills/<name>/SKILL.md` for each of the eight bundled skills and `dist/claude/hooks/terum-skills-edit.mjs`, and no path may contain `__tests__` or start with `src/`. `SECURITY.md` and the shipped skills are what make this check stricter than the equivalent one in `ci.yml`, which requires neither (`ci.yml:84`). The packed tarball is then installed into a fresh throwaway project and run from a foreign directory, and uploaded as the `release-tarball` artifact with the digest that `publish` later compares against.
 
 ### desktop
 

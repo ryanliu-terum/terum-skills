@@ -11,7 +11,7 @@ Everything is opt-in at `terum-skills setup`, each with its own y/N, and everyth
 | Piece | When it runs | What it runs | What it touches |
 | --- | --- | --- | --- |
 | Session hook | Once per Claude Code session start, in the background, at most once an hour per team | The copy of the CLI that set it up (see *Pinned, not latest*) with `sync --hook` | Fetches your team's private git repository into `~/.terum/skills`; refreshes skills it placed under `~/.claude/skills/` and the two files below; uploads nothing |
-| `/terum-skills` skill | Only when Claude Code decides the skill applies, or you invoke it | The CLI verbs the skill describes, in the same pinned spelling | Whatever the verb does; verbs that ask a question are handed to your terminal instead |
+| The eight skills | Only when Claude Code or Codex decides one applies, or you invoke it | The CLI verb the skill describes, in the same pinned spelling | Whatever the verb does; verbs that ask a question are handed to your terminal instead |
 | Edit hook | After Claude Code writes or edits a file | A small script placed under `~/.terum/skills`, run with the `node` on your PATH | Prints one reminder when the file is inside a `.claude/skills/` folder; writes nothing |
 | Desktop app | When you open it | The app bundle, which drives the same CLI as a separate process | The same paths as the CLI |
 
@@ -20,11 +20,11 @@ updates your copy; you run it.
 
 ## Pinned, not latest
 
-The session hook and the placed `/terum-skills` skill name the copy of the CLI that installed them:
+The session hook and the placed skills name the copy of the CLI that installed them:
 the bare `terum-skills` binary when you installed the package globally, otherwise
 `npx -y terum-skills@<version>` with the exact version that ran `setup`. Nothing on this machine
 fetches a newer CLI at session start. A newer release reaches you when you update the package
-yourself and, for the pinned `npx` spelling, re-run `setup` so the hook and the skill move with it.
+yourself and, for the pinned `npx` spelling, re-run `setup` so the hook and the skills move with it.
 
 Releases before 0.21 wrote `npx -y terum-skills@latest` into the hook. The first session hook run of
 0.21 or later re-points that entry at the running copy, once, and says so on stderr; it edits only
