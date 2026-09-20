@@ -66,7 +66,9 @@ export interface BatchItem<R = void> { mutate: Mutate<R>; message: string; }
 /** `committed` and `skipped` carry the caller's index, so a caller can map an outcome back to what it asked for. */
 export interface BatchOutcome<R = void> {
   committed: { index: number; returned: R }[];
-  skipped: { index: number; reason: string }[];
+  /** `noop` separates "this item had nothing left to write" - the record is already what the caller
+   *  wants, which is success - from a mutation the tree refused, which is not. */
+  skipped: { index: number; reason: string; noop: boolean }[];
   changed: boolean;
   pushedTo: string;
 }
@@ -383,7 +385,7 @@ async function safeWriteBatch<R = void>(root: string, remote: string, runner: Ru
       // re-runs every mutation against the freshly reset tree, so results kept from a previous
       // attempt would double-count silently.
       const committed: { index: number; returned: R }[] = [];
-      const skipped: { index: number; reason: string }[] = [];
+      const skipped: { index: number; reason: string; noop: boolean }[] = [];
       for (const [index, item] of items.entries()) {
         if (compromised) throw new Error(lostLock(root));
         const staged = (await requireGit(['ls-files', '--stage', '-z'])).stdout.split('\0').filter(Boolean);
@@ -398,12 +400,12 @@ async function safeWriteBatch<R = void>(root: string, remote: string, runner: Ru
         let returned: R;
         try {
           returned = item.mutate(tree);
-          if (tree.changedPaths.length === 0) { skipped.push({ index, reason: 'nothing to write' }); continue; }
+          if (tree.changedPaths.length === 0) { skipped.push({ index, reason: 'nothing to write', noop: true }); continue; }
           guard(tree, options);
         } catch (error) {
           // The item is out of this batch; the rest of the batch is unaffected. The tree it built
           // was in memory only, so there is nothing on disk to undo before the next item.
-          skipped.push({ index, reason: error instanceof Error ? error.message : String(error) });
+          skipped.push({ index, reason: error instanceof Error ? error.message : String(error), noop: false });
           continue;
         }
         const changed = tree.changedPaths;

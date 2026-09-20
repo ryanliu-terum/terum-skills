@@ -770,7 +770,7 @@ describe('safeWriteBatch', () => {
     ];
     const outcome = await openTeamRepo(clone, fixture.bare, countingRunner(counts)).safeWriteBatch(items, { action: 'install', handle: 'me' });
     expect(outcome.committed.map((entry) => entry.index)).toEqual([0, 2]);
-    expect(outcome.skipped).toEqual([{ index: 1, reason: 'no SKILL.md' }]);
+    expect(outcome.skipped).toEqual([{ index: 1, reason: 'no SKILL.md', noop: false }]);
     expect(counts.push).toBe(1);
     const log = (await git(['log', '--format=%s', 'origin/main'], clone)).split('\n').filter(Boolean);
     expect(log).toContain('me: install first');
@@ -784,7 +784,7 @@ describe('safeWriteBatch', () => {
     const counts = { push: 0, fetch: 0 };
     const before = await originSha(clone);
     const outcome = await openTeamRepo(clone, fixture.bare, countingRunner(counts)).safeWriteBatch([{ mutate: () => undefined, message: 'me: install nothing' }], { action: 'install', handle: 'me' });
-    expect(outcome).toMatchObject({ changed: false, committed: [], skipped: [{ index: 0, reason: 'nothing to write' }] });
+    expect(outcome).toMatchObject({ changed: false, committed: [], skipped: [{ index: 0, reason: 'nothing to write', noop: true }] });
     expect(counts.push).toBe(0);
     expect(await originSha(clone)).toBe(before);
   });
