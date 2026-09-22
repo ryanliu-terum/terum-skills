@@ -12,7 +12,7 @@ import { COMMUNITY_URL } from '../lib/community.js';
 import { ConfigStore, createConfigStore } from '../lib/config.js';
 import { preflight as systemPreflight } from '../lib/evals/agent.js';
 import { defaultHookOptions, HookOptions, offerHook as defaultOfferHook } from '../lib/hook.js';
-import { defaultWrapperOptions, offerWrapper as defaultOfferWrapper } from '../lib/wrapper.js';
+import { defaultWrapperOptions, placeManagedSkills as defaultPlaceManagedSkills } from '../lib/wrapper.js';
 import type { WrapperOptions } from '../lib/wrapper.js';
 import { defaultEditHookOptions, type EditHookOptions, offerEditHook as defaultOfferEditHook } from '../lib/editHook.js';
 import { MAX_SELECT_ATTEMPTS, Prompter } from '../lib/prompt.js';
@@ -38,7 +38,7 @@ export interface SetupVerbs {
   app: typeof runApp;
   invite: typeof invite;
   offerHook: typeof defaultOfferHook;
-  offerWrapper: typeof defaultOfferWrapper;
+  placeManagedSkills: typeof defaultPlaceManagedSkills;
   offerEditHook: typeof defaultOfferEditHook;
   eval: typeof evalRun;
   reconcile: typeof runReconcile;
@@ -70,7 +70,7 @@ export interface SetupArgs extends WithForm {
   home?: string;
   cwd?: string;
   hook?: HookOptions;
-  /** Where the bundled terum-skills skills are offered from and placed (test knob). */
+  /** Where the bundled terum-skills skills are read from and placed (test knob). */
   wrapper?: WrapperOptions;
   editHook?: Partial<EditHookOptions>;
   communityUrl?: string;
@@ -91,7 +91,7 @@ export interface SetupResult {
 const WELCOME = [
   'Welcome to terum-skills.',
   "Your team's skills live in one private git repository the team controls; each member installs what they want and publishes local skills explicitly.",
-  'This wizard helps you create a team, join one, invite teammates, and offer the session hook and the terum-skills skills for Claude Code and Codex and a reminder to publish a skill after Claude edits one; re-run it any time to continue, and leave the invitation question blank to skip it.',
+  'This wizard helps you create a team, join one, invite teammates, place the terum-skills skills for Claude Code and Codex, and offer the session hook and a reminder to publish a skill after Claude edits one; re-run it any time to continue, and leave the invitation question blank to skip it.',
 ];
 
 export const PROJECTS_QUESTION = 'Add a project?';
@@ -143,7 +143,7 @@ function unfinishedAtInvite(teamName: string, invited: readonly string[], form: 
     invited.length === 0
       ? `Team ${teamName} is set up; no invitation was sent.`
       : `Team ${teamName} is set up and ${invited.length} invitation${invited.length === 1 ? '' : 's'} ${invited.length === 1 ? 'was' : 'were'} sent; that stands.`,
-    `Setup stopped here, so the project, eval, session hook, terum-skills skills and edit-hook steps were not offered — run \`${invocation(form, 'setup')}\` again to finish.`,
+    `Setup stopped here, so the project, eval, session hook, terum-skills skills and edit-hook steps were not reached — run \`${invocation(form, 'setup')}\` again to finish.`,
   ];
 }
 
@@ -155,7 +155,7 @@ export async function run(args: SetupArgs, io: Prompter): Promise<Result<SetupRe
   const role: SetupResult['role'] = args.target === undefined ? 'creator' : 'joiner';
   const store = args.config ?? createConfigStore();
   const runner = args.runner ?? systemRunner;
-  const verbs: SetupVerbs = { team, app: runApp, invite, offerHook: defaultOfferHook, offerWrapper: defaultOfferWrapper, offerEditHook: defaultOfferEditHook, eval: evalRun, reconcile: runReconcile, preflight: systemPreflight, ...args.verbs };
+  const verbs: SetupVerbs = { team, app: runApp, invite, offerHook: defaultOfferHook, placeManagedSkills: defaultPlaceManagedSkills, offerEditHook: defaultOfferEditHook, eval: evalRun, reconcile: runReconcile, preflight: systemPreflight, ...args.verbs };
   const steps: SetupResult['steps'] = {};
   let teamName = '';
   let remote = '';
@@ -508,12 +508,16 @@ export async function run(args: SetupArgs, io: Prompter): Promise<Result<SetupRe
 
     // The terum-skills skills ship inside this package, and setup is the one onboarding step
     // (npm-first, Ryan 2026-09-08), so the skills that let Claude Code and Codex run these verbs are
-    // offered here, right after the hook and in the hook's shape: one offer with its own y/N on the same
-    // io, copies the tool recognises by their frontmatter marker (refreshed or added on a re-run without
-    // asking, removed by machine uninstall), and anything else at a destination left alone (src/lib/wrapper.ts).
+    // placed here, right after the hook, into the global roots (~/.claude/skills and, where ~/.codex
+    // exists, ~/.codex/skills) without a question (Teddy, 2026-09-21; the y/N offer that defaulted to
+    // No is gone): copies the tool recognises by their frontmatter marker, written or refreshed on
+    // every run and removed by machine uninstall, with anything else at a destination named and left
+    // alone (src/lib/wrapper.ts). The two hooks keep their own y/N.
     section('wrapper');
-    const wrapperOutcome = await verbs.offerWrapper(io, { ...defaultWrapperOptions(args.home, args.form), ...args.wrapper });
-    steps.wrapper = wrapperOutcome === 'installed' || wrapperOutcome === 'replaced' ? 'done' : 'skipped';
+    const wrapperOutcome = await verbs.placeManagedSkills(io, { ...defaultWrapperOptions(args.home, args.form), ...args.wrapper });
+    // `present` is the step having run and found every copy in place, so it is done like a write is; `skipped` is
+    // a step that placed nothing (no bundle, every name foreign, or every write failed).
+    steps.wrapper = wrapperOutcome === 'installed' || wrapperOutcome === 'replaced' || wrapperOutcome === 'present' ? 'done' : 'skipped';
 
     // The edit hook gets its OWN y/N, deliberately, instead of riding the session hook's. That one
     // fetches on a schedule; this one runs after every Write and Edit the agent makes and reads the

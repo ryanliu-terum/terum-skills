@@ -1,7 +1,8 @@
+import type { PathLike } from 'node:fs';
 import { mkdir, readFile, readdir, symlink, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { BUNDLED_SKILLS, defaultWrapperOptions, fsForTests, inspectManagedSkill, installManagedSkill, isManagedFrontmatter, isManagedSkill, listManagedSkills, managedSkillInventory, managedSkillRoots, managedSkillStates, offerWrapper, readBundledSkills, refreshManagedSkills, removeManagedSkill, renderWrapper } from '../wrapper.js';
+import { BUNDLED_SKILLS, defaultWrapperOptions, fsForTests, inspectManagedSkill, installManagedSkill, isManagedFrontmatter, isManagedSkill, listManagedSkills, managedSkillInventory, managedSkillRoots, managedSkillStates, placeManagedSkills, readBundledSkills, refreshManagedSkills, removeManagedSkill, renderWrapper } from '../wrapper.js';
 import { NPX_PREFIX, pinnedPrefix } from '../invocation.js';
 import { packageVersion } from '../package.js';
 import { BUNDLED_SKILL_SOURCE, CANONICAL_SKILLS, ScriptedPrompter, SYMLINKS_SUPPORTED, temporaryDirectory, wrapperFor } from './fixtures.js';
@@ -29,7 +30,6 @@ async function fresh(codex = true) {
   const names = [...bundled.keys()].sort();
   return { root, home, options, claude: options.roots[0]!.root, codexRoot: options.roots[1]!.root, bundled, names };
 }
-const brace = (root: string, names: string[]) => `${root}/{${names.join(', ')}}`;
 
 describe('the bundled terum-skills skills', () => {
   it('reads marked canonical entries and skips missing, unmarked, and misnamed entries', async () => {
@@ -141,7 +141,9 @@ describe('the bundled terum-skills skills', () => {
     expect(renderWrapper(manual, NPX_PREFIX)).toBe(manual);
     const bare = await fresh(); const options = { ...bare.options, prefix: 'terum-skills' };
     for (const raw of bare.bundled.values()) expect(raw).toContain(NPX_PREFIX);
-    expect(await offerWrapper(new ScriptedPrompter([], [true]), options)).toBe('installed');
+    const placing = new ScriptedPrompter();
+    expect(await placeManagedSkills(placing, options)).toBe('installed');
+    expect(placing.asked).toEqual([]);
     for (const root of [bare.claude, bare.codexRoot]) for (const name of bare.names) {
       const placed = await readFile(join(root, name, 'SKILL.md'), 'utf8');
       expect(placed, name).toBe(renderWrapper(bare.bundled.get(name)!, 'terum-skills'));
@@ -154,7 +156,7 @@ describe('the bundled terum-skills skills', () => {
     // The same files judged by a copy pinned to a version: outdated, and a refresh rewrites them in that spelling.
     const pinned = { ...bare.options, prefix: 'npx -y terum-skills@9.9.9' };
     expect(await states(pinned)).toEqual(all('outdated'));
-    expect((await refreshManagedSkills(pinned)).sort()).toEqual([bare.claude, bare.codexRoot].flatMap((root) => bare.names.map((name) => join(root, name))).sort());
+    expect((await refreshManagedSkills(pinned)).written.sort()).toEqual([bare.claude, bare.codexRoot].flatMap((root) => bare.names.map((name) => join(root, name))).sort());
     expect(await readFile(join(bare.claude, 'terum-skills', 'SKILL.md'), 'utf8')).toContain('npx -y terum-skills@9.9.9 ');
     expect(await states(pinned)).toEqual(all('current'));
     expect(await states(options)).toEqual(all('outdated'));
@@ -165,31 +167,69 @@ describe('the bundled terum-skills skills', () => {
     const missing = { ...options, bundle: join(root, 'nowhere') };
     expect(await managedSkillStates(missing)).toEqual({ kind: 'unavailable', bundle: missing.bundle });
     const io = new ScriptedPrompter([], []);
-    expect(await offerWrapper(io, missing)).toBe('unavailable');
+    expect(await placeManagedSkills(io, missing)).toBe('unavailable');
     expect(io.asked).toEqual([]);
     expect(io.lines).toEqual([`The terum-skills skills are not bundled in this copy of terum-skills (expected under ${missing.bundle}); skipped.`]);
-    expect(await refreshManagedSkills(missing)).toEqual([]);
+    expect(await refreshManagedSkills(missing)).toEqual({ written: [], failed: [] });
     expect(await listManagedSkills(claude)).toEqual([]);
   });
 
-  it('asks exactly once for a first install and subsequently reports or refreshes without asking', async () => {
+  it('names a foreign folder at every bundled name, asks nothing and writes nothing', async () => {
+    const { options, claude, codexRoot, names } = await fresh(false);
+    for (const name of names) { await mkdir(join(claude, name), { recursive: true }); await writeFile(join(claude, name, 'SKILL.md'), SOMEONE_ELSES); }
+    const io = new ScriptedPrompter();
+    expect(await placeManagedSkills(io, options)).toBe('foreign');
+    expect(io.asked).toEqual([]);
+    expect(io.lines).toEqual([`No ${dirname(codexRoot)} on this machine; Codex skills skipped.`, ...names.map((name) => `${join(claude, name)} exists and is not a bundled terum-skills skill (it is a different skill); left alone. Move it aside and re-run setup to install the bundled one.`)]);
+    for (const name of names) expect(await readFile(join(claude, name, 'SKILL.md'), 'utf8')).toBe(SOMEONE_ELSES);
+  });
+
+  it('names only the roots that hold a copy of ours when nothing needs writing', async () => {
+    const { options, claude, codexRoot, names } = await fresh();
+    for (const name of names) { await mkdir(join(claude, name), { recursive: true }); await writeFile(join(claude, name, 'SKILL.md'), SOMEONE_ELSES); }
+    expect(await placeManagedSkills(new ScriptedPrompter(), options)).toBe('installed');
+    const io = new ScriptedPrompter();
+    expect(await placeManagedSkills(io, options)).toBe('present');
+    expect(io.lines).toEqual([...names.map((name) => `${join(claude, name)} exists and is not a bundled terum-skills skill (it is a different skill); left alone. Move it aside and re-run setup to install the bundled one.`), `The terum-skills skills at ${codexRoot} are current.`]);
+  });
+
+  it('names a write that fails, keeps writing the rest, and never throws; the hook refresh reports the same failure', async () => {
+    const { options, claude, codexRoot, names } = await fresh();
+    const realOpen = fsForTests.open;
+    const blocked = join(codexRoot, 'eval', '.SKILL.md');
+    fsForTests.open = (async (file: PathLike, flags?: string | number) => {
+      if (String(file).startsWith(blocked)) throw Object.assign(new Error('disk full (simulated)'), { code: 'ENOSPC' });
+      return realOpen(file, flags);
+    }) as typeof fsForTests.open;
+    try {
+      const first = new ScriptedPrompter();
+      expect(await placeManagedSkills(first, options)).toBe('installed');
+      expect(first.asked).toEqual([]);
+      expect(first.lines).toEqual([`Installed the terum-skills skills at ${claude}: ${names.join(', ')}.`, `Installed the terum-skills skills at ${codexRoot}: ${names.filter((name) => name !== 'eval').join(', ')}.`, `Could not install the terum-skills skill eval at ${codexRoot}: disk full (simulated)`]);
+      const again = new ScriptedPrompter();
+      expect(await placeManagedSkills(again, options)).toBe('failed');
+      expect(again.lines).toEqual([`Could not install the terum-skills skill eval at ${codexRoot}: disk full (simulated)`]);
+      expect(await refreshManagedSkills(options)).toEqual({ written: [], failed: [`${join(codexRoot, 'eval')}: disk full (simulated)`] });
+    } finally { fsForTests.open = realOpen; }
+    const healed = new ScriptedPrompter();
+    expect(await placeManagedSkills(healed, options)).toBe('installed');
+    expect(healed.lines).toEqual([`Installed the terum-skills skills at ${codexRoot}: eval.`]);
+  });
+
+  it('installs every skill on a fresh machine without asking, then reports or refreshes without asking', async () => {
     const { options, claude, codexRoot, names, bundled } = await fresh();
-    const question = `Install the terum-skills skills for Claude Code and Codex so they can run terum-skills for you? (writes ${brace(claude, names)} and ${brace(codexRoot, names)})`;
-    const declined = new ScriptedPrompter([], [false]);
-    expect(await offerWrapper(declined, options)).toBe('declined');
-    expect(declined.asked).toEqual([question]);
-    expect(declined.lines).toEqual(['Skipped the terum-skills skills; re-run setup to install them later.']);
-    const accepted = new ScriptedPrompter([], [true]);
-    expect(await offerWrapper(accepted, options)).toBe('installed');
-    expect(accepted.asked).toEqual([question]);
-    expect(accepted.lines).toEqual([`Installed the terum-skills skills at ${claude}: ${names.join(', ')}.`, `Installed the terum-skills skills at ${codexRoot}: ${names.join(', ')}.`]);
+    const placed = new ScriptedPrompter();
+    expect(await placeManagedSkills(placed, options)).toBe('installed');
+    expect(placed.asked).toEqual([]);
+    expect(placed.lines).toEqual([`Installed the terum-skills skills at ${claude}: ${names.join(', ')}.`, `Installed the terum-skills skills at ${codexRoot}: ${names.join(', ')}.`]);
     for (const root of [claude, codexRoot]) for (const name of names) expect(await readFile(join(root, name, 'SKILL.md'), 'utf8')).toBe(bundled.get(name));
-    const again = new ScriptedPrompter([], []);
-    expect(await offerWrapper(again, options)).toBe('present');
+    const again = new ScriptedPrompter();
+    expect(await placeManagedSkills(again, options)).toBe('present');
+    expect(again.asked).toEqual([]);
     expect(again.lines).toEqual([`The terum-skills skills at ${claude} and ${codexRoot} are current.`]);
     await writeFile(join(codexRoot, 'terum-skills', 'SKILL.md'), OLD_COPY);
-    const refreshed = new ScriptedPrompter([], []);
-    expect(await offerWrapper(refreshed, options)).toBe('replaced');
+    const refreshed = new ScriptedPrompter();
+    expect(await placeManagedSkills(refreshed, options)).toBe('replaced');
     expect(refreshed.asked).toEqual([]);
     expect(refreshed.lines).toEqual([`Updated the terum-skills skills at ${codexRoot}: terum-skills.`]);
   });
@@ -199,26 +239,26 @@ describe('the bundled terum-skills skills', () => {
     await mkdir(join(migration.claude, 'terum-skills'), { recursive: true });
     await writeFile(join(migration.claude, 'terum-skills', 'SKILL.md'), OLD_COPY);
     const migrated = new ScriptedPrompter([], []);
-    expect(await offerWrapper(migrated, migration.options)).toBe('installed');
+    expect(await placeManagedSkills(migrated, migration.options)).toBe('installed');
     expect(migrated.asked).toEqual([]);
     const others = migration.names.filter((name) => name !== 'terum-skills');
     expect(migrated.lines).toEqual([`Installed the terum-skills skills at ${migration.claude}: ${others.join(', ')}.`, `Updated the terum-skills skills at ${migration.claude}: terum-skills.`, `Installed the terum-skills skills at ${migration.codexRoot}: ${migration.names.join(', ')}.`]);
     const absentCodex = await fresh(false);
-    const io = new ScriptedPrompter([], [true]);
-    expect(await offerWrapper(io, absentCodex.options)).toBe('installed');
-    expect(io.asked).toEqual([`Install the terum-skills skills for Claude Code so it can run terum-skills for you? (writes ${brace(absentCodex.claude, absentCodex.names)})`]);
+    const io = new ScriptedPrompter();
+    expect(await placeManagedSkills(io, absentCodex.options)).toBe('installed');
+    expect(io.asked).toEqual([]);
     expect(io.lines).toEqual([`No ${dirname(absentCodex.codexRoot)} on this machine; Codex skills skipped.`, `Installed the terum-skills skills at ${absentCodex.claude}: ${absentCodex.names.join(', ')}.`]);
   });
 
   it('refreshes only roots that already hold a marked copy and inventories marked and foreign entries', async () => {
     const { options, claude, codexRoot, names, bundled } = await fresh();
-    expect(await refreshManagedSkills(options)).toEqual([]);
+    expect(await refreshManagedSkills(options)).toEqual({ written: [], failed: [] });
     await mkdir(join(claude, 'terum-skills'), { recursive: true });
     await writeFile(join(claude, 'terum-skills', 'SKILL.md'), OLD_COPY);
     const theirs = join(claude, 'skill-info');
     await mkdir(theirs);
     await writeFile(join(theirs, 'SKILL.md'), SOMEONE_ELSES);
-    expect((await refreshManagedSkills(options)).sort()).toEqual(names.filter((name) => name !== 'skill-info').map((name) => join(claude, name)).sort());
+    expect((await refreshManagedSkills(options)).written.sort()).toEqual(names.filter((name) => name !== 'skill-info').map((name) => join(claude, name)).sort());
     await installManagedSkill(claude, 'eval', bundled.get('eval')!);
     await mkdir(join(claude, 'renamed-copy'));
     await writeFile(join(claude, 'renamed-copy', 'SKILL.md'), OLD_COPY);

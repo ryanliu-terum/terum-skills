@@ -21,7 +21,9 @@ export function printedSetupStep(line:string):SetupStep|null {
   ||line.startsWith('The team has no shared skills yet')||line.startsWith('Could not read the current skill versions')||line.startsWith('No shared skill could be checked'))return 'evals';
  if(line.startsWith('Feedback and requests:'))return 'community';
  if(line.includes('session hook'))return 'hook';
- if(line.includes('/terum-skills Claude Code skill')||line.includes('/terum-skills skill'))return 'wrapper';
+ // The skills step, in its old single-skill wording and in the eight-skills wording setup prints now that it places
+ // them without asking: every line names a "terum-skills skill", and the Codex-skipped line is its as well.
+ if(line.includes('/terum-skills Claude Code skill')||line.includes('terum-skills skill')||line.endsWith('Codex skills skipped.'))return 'wrapper';
  if(line.startsWith('Members:')||line.startsWith('Repository:')||line.startsWith('README:'))return 'done';
  return null;
 }
