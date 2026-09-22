@@ -15,7 +15,7 @@ import { refuseSecondTeam, teamByRemote } from '../lib/auth.js';
 import { normalizeRemote } from '../lib/remote.js';
 import { fromError, CancelledError, RefusedError, Result, success } from '../lib/result.js';
 import { Runner, systemRunner } from '../lib/runner.js';
-import { Config, Destination, Team, describeRaw, handleSchema, parseOrExplain, parseSkillFrontmatter, sameScope } from '../lib/schema.js';
+import { Config, Destination, Team, describeRaw, handleSchema, insideRoot, parseOrExplain, parseSkillFrontmatter, sameScope } from '../lib/schema.js';
 import { canonicalDigest, findSkill, readPerson, readTeam, skillRecords, SkillRecord } from '../lib/skills.js';
 import { openTeamRepo, SafeWriteOptions, lockWait } from '../lib/teamRepo.js';
 import { recordProfileEntry, writePersonFile } from '../lib/profile-entry.js';
@@ -457,7 +457,11 @@ export async function resolveDestination(store: ConfigStore, teamJson: Team, pac
     const origin = await opts.runner.run('git', ['remote', 'get-url', 'origin'], { cwd: root });
     if (origin.code === 0 && remotes.some(remote => normalizeRemote(remote) === normalizeRemote(origin.stdout.trim()))) matches.push(index + 1);
   }
-  const defaultChoice = matches.length === 1 ? choices[matches[0]!] : matches.length > 1 ? undefined : global;
+  // A sub-project answers its parent's origin (git walks up to the same repository), so among nested
+  // matches only the outermost one is the checkout the team project names; two unrelated matches still
+  // offer no default.
+  const outermost = matches.filter(match => !matches.some(other => other !== match && insideRoot(roots[match - 1]!, roots[other - 1]!)));
+  const defaultChoice = outermost.length === 1 ? choices[outermost[0]!] : outermost.length > 1 ? undefined : global;
   const selected = await io.select('Install to', choices, defaultChoice);
   const index = choices.indexOf(selected);
   if (index < 0) throw new Error('Invalid install destination.');

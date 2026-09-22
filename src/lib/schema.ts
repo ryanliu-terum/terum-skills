@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { basename, dirname } from 'node:path';
+import { basename, dirname, relative, sep } from 'node:path';
 import { inspect } from 'node:util';
 import { z } from 'zod';
 import YAML from 'yaml';
@@ -176,27 +176,101 @@ export const libraryProjectSchema = z.object({
   label: z.string().min(1),
   /** Absent on entries migrated from `checkouts`: that shape never recorded when a root was added, and inventing a date would put a false fact on the Library. */
   added_at: z.string().optional(),
+  /**
+   * Present when the person chose the label (`project rename`). A derived label is recomputed on every
+   * add so the set stays readable; a chosen one is kept as typed, and the derived labels move out of
+   * its way instead.
+   */
+  renamed_at: z.string().optional(),
 }).passthrough();
 export type LibraryProject = z.infer<typeof libraryProjectSchema>;
 
+/** `project rename`: display text for one Library row. `Global` is the global root's own name in every list that also shows projects. */
+export const LIBRARY_PROJECT_LABEL_RULE = 'a project name is 1-64 characters and is not Global';
+export function isLibraryProjectLabel(value: string): boolean {
+  return value.trim() === value && value.length >= 1 && value.length <= 64 && value.toLowerCase() !== 'global';
+}
+
+/** True when `path` sits strictly inside `root`: the boundary separator is required, so `/repo-two` is not inside `/repo`, and a root is never inside itself. */
+export function insideRoot(path: string, root: string): boolean {
+  return path !== root && path.startsWith(root.endsWith(sep) ? root : root + sep);
+}
+
 /**
- * §3.6's label rule, applied to the whole set rather than to one new entry: `basename(root)`,
- * qualified by the parent when two roots share a basename, and by the whole root when even that
- * collides. Positional — `projectLabels(roots)[i]` labels `roots[i]`. It is the set that has to be
- * readable, so adding `/b/web` relabels an existing `/a/web` too; two Library rows reading `web`
- * would defeat "you can always see exactly what's on each".
+ * Sub-projects: a Library project whose root sits inside another registered project's root is that
+ * project's sub-project. The tree is read off the paths every time and never stored, so it cannot
+ * disagree with the folder structure on disk. Positional — `projectParents(roots)[i]` is the root of
+ * `roots[i]`'s nearest registered ancestor, or undefined for a top-level project.
  */
-export function projectLabels(roots: readonly string[]): string[] {
+export function projectParents(roots: readonly string[]): (string | undefined)[] {
+  return roots.map((root) => {
+    let parent: string | undefined;
+    for (const candidate of roots) if (insideRoot(root, candidate) && (parent === undefined || candidate.length > parent.length)) parent = candidate;
+    return parent;
+  });
+}
+
+/**
+ * Depth-first over the project tree: each top-level item in the order given, followed by its
+ * sub-projects, recursively. Every list that shows projects (`project list`, `ls --local`, the app's
+ * sidebar) is drawn in this order, so a sub-project always sits under its parent.
+ */
+export function orderByProjectTree<T>(items: readonly T[], key: (item: T) => string, parent: (item: T) => string | undefined): { item: T; depth: number }[] {
+  const ordered: { item: T; depth: number }[] = [];
+  const visit = (of: string | undefined, depth: number): void => {
+    for (const item of items) if (parent(item) === of) { ordered.push({ item, depth }); visit(key(item), depth + 1); }
+  };
+  visit(undefined, 0);
+  // An item whose parent is not in the list (a caller passed a partial set) is still drawn, at the top level.
+  for (const item of items) if (!ordered.some((entry) => entry.item === item)) ordered.push({ item, depth: 0 });
+  return ordered;
+}
+
+/** What `libraryProjectLabels` reads: the root, and the label only when it was chosen (`renamed_at`). */
+export interface LabelledProject { root: string; label?: string; renamed_at?: string }
+
+/**
+ * §3.6's label rule, applied to the whole set rather than to one new entry, so it is the set that
+ * stays readable: adding `/b/web` relabels an existing `/a/web` too, because two Library rows
+ * reading `web` would defeat "you can always see exactly what's on each". Positional —
+ * `libraryProjectLabels(projects)[i]` labels `projects[i]`.
+ *
+ * A top-level project is its folder's name; a sub-project is its path relative to the parent project
+ * (`packages/api`), which is what "matching the file structure" means on a card. A collision
+ * (compared without case, the way a person reads two rows) is qualified by the folder above a
+ * top-level root and by the parent project's name for a sub-project, and by the whole root when
+ * even that collides. A chosen label (`renamed_at`) is kept exactly as typed and reserved: a derived
+ * label that would read the same is the one that moves.
+ */
+export function libraryProjectLabels(projects: readonly LabelledProject[]): string[] {
+  const roots = projects.map((project) => project.root);
+  const parents = projectParents(roots);
+  const chosen = projects.map((project) => project.renamed_at !== undefined && project.label ? project.label : undefined);
+  const fold = (name: string): string => name.toLowerCase();
   const tally = (names: readonly string[]): Map<string, number> => {
     const counts = new Map<string, number>();
-    for (const name of names) counts.set(name, (counts.get(name) ?? 0) + 1);
+    for (const name of names) counts.set(fold(name), (counts.get(fold(name)) ?? 0) + 1);
     return counts;
   };
-  const bases = roots.map((root) => basename(root) || root);
+  const base = (index: number): string => {
+    const parent = parents[index];
+    return parent === undefined ? basename(roots[index]!) || roots[index]! : relative(parent, roots[index]!);
+  };
+  const bases = roots.map((_, index) => chosen[index] ?? base(index));
   const byBase = tally(bases);
-  const qualified = roots.map((root, index) => byBase.get(bases[index]!)! > 1 ? `${bases[index]} (${basename(dirname(root)) || dirname(root)})` : bases[index]!);
+  const qualified = roots.map((root, index) => {
+    if (chosen[index] !== undefined || byBase.get(fold(bases[index]!)) === 1) return bases[index]!;
+    const parent = parents[index];
+    const by = parent === undefined ? basename(dirname(root)) || dirname(root) : base(roots.indexOf(parent));
+    return `${bases[index]} (${by})`;
+  });
   const byQualified = tally(qualified);
-  return roots.map((root, index) => byQualified.get(qualified[index]!)! > 1 ? root : qualified[index]!);
+  return roots.map((root, index) => chosen[index] === undefined && byQualified.get(fold(qualified[index]!))! > 1 ? root : qualified[index]!);
+}
+
+/** The label rule over bare roots: what the `checkouts` migration below has, since that shape carried no labels to keep. */
+export function projectLabels(roots: readonly string[]): string[] {
+  return libraryProjectLabels(roots.map((root) => ({ root })));
 }
 
 export const configSchema = z.object({

@@ -541,7 +541,7 @@ export async function collectLocal(store: ConfigStore, home: string, io: Prompte
 /** The Library report, exactly the lines `ls --local` has always printed, in the same order. */
 export function printLocal(io: Prompter, sections: readonly LocalSection[], discoveryProblems: readonly { path: string; reason: string }[]): void {
   for (const local of sections) {
-    io.print(`Local Claude Code skills (${printable(local.root)}; ${local.scope}${local.registered ? '; registered' : ''}):`);
+    io.print(`Local Claude Code skills (${printable(local.root)}; ${local.scope}${local.registered ? '; registered' : ''}${local.parent === undefined ? '' : `; sub-project of ${printable(local.parent)}`}):`);
     if (local.repoRoot !== undefined) io.print(`  GitHub: ${local.remote === null ? 'not connected' : local.remote.slug === null ? `not connected (origin is ${printable(local.remote.url)})` : printable(local.remote.slug)}`);
     for (const row of local.rows) io.print(`  ${printable(row.name)} — ${printable(row.state)}${row.problem === undefined ? '' : `; source problem: ${printable(row.problem)}`}; path: ${printable(row.path)}`);
     if (local.notOffered.length) {

@@ -214,3 +214,20 @@ it('keeps the Team group second on the real adapter, where a bare CLI answers no
  expect(groups).toHaveLength(2);
  expect(groups[1]).toHaveTextContent('Team');
 });
+
+
+// Sub-projects (2026-09-19): a checkout inside another draws under it, one indent step deeper, in the CLI's tree order.
+it('draws a sub-project under its parent, indented one step deeper than a top-level project',async()=>{
+ const backend=createMockBackend(),status=await backend.status();if(!status.ok)throw new Error(status.error);
+ const acme={id:'/a/acme',kind:'checkout' as const,root:'/a/acme',label:'acme',registered:true,parent:null};
+ const roots=[{id:'global',kind:'global' as const,root:'~/.claude/skills',label:'Global',registered:false,parent:null},acme,{...acme,id:'/a/acme/apps/web',root:'/a/acme/apps/web',label:'apps/web',parent:'/a/acme'},{...acme,id:'/b/other',root:'/b/other',label:'other'}];
+ vi.spyOn(backend,'status').mockResolvedValue({ok:true,value:{...status.value,roots}});
+ await openSidebar(backend,'/a/acme/apps/web');
+ const links=[screen.getByRole('link',{name:'acme'}),screen.getByRole('link',{name:'apps/web'}),screen.getByRole('link',{name:'other'})];
+ expect(links.map(a=>a.style.paddingLeft)).toEqual(['32px','48px','32px']);
+ // Tree order: the sub-project follows its parent, ahead of the next top-level project.
+ const order=[...document.querySelectorAll('a.nav-row')].map(a=>a.textContent);
+ expect(order.indexOf('apps/web')).toBe(order.indexOf('acme')+1);
+ expect(order.indexOf('other')).toBe(order.indexOf('apps/web')+1);
+ expect(links[1]).toHaveAttribute('aria-current','page');
+});

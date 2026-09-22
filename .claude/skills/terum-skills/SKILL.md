@@ -57,6 +57,8 @@ reporting the outcome. So:
   which you show as is.
 - Run from the current working directory; do not `cd`; use absolute path arguments. The Library
   reads Global and explicitly added project roots; the working directory does not add a project.
+  A registered folder inside another registered folder is that project's sub-project, named by its
+  path inside the parent; the tree is the folder structure, never a setting.
 - An italic board line `_Resolved: …_` says which skill answered a prefix, a case-insensitive match,
   or a bare invocation from inside a skill folder; keep it. A failure naming several candidates
   (`Ambiguous skill name …`) is a result: show it and ask which one.
@@ -70,7 +72,7 @@ reporting the outcome. So:
 |---|---|---|
 | `status` | nothing | show the board; exit 0 means the query succeeded, not that setup is complete. Pending work needs the matching install or removal retried, not a fetch |
 | `ls`, `ls --local`, `ls member <h>`, `ls project <n>`, `ls skill <name>` | nothing | show the board (the list-skills and skill-info skills exist for the common cases) |
-| `project add <abs-path>`, `project remove <abs-path>`, `project list` | confirm with the user before adding or forgetting a root | show the board; removing a project leaves its files and placement ledger unchanged |
+| `project add <abs-path>`, `project remove <abs-path>`, `project rename <abs-path> --to <name>`, `project list` | confirm with the user before adding, renaming, or forgetting a root | show the board, or the fenced block for `project rename`; removing a project leaves its files and placement ledger unchanged; a folder registered inside another registered folder is listed as its sub-project |
 | `search <term> [--category <c>] [--author <a>] [--project <p>]` | nothing | show the board; `No skills found.` is a result |
 | `skill fix <abs-path>` | confirm with the user, as for install: it rewrites the folder's SKILL.md | it applies the repairs with one right answer (quote a frontmatter value YAML refuses, `name` to the folder, `license` to team policy, strip invisible characters, clear an executable bit on a non-script) and prints `Still needs you` for the rest; show the fenced block |
 | `skill category <abs-path> --to <name>` | confirm with the user: it rewrites the folder's category | show the board; it rewrites `metadata.terum-category` locally and publishes nothing, so the team keeps showing the category its newest version carries until the user runs the `publish` the output prints. Any name is accepted; an off-list one gets the same advisory warning `publish` gives |

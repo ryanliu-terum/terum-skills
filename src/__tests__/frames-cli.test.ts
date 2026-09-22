@@ -22,7 +22,7 @@ const asking = (async (_args: unknown, io: Prompter) => {
 
 const INVOCATIONS: Record<string, string[]> = {
   'skill move':['skill','move','/skills/a','--to','global'], 'skill copy':['skill','copy','/skills/a','--to','global'], 'skill rename':['skill','rename','/skills/a','--to','b'], 'skill delete':['skill','delete','/skills/a'], 'skill enable':['skill','enable','/skills/a'], 'skill disable':['skill','disable','/skills/a'], 'skill fix':['skill','fix','/skills/a'], 'skill category':['skill','category','/skills/a','--to','infra'],
-  'project add': ['project', 'add'], 'project remove': ['project', 'remove', '/project'], 'project list': ['project', 'list'],
+  'project add': ['project', 'add'], 'project remove': ['project', 'remove', '/project'], 'project list': ['project', 'list'], 'project rename': ['project', 'rename', '/project', '--to', 'Payments'],
   'team project create': ['team', 'project', 'create', 'Payments'],
   'team project delete': ['team', 'project', 'delete', 'Payments'],
   'app-update': ['app-update', '--check'],

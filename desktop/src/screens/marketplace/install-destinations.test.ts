@@ -17,3 +17,14 @@ it('matches a root whose origin is any of the project\'s remotes, not only the f
   // Spec §3: the CLI matches a destination on ANY project remote; a project with two remotes must match a checkout whose origin is the second.
   expect(destinationsFor([root('one', true, 'acme/mirror')], ['acme/repo', 'acme/mirror'], { libraryProjects: true }).preselected).toBe('one');
 });
+
+
+// Sub-projects (2026-09-19): a folder inside a checkout reports the checkout's origin, so nested matches default to
+// the outermost one; only unrelated matches leave the choice open.
+it('defaults to the outermost of nested origin matches, in either order', () => {
+  const parent = root('one'), child = { ...root('one/apps/web'), parent: parent.id };
+  expect(destinationsFor([parent, child], ['acme/repo'], { libraryProjects: true }).preselected).toBe('one');
+  expect(destinationsFor([child, parent], ['acme/repo'], { libraryProjects: true }).preselected).toBe('one');
+  expect(destinationsFor([parent, child], ['acme/repo'], { libraryProjects: true }).rows.map(([label]) => label)).toEqual(['Global', 'one', 'one/apps/web']);
+  expect(destinationsFor([parent, child, root('two')], ['acme/repo'], { libraryProjects: true }).preselected).toBeNull();
+});

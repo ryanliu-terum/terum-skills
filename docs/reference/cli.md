@@ -519,7 +519,7 @@ What it does: registers a folder as a library project, so its `.claude/skills` d
 
 Asks: `Which folder?`, defaulting to the nearest git repository root above the current directory, otherwise the current directory. A typed `~` is expanded in-process.
 
-Writes: `config.projects[]` in `~/.terum/skills/config.json`. Adding a project relabels the whole set, so adding `/b/web` renames an existing `/a/web` row.
+Writes: `config.projects[]` in `~/.terum/skills/config.json`. Adding a project relabels the whole set, so adding `/b/web` renames an existing `/a/web` row. A folder inside a registered project is added as its sub-project and labelled by its path inside the parent (`Added <path> to your library as a sub-project of <label>.`); a folder above registered projects adopts them as its sub-projects and says so. The tree is read off the paths and never stored. A name chosen with `project rename` is kept; only derived labels move.
 
 Fails when: the path does not exist (`<path> does not exist.`); it is not a folder; it is inside `~/.terum/skills`; it is the Global home root (`<path> is the Global home root and cannot be added as a project.`). An already-registered path is not a failure: it prints `<path> is already in your library.` and exits 0.
 
@@ -533,7 +533,7 @@ Arguments: `<path>`, required.
 
 This command has no options beyond `-h, --help`.
 
-What it does: forgets a project. Files are left exactly where they are and the placement ledger is untouched, so skills placed under that root stay on disk and stay recorded. It prints `Removed <path> from your library.` followed by `N placements recorded under <path> stay in the ledger; uninstall-skill removes them.`
+What it does: forgets a project. Files are left exactly where they are and the placement ledger is untouched, so skills placed under that root stay on disk and stay recorded. It prints `Removed <path> from your library.` followed by `N placements recorded under <path> stay in the ledger; uninstall-skill removes them.` When registered folders sit inside the removed one it adds `N sub-projects under <path> stay in your library.`: they stay registered, drawn one level up.
 
 Asks: nothing.
 
@@ -549,13 +549,33 @@ Usage: terum-skills project list [options]
 
 Arguments: none. No options beyond `-h, --help`.
 
-What it does: prints one line per registered project, `<label> — <path>; <root state>; N skill folders`, or `none` when there are none.
+What it does: prints one line per registered project, `<label> — <path>; <root state>; N skill folders`, in tree order with a sub-project indented two spaces under the project whose folder holds it, or `none` when there are none.
 
 Asks: nothing.
 
 Writes: nothing.
 
 Fails when: the config cannot be read.
+
+### project rename
+
+```
+Usage: terum-skills project rename [options] <path>
+```
+
+Arguments: `<path>`, required.
+
+| Flag | Argument | Default | Meaning |
+| --- | --- | --- | --- |
+| `--to` | `<name>` | required | The new name: 1 to 64 characters, not `Global`. |
+
+What it does: names a Library row. It is display text and nothing else: the folder keeps its name, every path in the ledger stays as it is, and no team file changes. The name is kept until you rename again; when a later add would derive the same name, the derived label is the one qualified. It prints `Renamed <old> to <new>; the folder <path> is unchanged.`
+
+Asks: nothing.
+
+Writes: `config.projects[]` in `~/.terum/skills/config.json` (`label` and `renamed_at`).
+
+Fails when: the path is not registered (`<path> is not in your library.`); the name is empty, longer than 64 characters, or `Global` (`a project name is 1-64 characters and is not Global`); another project already carries that chosen name (`Another project is already named <name> (<path>).`).
 
 ### reconcile
 

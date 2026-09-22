@@ -56,7 +56,7 @@ A refusal does not prove nothing happened. A verb can clone, record intent or fi
 
 Verbs the agent runs in the session, because they never ask, or ask only sometimes:
 
-`status`, `ls`, `ls member`, `ls project`, `ls skill`, `ls --local`, `project add <path>`, `project remove`, `project list`, `search`, `skill fix`, `skill category`, `validate`, `update`, `app`, `app-update`, `sync`, `install`, `publish`, `invite`, `profile`, `login --set`, `team workflow-update --print`, the whole `eval` family, `eval-report` and `serve`.
+`status`, `ls`, `ls member`, `ls project`, `ls skill`, `ls --local`, `project add <path>`, `project remove`, `project rename`, `project list`, `search`, `skill fix`, `skill category`, `validate`, `update`, `app`, `app-update`, `sync`, `install`, `publish`, `invite`, `profile`, `login --set`, `team workflow-update --print`, the whole `eval` family, `eval-report` and `serve`.
 
 Verbs it prepares and hands to your terminal, because they need an answer or can write before their first question:
 

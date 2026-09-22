@@ -16,7 +16,7 @@ export interface Run<T>{readonly frames:AsyncIterable<Frame>;answer(id:string,va
 export interface Capabilities {appVersion:string;windowChrome:'mac-overlay'|'native'|'cosmetic';windowControlsEnd:number|null;disablePerMachine:boolean;inboxEventLog:boolean;offtargetKind:boolean;machineRegistry:boolean;perCaseEvalTables:boolean;openInEditor:boolean;clipboard:boolean}
 // §7.1: the local key is `libraryProjects`, not `projects` — `projects` is already the marketplace's
 // team-projects screen, and desktop/AGENTS.md invariant 2 forbids one flag meaning two things.
-export const FEATURE_KEYS = ['favorites','follow','roles','lastSeen','installScope','inviteScoping','disablePerMachine','projectMembers','liftOnCards','runEvalInApp','perCase','progress','memberRole','localIdentity','libraryProjects','projects','refresh','appUpdate','reconcile','serve','usage','misses'] as const;
+export const FEATURE_KEYS = ['favorites','follow','roles','lastSeen','installScope','inviteScoping','disablePerMachine','projectMembers','liftOnCards','runEvalInApp','perCase','progress','memberRole','localIdentity','libraryProjects','projectRename','projects','refresh','appUpdate','reconcile','serve','usage','misses'] as const;
 export type FeatureKey = typeof FEATURE_KEYS[number];
 export type Features = Readonly<Record<FeatureKey, boolean>>;
 export interface Surfaces {libraryProjects:boolean;divergence:boolean;status:boolean;settings:boolean;onboarding:boolean;library:boolean;skill:boolean;receipts:boolean;inbox:boolean;catalog:boolean;roster:boolean;update:boolean;appUpdate:boolean}
@@ -105,14 +105,16 @@ export interface Roster {members:Member[];invited:Design['INVITED']|null;member:
 /** `slug` is owner/repo on GitHub and null on every other host; `remote` is null when the folder has no origin at all. */
 export interface RootRemote {url:string;slug:string|null}
 /** §7.2 removed `detected`: every project root is here because the user added it. */
-export interface Root {id:string;kind:'global'|'checkout';label:string;root:string;rootState?:'scanned'|'absent'|'unreadable'|undefined;registered:boolean;count?:string|undefined;remote?:RootRemote|null|undefined}
+export interface Root {id:string;kind:'global'|'checkout';label:string;root:string;rootState?:'scanned'|'absent'|'unreadable'|undefined;registered:boolean;count?:string|undefined;remote?:RootRemote|null|undefined;/** Sub-projects: the id (repo root) of the registered checkout whose folder holds this one; null at the top level, and on a CLI that predates the tree. */parent?:string|null|undefined}
 export type LibraryScope={kind:'global'}|{kind:'checkout';root:string};
 export interface ReconcileRow {path:string;name:string;team:string;skillId:string|null}
 export interface ReconcileResult {identical:(ReconcileRow&{version:string})[];differing:(ReconcileRow&{teamVersion:string;nextVersion:string;sameId:boolean;teamAuthor:string})[];renamed:(ReconcileRow&{version:string;teamName:string})[];adopted:string[];published:string[]}
-export interface ProjectAdded {path:string;label:string;added:boolean;reconcile?:ReconcileResult}
+export interface ProjectAdded {path:string;label:string;added:boolean;/** The registered project the folder sits inside, when it was added as a sub-project. */parent?:string|null|undefined;reconcile?:ReconcileResult}
 /** `project create`: the team project as team.json now holds it. A new project is always born with no skills. */
 export interface ProjectCreated {team:string;name:string;remotes:string[];skills:number}
-export interface ProjectRemoved {path:string;placementsRemaining:number}
+export interface ProjectRemoved {path:string;placementsRemaining:number;/** Registered folders inside the forgotten one: they stay, drawn one level up. */subProjectsRemaining?:number|undefined}
+/** `project rename`: display text only — the folder keeps its name, and no team file changes. */
+export interface ProjectRenamed {path:string;label:string;previous:string}
 /** The Library overview row's fourth tile counts skills never published to the team marketplace. It
  *  stands where the design board draws Team installs, so the two extra strings are declared here
  *  rather than in `src/fixtures/design.json`, which invariant 3 forbids hand-editing (`installs` /
