@@ -10,7 +10,7 @@ import type { Launch } from '../lib/launch.js';
 import { packageVersion } from '../lib/package.js';
 import { assetSuffix, detectPlatform, type AppPlatform, type PlatformEvidence } from '../lib/platform.js';
 import type { Prompter } from '../lib/prompt.js';
-import { failure, success, type Result } from '../lib/result.js';
+import { failure, permanent, success, type Result } from '../lib/result.js';
 import { execCommand, systemRunner, type Exec, type Runner } from '../lib/runner.js';
 import { compare } from '../lib/update.js';
 
@@ -81,7 +81,7 @@ export const removeRetrying = (path: string, retry: TransientRetry): Promise<voi
 
 export async function run(args: AppArgs, io: Prompter): Promise<Result<AppResult>> {
   const version = args.version === undefined ? packageVersion() : args.version;
-  if (!version) return failure('This copy of terum-skills has no version; the desktop app is published per version.');
+  if (!version) return permanent('This copy of terum-skills has no version; the desktop app is published per version.');
   const evidence = args.evidence ?? { platform: process.platform, arch: process.arch, env: process.env, procVersion: await readProcVersion() };
   const platform = detectPlatform(evidence);
   const suffix = assetSuffix(platform);
@@ -122,25 +122,28 @@ export async function run(args: AppArgs, io: Prompter): Promise<Result<AppResult
         io.print(`Downloading ${APP_PRODUCT} ${version} for ${platform}…`);
         // A runner that cannot start gh rejects rather than resolving; it must reach the same per-cause wording (D7) as a non-zero exit.
         const download = await runner.run('gh', ['release', 'download', `v${version}`, '--repo', APP_REPOSITORY, '--pattern', asset, '--pattern', `${asset}.sha256`, '--dir', staging], { deadlineMs: 600_000 }).catch((error: unknown) => ({ code: 1, stdout: '', stderr: message(error) }));
-        if (download.code === 124) return failure(`Downloading the desktop app took longer than 10 minutes and was stopped. ${tail(args.form)}`);
-        if (download.code !== 0) return failure(await explainDownloadFailure(download.stderr || download.stdout, version, asset, runner, args.form));
+        // `permanent` marks the failures a caller that would try again before it exits (setup's end-of-wizard retry)
+        // should leave alone: a second attempt could only repeat the wait and the same paragraph. A gh that is not
+        // logged in or a network that is down (explainDownloadFailure) may well have changed by then, and stays plain.
+        if (download.code === 124) return permanent(`Downloading the desktop app took longer than 10 minutes and was stopped. ${tail(args.form)}`);
+        if (download.code !== 0) return explainDownloadFailure(download.stderr || download.stdout, version, asset, runner, args.form);
         const file = join(staging, asset);
-        if (!(await exists(file)) || !(await exists(`${file}.sha256`))) return failure(`No desktop app is published for terum-skills ${version} (looked for ${asset} on release v${version} of ${APP_REPOSITORY}). ${tail(args.form)}`);
+        if (!(await exists(file)) || !(await exists(`${file}.sha256`))) return permanent(`No desktop app is published for terum-skills ${version} (looked for ${asset} on release v${version} of ${APP_REPOSITORY}). ${tail(args.form)}`);
         const problem = await verifyDownloadedAsset(file, runner, args.form);
-        if (problem !== null) return failure(problem);
+        if (problem !== null) return permanent(problem);
         // Unpack (macOS: and place the bundle) or install from the staging directory, then move the record into place in one rename so <version>/ only ever exists complete.
         let bundle: string | null = null;
         if (platform.startsWith('darwin')) {
           const unpack = await exec('tar', ['-xzf', file, '-C', staging]);
-          if (unpack.code !== 0) return failure(`Could not unpack the desktop app: ${(unpack.stderr || unpack.stdout).trim()} ${tail(args.form)}`);
+          if (unpack.code !== 0) return permanent(`Could not unpack the desktop app: ${(unpack.stderr || unpack.stdout).trim()} ${tail(args.form)}`);
           await rm(file, { force: true }); await rm(`${file}.sha256`, { force: true });
           bundle = (await readdir(staging)).find((name) => name.endsWith('.app')) ?? null;
-          if (!bundle) return failure(`The downloaded archive did not contain an application bundle. ${tail(args.form)}`);
+          if (!bundle) return permanent(`The downloaded archive did not contain an application bundle. ${tail(args.form)}`);
           await placeBundle(join(staging, bundle), applications, retry);
         } else {
           // Windows (x64 and ARM64): the asset is a per-user NSIS installer; /S installs silently under %LOCALAPPDATA% with no elevation (D8).
           const install = await exec(file, ['/S']);
-          if (install.code !== 0) return failure(`The desktop app installer exited with code ${install.code}. ${(install.stderr || install.stdout).trim()} ${tail(args.form)}`.trim());
+          if (install.code !== 0) return permanent(`The desktop app installer exited with code ${install.code}. ${(install.stderr || install.stdout).trim()} ${tail(args.form)}`.trim());
         }
         const record = JSON.stringify({ schema: 1, version, platform, bundle, installedAt: new Date().toISOString() }, null, 2);
         await writeFile(join(staging, 'installed.json'), record);
@@ -163,7 +166,7 @@ export async function run(args: AppArgs, io: Prompter): Promise<Result<AppResult
     }
 
     const appPath = await locateApp(platform, args.localAppData, applications);
-    if (!appPath) return failure(`The desktop app ${version} is installed but its executable was not found where it should be (${platform.startsWith('win32') ? join(args.localAppData ?? process.env['LOCALAPPDATA'] ?? '%LOCALAPPDATA%', APP_PRODUCT) : join(applications, APP_BUNDLE)}). ${tail(args.form)}`);
+    if (!appPath) return permanent(`The desktop app ${version} is installed but its executable was not found where it should be (${platform.startsWith('win32') ? join(args.localAppData ?? process.env['LOCALAPPDATA'] ?? '%LOCALAPPDATA%', APP_PRODUCT) : join(applications, APP_BUNDLE)}). ${tail(args.form)}`);
 
     // D1: the app finds Node and this CLI through this file, on every launch, so a relaunch from the Dock a week later still works.
     const statePath = join(root, 'run', 'app.json');
@@ -268,7 +271,6 @@ async function readProcVersion(): Promise<string | null> {
 /** The tag is advertised but its release carries no assets yet: release.yml pushes the tag before it creates the Release. */
 export const RELEASE_ASSETS_MISSING = /release not found|Not Found \(HTTP 404\)|no assets match/i;
 
-/** D7: one sentence per cause, and always the same two next steps. */
 /**
  * Two independent checks on a downloaded asset, both required. The `.sha256` beside it catches a
  * damaged download; it ships in the same Release as the asset, so it cannot catch an asset swapped
@@ -288,13 +290,19 @@ export async function verifyDownloadedAsset(file: string, runner: Runner, form: 
   return `The downloaded desktop app has no valid build attestation from ${APP_REPOSITORY}, so it was discarded: ${text || 'gh reported no detail'}. ${tail(form)}`;
 }
 
-export async function explainDownloadFailure(output: string, version: string, asset: string, runner: Runner, form: WithForm['form']): Promise<string> {
+/**
+ * D7: one sentence per cause, and always the same two next steps. The failure is the verb's own Result: a release
+ * with nothing published for this version is `permanent` (nothing in this run can change it), while a gh that is
+ * not installed or logged in, an unreachable GitHub, and anything unrecognised stay plain failures a caller may try
+ * again before it exits.
+ */
+export async function explainDownloadFailure(output: string, version: string, asset: string, runner: Runner, form: WithForm['form']): Promise<Result<never>> {
   const text = output.trim();
   const gh = await explainGhFailure(runner);
-  if (gh) return `${gh} ${tail(form)}`;
-  if (RELEASE_ASSETS_MISSING.test(text)) return `No desktop app is published for terum-skills ${version} (looked for ${asset} on release v${version} of ${APP_REPOSITORY}). ${tail(form)}`;
-  if (/dial tcp|no such host|connection refused|network is unreachable|TLS handshake timeout|i\/o timeout|could not resolve/i.test(text)) return `Could not reach GitHub to download the desktop app; you appear to be offline or behind a proxy that blocks github.com. ${tail(form)}`;
-  return `Could not download the desktop app: ${text || 'gh reported no detail'}. ${tail(form)}`;
+  if (gh) return failure(`${gh} ${tail(form)}`);
+  if (RELEASE_ASSETS_MISSING.test(text)) return permanent(`No desktop app is published for terum-skills ${version} (looked for ${asset} on release v${version} of ${APP_REPOSITORY}). ${tail(form)}`);
+  if (/dial tcp|no such host|connection refused|network is unreachable|TLS handshake timeout|i\/o timeout|could not resolve/i.test(text)) return failure(`Could not reach GitHub to download the desktop app; you appear to be offline or behind a proxy that blocks github.com. ${tail(form)}`);
+  return failure(`Could not download the desktop app: ${text || 'gh reported no detail'}. ${tail(form)}`);
 }
 
 export { readState as readAppState };

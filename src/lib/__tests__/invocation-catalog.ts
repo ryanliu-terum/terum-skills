@@ -445,7 +445,7 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "file": "src/commands/app.ts",
     "line": 75,
     "policy": "prose",
-    "pattern": "if (!version) return failure('This copy of terum-skills has no version; the desktop app is published per version.');"
+    "pattern": "if (!version) return permanent('This copy of terum-skills has no version; the desktop app is published per version.');"
   },
   {
     "file": "src/commands/app.ts",
@@ -457,7 +457,7 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "file": "src/commands/app.ts",
     "line": 118,
     "policy": "prose",
-    "pattern": "if (!(await exists(file)) || !(await exists(`${file}.sha256`))) return failure(`No desktop app is published for terum-skills ${version} (looked for ${asset} on release v${version} of ${APP_REPOSITORY}). ${tail(args.form)}`);"
+    "pattern": "if (!(await exists(file)) || !(await exists(`${file}.sha256`))) return permanent(`No desktop app is published for terum-skills ${version} (looked for ${asset} on release v${version} of ${APP_REPOSITORY}). ${tail(args.form)}`);"
   },
   {
     "file": "src/commands/app.ts",
@@ -469,7 +469,7 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "file": "src/commands/app.ts",
     "line": 229,
     "policy": "prose",
-    "pattern": "if (RELEASE_ASSETS_MISSING.test(text)) return `No desktop app is published for terum-skills ${version} (looked for ${asset} on release v${version} of ${APP_REPOSITORY}). ${tail(form)}`;"
+    "pattern": "if (RELEASE_ASSETS_MISSING.test(text)) return permanent(`No desktop app is published for terum-skills ${version} (looked for ${asset} on release v${version} of ${APP_REPOSITORY}). ${tail(form)}`);"
   },
   {
     "file": "src/commands/eval.ts",
@@ -4015,7 +4015,7 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "file": "docs/guides/desktop-app.md",
     "line": 15,
     "policy": "prose",
-    "pattern": "On macOS and Windows, `setup` runs this before the rest of the wizard. When the app launches, setup prints `Continuing in the app.` and returns, so you create or join the team in the app rather than in the terminal. When you named a team to join, the line is `Continuing in the app. Join <org>/<repo> there.` `setup --no-app` keeps the whole wizard in the terminal, and so does any setup that is not at an interactive terminal. See [Install](../getting-started/install.md)."
+    "pattern": "On macOS and Windows, `setup` runs this before the rest of the wizard. When the app launches, setup prints `Continuing in the app.` and returns, so you create or join the team in the app rather than in the terminal. When you named a team to join, the line is `Continuing in the app. Join <org>/<repo> there.` If the app could not be installed at that point (gh logged out, offline), setup finishes in the terminal and tries the app once more after its closing summary, so a join that ran in the terminal still ends with the app open. `setup --no-app` keeps the whole wizard in the terminal, and so does any setup that is not at an interactive terminal. See [Install](../getting-started/install.md)."
   },
   {
     "file": "docs/guides/desktop-app.md",
@@ -5425,7 +5425,7 @@ export const invocationLiteralCatalog: readonly { file: string; line: number; po
     "file": "docs/reference/cli.md",
     "line": 115,
     "policy": "prose",
-    "pattern": "What it does: setup is the onboarding wizard, and the desktop app comes before the team. Only the welcome lines, the move question below and the one-team check run ahead of it. Where an app exists for the platform and a person is at an interactive terminal, setup installs and opens the app without asking, prints `Continuing in the app.` (or `Continuing in the app. Join <org>/<repo> there.` when a target was given and the move question did not fire) and returns. The team is then created or joined inside the app. The terminal wizard continues only when the app step is skipped: on Linux and WSL, over a pipe, over frames, with `--no-app`, in `install`'s quiet bootstrap, or when the app hand-off fails. In the terminal it then asks the create-or-join question, checks the GitHub CLI, creates or joins the team, invites teammates, offers to add a project, reconciles your Library against the team, offers to evaluate shared skills with no receipt, and finally offers three optional Claude Code integrations one at a time. A bare `setup` cannot join: choosing \"Join an existing team\" prints the command to ask the team owner for and exits having written nothing."
+    "pattern": "What it does: setup is the onboarding wizard, and the desktop app comes before the team. Only the welcome lines, the move question below and the one-team check run ahead of it. Where an app exists for the platform and a person is at an interactive terminal, setup installs and opens the app without asking, prints `Continuing in the app.` (or `Continuing in the app. Join <org>/<repo> there.` when a target was given and the move question did not fire) and returns. The team is then created or joined inside the app. The terminal wizard continues only when the app step is skipped: on Linux and WSL, over a pipe, over frames, with `--no-app`, in `install`'s quiet bootstrap, or when the app hand-off fails. In the terminal it then asks the create-or-join question, checks the GitHub CLI, creates or joins the team, invites teammates, offers to add a project, reconciles your Library against the team, offers to evaluate shared skills with no receipt, and finally offers three optional Claude Code integrations one at a time. When the app hand-off had failed for a cause the wizard can change (gh logged out, offline), setup tries the app once more after the closing summary, without a target; a cause that cannot change, such as no app published for this version or a rejected download, is not retried. A bare `setup` cannot join: choosing \"Join an existing team\" prints the command to ask the team owner for and exits having written nothing."
   },
   {
     "file": "docs/reference/cli.md",
