@@ -7,7 +7,7 @@ import YAML from 'yaml';
 import { createConfigStore, type ConfigStore } from '../lib/config.js';
 import { writeJsonPrivate } from '../lib/fs.js';
 import { canonicalLedger, localSkillRoots } from '../lib/local-skills.js';
-import { appendExclude, lockTarget, moveDirectory, moveToQuarantine, place } from '../lib/placer.js';
+import { appendExclude, keptCopyPath, lockTarget, moveDirectory, moveToQuarantine, place } from '../lib/placer.js';
 import { isSkillsRoot } from '../lib/placer/agent-paths.js';
 import { projectPath } from '../lib/projects.js';
 import { snapshotSkillDirectory } from '../lib/placer/vendor/skillhub/skill-fingerprint.js';
@@ -289,8 +289,9 @@ export async function run(args: SkillArgs, io: Prompter): Promise<Result<SkillRe
           const same = (await snapshotSkillDirectory(dest)).fingerprint === op.fingerprint;
           if (args.kind === 'rename') throw new Error(`${dest} already exists; choose another name.`);
           if (!same || op.destinationExisted) {
-            const kept = join(dirname(targetRoot.root), 'old-skills', name);
-            if (await present(kept)) throw new Error(`${kept} already exists; move the kept copy elsewhere before retrying.`);
+            // Same rotation install uses: a kept copy is never overwritten, and a second move
+            // is never blocked by the first one's backup (placer.keptCopyPath).
+            const kept = await keptCopyPath(targetRoot.root, name);
             await mkdir(dirname(kept), { recursive: true });
             op.kept = kept;
             await writeJsonPrivate(journal, op);
