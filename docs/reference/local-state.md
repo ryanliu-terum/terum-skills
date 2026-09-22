@@ -77,7 +77,7 @@ The shape:
 - `approvals` remembers a tool-grant consent by the hash of the skill's `allowed-tools`, so `install` does not ask again while the content is unchanged. `team leave` clears it when the last team goes.
 - `pending` is an intent note written before a placement or removal and cleared after, so an interrupted run can be finished.
 - `placements` is the authority for every path this tool may delete. A row exists only for a folder terum-skills copied from a team version, and only directly under a `.claude/skills` root. `fingerprint` is what was on disk when it was placed, which is how a hand-edited copy is recognised later.
-- `projects` is your library project registry, written only by `project add` and `project remove`. Labels are derived across the whole set, so adding one project can relabel another.
+- `projects` is your library project registry, written only by `project add`, `project remove` and `project rename`. Labels are derived across the whole set, so adding one project can relabel another; a name chosen with `project rename` carries `renamed_at` and is kept. A folder inside another registered folder is labelled by its path inside it, and its parent is read off the paths, never stored.
 - `app` records that you ran `app`.
 - The four identity fields are written by `login` and by `team create`/`team join`. `profile --name` writes `display_name` on its own.
 

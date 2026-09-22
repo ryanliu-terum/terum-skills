@@ -9,13 +9,13 @@ import { ConfigStore, createConfigStore, selectTeam } from '../lib/config.js';
 import type { HookOptions } from '../lib/hook.js';
 import type { WrapperOptions } from '../lib/wrapper.js';
 import type { EditHookOptions } from '../lib/editHook.js';
-import { inspect, lockTarget, moveDirectory, place, appendExclude, resolveTarget } from '../lib/placer.js';
+import { inspect, keptCopyPath, lockTarget, moveDirectory, place, appendExclude, resolveTarget } from '../lib/placer.js';
 import { Prompter } from '../lib/prompt.js';
 import { refuseSecondTeam, teamByRemote } from '../lib/auth.js';
 import { normalizeRemote } from '../lib/remote.js';
 import { fromError, CancelledError, RefusedError, Result, success } from '../lib/result.js';
 import { Runner, systemRunner } from '../lib/runner.js';
-import { Config, Destination, Team, describeRaw, handleSchema, parseOrExplain, parseSkillFrontmatter, sameScope } from '../lib/schema.js';
+import { Config, Destination, Team, describeRaw, handleSchema, insideRoot, parseOrExplain, parseSkillFrontmatter, sameScope } from '../lib/schema.js';
 import { canonicalDigest, findSkill, readPerson, readTeam, skillRecords, SkillRecord } from '../lib/skills.js';
 import { openTeamRepo, SafeWriteOptions, lockWait } from '../lib/teamRepo.js';
 import { addProfileEntry, recordProfileEntry, writePersonFile } from '../lib/profile-entry.js';
@@ -251,9 +251,9 @@ async function placeInstall(input: PlacingInstallInput, io: Prompter, consented 
     const ownedKey = (await Promise.all(Object.keys(ledger).map(async key => ({ key, canonical: await canonicalParentPath(key) })))).find(item => item.key === destination || (canonical !== undefined && item.canonical === canonical))?.key;
     const collision = await inspect(destination);
     if (collision.kind === 'present') {
-      const kept = join(dirname(root), 'old-skills', skill.name);
-      // §9.1.1 leaves repeated-backup policy deferred. Keep B5's conservative no-loss refusal.
-      if ((await inspect(kept)).kind !== 'absent') throw new Error(`${kept} already exists; move the kept copy elsewhere before retrying.`);
+      // §9.1.1 left repeated-backup policy deferred and B5 read that as a refusal; rotating the
+      // kept path keeps B5's no-loss guarantee without the dead end (placer.keptCopyPath).
+      const kept = await keptCopyPath(root, skill.name);
       if (!(await io.confirm(`Replace it with ${versionLabel(skill.latestVersion)}?`, { detail: [
         `You already have a skill named ${skill.name}.`, `Your copy is kept at ${kept}.`,
       ] }))) throw new CancelledError('Replace was declined.');
@@ -565,7 +565,11 @@ export async function resolveDestination(store: ConfigStore, teamJson: Team, pac
     const origin = await opts.runner.run('git', ['remote', 'get-url', 'origin'], { cwd: root });
     if (origin.code === 0 && remotes.some(remote => normalizeRemote(remote) === normalizeRemote(origin.stdout.trim()))) matches.push(index + 1);
   }
-  const defaultChoice = matches.length === 1 ? choices[matches[0]!] : matches.length > 1 ? undefined : global;
+  // A sub-project answers its parent's origin (git walks up to the same repository), so among nested
+  // matches only the outermost one is the checkout the team project names; two unrelated matches still
+  // offer no default.
+  const outermost = matches.filter(match => !matches.some(other => other !== match && insideRoot(roots[match - 1]!, roots[other - 1]!)));
+  const defaultChoice = outermost.length === 1 ? choices[outermost[0]!] : outermost.length > 1 ? undefined : global;
   const selected = await io.select('Install to', choices, defaultChoice);
   const index = choices.indexOf(selected);
   if (index < 0) throw new Error('Invalid install destination.');

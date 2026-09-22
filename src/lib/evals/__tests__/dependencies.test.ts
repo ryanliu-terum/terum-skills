@@ -127,7 +127,7 @@ async function scripts(root: string, dirs: string[]): Promise<void> {
 /** Seeds an arm with scratch outside the repository, as a real run does. */
 async function arm(caseDir: string, skillName: string, skillDir: string | null, plan: Awaited<ReturnType<typeof dependencyPlan>>, files: Record<string, string> = {}): Promise<string> {
   const scratch = await tmp('dependency-scratch-');
-  return seedSandbox({ ...evalCase, files }, { caseDir, skillName, skillDir, scratch, dependencies: plan });
+  return seedSandbox({ ...evalCase, files }, { caseDir, arm: skillDir === null ? null : { name: skillName, dir: skillDir }, scratch, dependencies: plan });
 }
 
 const seed = (root: string, skillDir: string | null, plan: Awaited<ReturnType<typeof dependencyPlan>>, files: Record<string, string> = {}): Promise<string> =>

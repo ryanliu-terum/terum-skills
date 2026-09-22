@@ -1331,3 +1331,23 @@ it('prefers the byte match over the ledger version on the Marketplace card', asy
   if (!catalog.ok) throw new Error(catalog.error);
   expect(catalog.value.skills.find(skill => skill.name === 'deploy-check')).toMatchObject({ installed: 'placed', placed: true, installedVersion: 'v1', localMatch: 'identical' });
 });
+
+
+// Sub-projects and rename (2026-09-19): `project rename` is one more `project` spawn, and a section's `parent`
+// reaches the sidebar's Root unchanged (null at the top level and for the global root).
+it('renames a Library project through project rename and carries the previous label', async () => {
+  const f = replay({ path: '/work', label: 'Payments', previous: 'work' });
+  expect(await createTauriBackend(f.bridge).projects.rename({ path: '/work', name: 'Payments' }).done).toEqual({ ok: true, value: { path: '/work', label: 'Payments', previous: 'work' } });
+  expect(f.spawns.map(spawn => spawn.args)).toEqual([['project', 'rename', '--to', 'Payments', '--', '/work']]);
+});
+it('carries a section parent into the Library roots, null at the top level and for the global root', async () => {
+  const local = { roster: [], skills: [], problems: [], local: [
+    { root: '/home/.claude/skills', scope: 'global', rows: [], problems: [] },
+    { root: '/work/ops/.claude/skills', repoRoot: '/work/ops', scope: 'project', label: 'ops', registered: true, rows: [], problems: [] },
+    { root: '/work/ops/apps/web/.claude/skills', repoRoot: '/work/ops/apps/web', scope: 'project', label: 'apps/web', registered: true, parent: '/work/ops', rows: [], problems: [] },
+  ] };
+  const result = await createTauriBackend(inventoryBridge({ local }).bridge).library({ scope: { kind: 'checkout', root: '/work/ops/apps/web' }, team: 'acme' });
+  expect(result.ok).toBe(true);
+  expect(result.value?.roots.map(root => [root.id, root.parent])).toEqual([['global', null], ['/work/ops', null], ['/work/ops/apps/web', '/work/ops']]);
+  expect(result.value?.root).toMatchObject({ id: '/work/ops/apps/web', label: 'apps/web', parent: '/work/ops' });
+});

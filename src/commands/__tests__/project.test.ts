@@ -1,5 +1,5 @@
 import { cp, mkdir, realpath, readFile, symlink, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { createConfigStore } from '../../lib/config.js';
 import { configSchema } from '../../lib/schema.js';
@@ -141,4 +141,64 @@ it.skipIf(!SYMLINKS_SUPPORTED)('preserves unrelated formatting and counts missin
   const result = await run({ ...args, kind: 'remove', path: args.root }, new ScriptedPrompter());
   expect(result).toMatchObject({ ok: true, value: { placementsRemaining: 1 } });
   expect(await readFile(file, 'utf8')).toContain('"kept"  :  true');
+});
+
+
+/** Sub-projects (2026-09-19): a registered folder inside a registered folder, read off the paths; `project rename` names a row. */
+describe('sub-projects and rename', () => {
+  it('adds a folder inside a project as its sub-project, labelled by its path inside the parent', async () => {
+    const args = await fixture(); const web = join(args.root, 'apps', 'web'); await mkdir(web, { recursive: true });
+    await run({ ...args, kind: 'add', path: args.root }, new ScriptedPrompter());
+    const io = new ScriptedPrompter();
+    expect(await run({ ...args, kind: 'add', path: web }, io)).toMatchObject({ ok: true, value: { path: web, label: join('apps', 'web'), added: true, parent: args.root } });
+    expect(io.lines).toEqual([`Added ${web} to your library as a sub-project of repo.`]);
+    expect((await args.config.read()).projects).toMatchObject([{ root: args.root, label: 'repo' }, { root: web, label: join('apps', 'web') }]);
+  });
+  it('adopts registered folders inside a project added later, and lists the tree in order', async () => {
+    const args = await fixture();
+    const web = join(args.root, 'apps', 'web'), api = join(args.root, 'packages', 'api'), other = join(args.home, 'other');
+    for (const dir of [web, api, other]) await mkdir(dir, { recursive: true });
+    for (const dir of [api, other, web]) await run({ ...args, kind: 'add', path: dir }, new ScriptedPrompter());
+    expect((await args.config.read()).projects).toMatchObject([{ label: 'api' }, { label: 'other' }, { label: 'web' }]);
+    const io = new ScriptedPrompter();
+    expect(await run({ ...args, kind: 'add', path: args.root }, io)).toMatchObject({ ok: true, value: { path: args.root, label: 'repo', added: true, parent: null } });
+    expect(io.lines).toEqual([`Added ${args.root} to your library.`, `2 projects already in your library sit inside it and are now its sub-projects: ${join('packages', 'api')}, ${join('apps', 'web')}.`]);
+    const list = new ScriptedPrompter();
+    const result = await run({ ...args, kind: 'list' }, list);
+    expect(result).toMatchObject({ ok: true, value: { projects: [
+      { path: other, label: 'other', parent: null }, { path: args.root, label: 'repo', parent: null },
+      { path: api, label: join('packages', 'api'), parent: args.root }, { path: web, label: join('apps', 'web'), parent: args.root },
+    ] } });
+    expect(list.lines).toEqual([
+      `other — ${other}; absent; 0 skill folders`, `repo — ${args.root}; absent; 0 skill folders`,
+      `  ${join('packages', 'api')} — ${api}; absent; 0 skill folders`, `  ${join('apps', 'web')} — ${web}; absent; 0 skill folders`,
+    ]);
+  });
+  it('renames a row, keeps the name across later adds, and refuses a second chosen name that reads the same', async () => {
+    const args = await fixture(); const other = join(args.home, 'other'); await mkdir(other);
+    await run({ ...args, kind: 'add', path: args.root }, new ScriptedPrompter());
+    const io = new ScriptedPrompter();
+    expect(await run({ ...args, kind: 'rename', path: args.root, to: '  Payments ' }, io)).toMatchObject({ ok: true, value: { path: args.root, label: 'Payments', previous: 'repo' } });
+    expect(io.lines).toEqual([`Renamed repo to Payments; the folder ${args.root} is unchanged.`]);
+    const stored = (await args.config.read()).projects!;
+    expect(stored).toMatchObject([{ root: args.root, label: 'Payments' }]);
+    expect(stored[0]!.renamed_at).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    // A later add recomputes derived labels only; the chosen one stays, and a derived twin moves out of its way.
+    const payments = join(args.home, 'payments'); await mkdir(payments);
+    await run({ ...args, kind: 'add', path: payments }, new ScriptedPrompter());
+    expect((await args.config.read()).projects).toMatchObject([{ root: args.root, label: 'Payments' }, { root: payments, label: `payments (${basename(args.home)})` }]);
+    await run({ ...args, kind: 'add', path: other }, new ScriptedPrompter());
+    expect(await run({ ...args, kind: 'rename', path: other, to: 'payments' }, new ScriptedPrompter())).toMatchObject({ ok: false, error: `Another project is already named Payments (${args.root}).` });
+    expect(await run({ ...args, kind: 'rename', path: other, to: 'Global' }, new ScriptedPrompter())).toMatchObject({ ok: false, error: 'a project name is 1-64 characters and is not Global' });
+    expect(await run({ ...args, kind: 'rename', path: join(args.home, 'missing'), to: 'x' }, new ScriptedPrompter())).toMatchObject({ ok: false, error: `${join(args.home, 'missing')} is not in your library.` });
+    expect(await run({ ...args, kind: 'rename', path: other }, new ScriptedPrompter())).toMatchObject({ ok: false, error: 'Specify the new name with --to.' });
+  });
+  it('forgets a parent alone and says how many sub-projects stay', async () => {
+    const args = await fixture(); const web = join(args.root, 'apps', 'web'); await mkdir(web, { recursive: true });
+    for (const dir of [args.root, web]) await run({ ...args, kind: 'add', path: dir }, new ScriptedPrompter());
+    const io = new ScriptedPrompter();
+    expect(await run({ ...args, kind: 'remove', path: args.root }, io)).toMatchObject({ ok: true, value: { path: args.root, placementsRemaining: 0, subProjectsRemaining: 1 } });
+    expect(io.lines).toEqual([`Removed ${args.root} from your library.`, `0 placements recorded under ${args.root} stay in the ledger; uninstall-skill removes them.`, `1 sub-project under ${args.root} stays in your library.`]);
+    expect(await run({ ...args, kind: 'list' }, new ScriptedPrompter())).toMatchObject({ ok: true, value: { projects: [{ path: web, label: join('apps', 'web'), parent: null }] } });
+  });
 });

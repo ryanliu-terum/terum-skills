@@ -1,5 +1,5 @@
 import type { FileDropEvent, SkillFileResult, SkillToggleResult } from './types';
-import type { AppUpdateStaged, AppUpdateStatus, LaunchContext, IdentityArgs, IdentityWrite, Settings, Onboarding, Features, Capabilities, Surfaces, ReadOptions, Catalog, ChangeSource, EvalArgs, EvalManyArgs, EvalManyResult, EvalResult, UsageModel, MissesModel, EvalReportModel, InboxItem, InstallArgs, InstalledResult, InviteArgs, InviteResult, MachineUninstallResult, PrefStore, PublishArgs, PublishManyArgs, PublishResult, UnpublishArgs, UnpublishResult, Receipt, ReconcileResult, Result, Roster, Run, LibraryScope, ProjectAdded, ProjectRemoved, ProjectCreated, SearchArgs, SearchHit, SetupArgs, SetupResult, Library, SkillDetail, StatusResult, Subscription, SyncArgs, SyncResult, TeamArgs, TeamResult, UninstallArgs, UninstalledResult, UpdateAdvice, ValidateArgs, ValidateResult } from './types';
+import type { AppUpdateStaged, AppUpdateStatus, LaunchContext, IdentityArgs, IdentityWrite, Settings, Onboarding, Features, Capabilities, Surfaces, ReadOptions, Catalog, ChangeSource, EvalArgs, EvalManyArgs, EvalManyResult, EvalResult, UsageModel, MissesModel, EvalReportModel, InboxItem, InstallArgs, InstalledResult, InviteArgs, InviteResult, MachineUninstallResult, PrefStore, PublishArgs, PublishManyArgs, PublishResult, UnpublishArgs, UnpublishResult, Receipt, ReconcileResult, Result, Roster, Run, LibraryScope, ProjectAdded, ProjectRemoved, ProjectRenamed, ProjectCreated, SearchArgs, SearchHit, SetupArgs, SetupResult, Library, SkillDetail, StatusResult, Subscription, SyncArgs, SyncResult, TeamArgs, TeamResult, UninstallArgs, UninstalledResult, UpdateAdvice, ValidateArgs, ValidateResult } from './types';
 export interface Backend {
   setWindowBackground(color: string): Promise<Result<void>>;
   quit(): Promise<void>;
@@ -31,7 +31,9 @@ export interface Backend {
   library(q: { scope: LibraryScope; team?: string }, options?: ReadOptions): Promise<Result<Library>>;
   localSkill(q: { path: string }, options?: ReadOptions): Promise<Result<SkillDetail>>;
   /** §7.1 L-PROJ: the folders this machine reads local skills from. Nothing else adds one. */
-  projects: { add(path:string):Run<ProjectAdded>; remove(path:string):Run<ProjectRemoved> };
+  projects: { add(path:string):Run<ProjectAdded>; remove(path:string):Run<ProjectRemoved>;
+    /** `project rename <path> --to <name>`: a display name for one row; the folder is unchanged. Offered only where `features.projectRename` is true. */
+    rename(args:{path:string;name:string}):Run<ProjectRenamed> };
   reconcile: { list():Promise<Result<ReconcileResult>> };
   /** Team projects (team.json), not the local folders above: `create` names one and commits it to the team's main. */
   teamProjects: { create(args:{name:string;remote?:string}):Run<ProjectCreated> };

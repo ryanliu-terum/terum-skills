@@ -1,7 +1,7 @@
 import { mapWithConcurrency } from './concurrency.js';
 import { lstat, readdir, readFile, realpath, stat } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, resolve, sep } from 'node:path';
-import { FRONTMATTER, type Config, type LibraryProject } from './schema.js';
+import { FRONTMATTER, orderByProjectTree, projectParents, type Config, type LibraryProject } from './schema.js';
 import { AGENT_PATHS } from './placer/agent-paths.js';
 import { assertNotInsideStateRoot, inspectSkillSource, scanSkillFolder, type SourceProblem } from './skill-source.js';
 
@@ -30,7 +30,7 @@ export interface LocalInventory {
  * two things that produced it (the cwd-detected root and `ls`'s ledger-inferred `extraRoots`) were
  * the app adding a project by itself. `label` is the user-facing name carried on `config.projects`.
  */
-export interface LocalRoot { root: string; scope: 'global' | 'project'; repoRoot?: string; registered: boolean; label?: string; }
+export interface LocalRoot { root: string; scope: 'global' | 'project'; repoRoot?: string; registered: boolean; label?: string; /** Sub-projects: the repo root of the registered project this one sits inside; absent at the top level. */ parent?: string; }
 
 /**
  * Discovery is filesystem-only: the nearest .git file or directory selects the project root.
@@ -73,7 +73,13 @@ export async function localSkillRoots(home: string, projects: readonly LibraryPr
     roots.push({ root: project, scope: 'project', repoRoot: dir, registered: true, label });
   };
   for (const project of projects) await append(project.root, project.label);
-  return { roots, problems };
+  // Sub-projects: a registered root inside another registered root is drawn under it, in tree order,
+  // so `ls --local` and the app's sidebar agree with `project list` about which folder holds which.
+  const projectRoots = roots.slice(1);
+  const parents = projectParents(projectRoots.map((root) => root.repoRoot!));
+  projectRoots.forEach((root, index) => { if (parents[index] !== undefined) root.parent = parents[index]; });
+  const ordered = orderByProjectTree(projectRoots, (root) => root.repoRoot!, (root) => root.parent).map((entry) => entry.item);
+  return { roots: [roots[0]!, ...ordered], problems };
 }
 
 /** §7.1: the label the user chose the project by. `basename` remains the fallback for a root with no stored label. */

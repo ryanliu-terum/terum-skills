@@ -25,7 +25,7 @@ import type { Result } from '../result.js';
 import { failure, success } from '../result.js';
 import { stageDependencies, type DependencyPlan } from './dependencies.js';
 
-export const ARMS = ['baseline', 'candidate', 'incumbent'] as const;
+export const ARMS = ['baseline', 'candidate', 'incumbent', 'rival'] as const;
 export type Arm = (typeof ARMS)[number];
 
 const BUCKETS = ['explicit', 'implicit', 'contextual', 'negative', 'adversarial'] as const;
@@ -170,12 +170,18 @@ export function casePathViolation(rel: string): string | null {
   return null;
 }
 
+/**
+ * IE6 §2: identity and tree travel together. A single `skillName` could not express the
+ * contamination invariant once two DIFFERENT skills share one matrix — the staging path and
+ * the assertion would read the same name for both arms. `null` is the baseline arm.
+ */
+export type ArmSpec = { name: string; dir: string } | null;
+
 export interface SeedOptions {
   /** Directory the case file lives in — fixture paths resolve relative to it (§5.1). */
   caseDir: string;
-  skillName: string;
-  /** Full skill tree to stage, or null for the baseline arm. */
-  skillDir: string | null;
+  /** The arm's identity and tree, or null for the baseline arm (IE6 §2). */
+  arm: ArmSpec;
   scratch: string;
   /** Resolved once per eval run; baseline arms never apply it. */
   dependencies?: DependencyPlan;
@@ -204,10 +210,10 @@ export async function seedSandbox(evalCase: EvalCase, options: SeedOptions): Pro
     if (rel.endsWith('.sh') || rel.split(/[\\/]/).filter((segment) => segment !== '' && segment !== '.')[0] === 'bin') await chmod(target, 0o755);
   }
   if (evalCase.setup !== undefined) await runSetup(evalCase, sandbox);
-  if (options.skillDir !== null) {
-    const staged = join(sandbox, '.claude', 'skills', options.skillName);
+  if (options.arm !== null) {
+    const staged = join(sandbox, '.claude', 'skills', options.arm.name);
     await mkdir(dirname(staged), { recursive: true });
-    const root = resolve(options.skillDir);
+    const root = resolve(options.arm.dir);
     await cp(root, staged, {
       recursive: true,
       filter: (source) => {
@@ -232,7 +238,7 @@ export async function dryRunCase(evalCase: EvalCase, scratch: string): Promise<s
   // is the only way a half-seeded sandbox does not outlive the check.
   const root = await mkdtemp(join(scratch, 'dry-'));
   try {
-    await seedSandbox(evalCase, { caseDir: root, skillName: evalCase.name, skillDir: null, scratch: root });
+    await seedSandbox(evalCase, { caseDir: root, arm: null, scratch: root });
     return null;
   } catch (error) {
     return error instanceof Error ? error.message : String(error);
@@ -249,7 +255,7 @@ export async function dryRunCase(evalCase: EvalCase, scratch: string): Promise<s
 export async function dryRunSuite(suite: EvalSuite, scratch: string): Promise<string | null> {
   const root = await mkdtemp(join(scratch, 'dry-suite-'));
   try {
-    await seedSandbox({ ...suite, checks: [] }, { caseDir: root, skillName: suite.name, skillDir: null, scratch: root });
+    await seedSandbox({ ...suite, checks: [] }, { caseDir: root, arm: null, scratch: root });
     return null;
   } catch (error) {
     return error instanceof Error ? error.message : String(error);
@@ -360,10 +366,13 @@ export interface RunCaseDeps {
 
 export interface RunCaseOptions {
   k: number;
-  skillName: string;
   caseDir: string;
-  /** Materialized arm trees; omit `incumbent` when none exists or it equals candidate (§7.1). */
-  arms: { candidate: string; incumbent?: string };
+  /**
+   * IE6 §2: the arm table. `baseline` (null) and `candidate` are always present; `incumbent`
+   * is omitted when none exists or it equals candidate (§7.1), and `rival` only in
+   * head-to-head. An absent key is an arm that does not run; a null value is the baseline.
+   */
+  arms: Partial<Record<Arm, ArmSpec>>;
   scratch: string;
   /** Transcripts land here as `<case>.<arm>.<rep>.jsonl` (§4.2). */
   transcriptDir: string;
@@ -378,7 +387,7 @@ type RunOutput = { rows: ComparisonRow[]; arms: ArmSample[]; skipped?: string[];
  */
 async function runArm(
   deps: RunCaseDeps, evalCase: Pick<EvalCase, 'name' | 'task' | 'timeout_minutes' | 'max_turns'>,
-  options: RunCaseOptions, arm: Arm, skillDir: string | null, rep: number, transcriptStem: string,
+  options: RunCaseOptions, arm: Arm, spec: ArmSpec, evaluated: ReadonlySet<string>, rep: number, transcriptStem: string,
 ): Promise<{ sandbox: string; transcript: Transcript | null; retried: boolean }> {
   const log = deps.log ?? (() => undefined);
   let sandbox = '';
@@ -386,7 +395,7 @@ async function runArm(
   let retried = false;
   const transcriptPath = join(options.transcriptDir, `${transcriptStem}.${arm}.${rep}.jsonl`);
   for (let attempt = 0; attempt < 2 && transcript === null; attempt++) {
-    sandbox = await seedSandbox(evalCase as EvalCase, { caseDir: options.caseDir, skillName: options.skillName, skillDir, scratch: options.scratch, ...(options.dependencies === undefined ? {} : { dependencies: options.dependencies }) });
+    sandbox = await seedSandbox(evalCase as EvalCase, { caseDir: options.caseDir, arm: spec, scratch: options.scratch, ...(options.dependencies === undefined ? {} : { dependencies: options.dependencies }) });
     try {
       transcript = await deps.agent.runAgent(evalCase.task, sandbox, {
         transcriptPath, model: deps.model ?? DEFAULT_MODEL,
@@ -408,12 +417,20 @@ async function runArm(
     }
   }
   const skillList = transcript?.skillList() ?? null;
-  const staged = skillDir !== null;
-  if (transcript !== null && staged && skillList === null) {
+  if (transcript !== null && spec !== null && skillList === null) {
     throw new ContaminationError(`arm '${arm}' did not report its resolved skill list; refusing the run (§7.3)`);
   }
-  if (skillList !== null && skillList.includes(options.skillName) !== staged) {
-    throw new ContaminationError(`arm '${arm}' resolved skills [${skillList.join(', ')}] — '${options.skillName}' ${staged ? 'is missing from an arm that staged it' : 'leaked into an arm without it staged'}; refusing the run (§7.3)`);
+  if (skillList !== null) {
+    // IE6 §2: per-arm, over every skill under evaluation in this run. This arm must contain
+    // exactly the one it staged and none of the others, so a rival tree leaking into the
+    // candidate's arm refuses the run instead of scoring clean. One name in a single-skill
+    // run, where this reduces exactly to the rev-6 membership check.
+    for (const name of evaluated) {
+      const expected = spec !== null && spec.name === name;
+      if (skillList.includes(name) !== expected) {
+        throw new ContaminationError(`arm '${arm}' resolved skills [${skillList.join(', ')}] — '${name}' ${expected ? 'is missing from an arm that staged it' : 'leaked into an arm that did not stage it'}; refusing the run (§7.3)`);
+      }
+    }
   }
   return { sandbox, transcript, retried };
 }
@@ -424,6 +441,23 @@ function sampleFor(arm: Arm, caseName: string, rep: number, transcript: Transcri
     || transcript.bashCommands().some((command) => /\bcodex\b|claude -p/.test(command));
   return { kind: 'arm', case: caseName, rep, arm, failed: transcript === null, retried, fraction: fractionPassed(checks), ...efficiency, skill_list: transcript?.skillList() ?? null, model_id: transcript?.modelId() ?? null, spawns_agents: spawnsAgents };
 }
+
+/**
+ * IE6 §2: the run's arm table, in ARMS order so the matrix is deterministic, plus the set of
+ * skills under evaluation that the contamination assertion ranges over.
+ */
+function armTable(options: RunCaseOptions): { specs: Array<[Arm, ArmSpec]>; candidate: NonNullable<ArmSpec>; evaluated: Set<string> } {
+  const specs: Array<[Arm, ArmSpec]> = ARMS.filter((arm) => Object.hasOwn(options.arms, arm)).map((arm) => [arm, options.arms[arm] ?? null]);
+  const candidate = options.arms.candidate ?? null;
+  if (candidate === null) throw new Error('runCase requires a candidate arm with a name and tree (IE6 §2)');
+  // `baseline: null` is always present. A caller that omits it would silently run no baseline
+  // arm and lose candidate-vs-baseline, the headline comparison — so it is loud.
+  if (!Object.hasOwn(options.arms, 'baseline')) throw new Error('runCase requires an explicit `baseline: null` arm (IE6 §2)');
+  return { specs, candidate, evaluated: new Set(specs.map(([, spec]) => spec).filter((spec): spec is NonNullable<ArmSpec> => spec !== null).map((spec) => spec.name)) };
+}
+
+/** IE6 §2.1: candidate stays on the left; `rival` only exists in head-to-head. */
+const OPPONENTS = ['baseline', 'incumbent', 'rival'] as const;
 
 /**
  * Run one case, k reps × available arms. Returns one row per (rep × opponent) plus per-arm
@@ -437,8 +471,7 @@ export async function runCase(deps: RunCaseDeps, evalCase: EvalCase, options: Ru
     log(`  ${evalCase.name}: SKIPPED (environment) — missing ${missing.join(', ')}`);
     return { rows: [], arms: [], skipped: missing };
   }
-  const armDirs: Array<[Arm, string | null]> = [['baseline', null], ['candidate', options.arms.candidate]];
-  if (options.arms.incumbent !== undefined) armDirs.push(['incumbent', options.arms.incumbent]);
+  const { specs: armSpecs, candidate: candidateSpec, evaluated } = armTable(options);
 
   const rows: ComparisonRow[] = [];
   const samples: ArmSample[] = [];
@@ -446,19 +479,19 @@ export async function runCase(deps: RunCaseDeps, evalCase: EvalCase, options: Ru
   for (let rep = 0; rep < options.k; rep++) {
     const transcripts = new Map<Arm, Transcript | null>();
     const checksByArm = new Map<Arm, CheckResult[]>();
-    for (const [arm, skillDir] of armDirs) {
-      const session = await runArm(deps, evalCase, options, arm, skillDir, rep, evalCase.name);
+    for (const [arm, spec] of armSpecs) {
+      const session = await runArm(deps, evalCase, options, arm, spec, evaluated, rep, evalCase.name);
       const checks = runChecks(evalCase.checks, session.transcript ?? emptyTranscript, session.sandbox);
       transcripts.set(arm, session.transcript);
       checksByArm.set(arm, checks);
       samples.push(sampleFor(arm, evalCase.name, rep, session.transcript, session.retried, checks));
     }
 
-    for (const opponent of ['baseline', 'incumbent'] as const) {
-      if (!armDirs.some(([arm]) => arm === opponent)) continue;
+    for (const opponent of OPPONENTS) {
+      if (!armSpecs.some(([arm]) => arm === opponent)) continue;
       const outcome = await decide(deps, evalCase, transcripts.get('candidate') ?? null, transcripts.get(opponent) ?? null, checksByArm.get('candidate') ?? [], checksByArm.get(opponent) ?? []);
       rows.push({
-        skill: options.skillName, kind: 'execution', case: evalCase.name, rep,
+        skill: candidateSpec.name, kind: 'execution', case: evalCase.name, rep,
         comparison: `candidate-vs-${opponent}`,
         outcome: outcome.result, decided_by: outcome.decidedBy, reason: outcome.reason,
         ...(outcome.swapped === undefined ? {} : { swapped: outcome.swapped }),
@@ -492,29 +525,28 @@ export async function runSuite(deps: RunCaseDeps, suite: EvalSuite, options: Run
     log(`  ${suite.name}: SKIPPED (environment) — missing ${missing.join(', ')}`);
     return { rows: [], arms: [], skipped: missing };
   }
-  const armDirs: Array<[Arm, string | null]> = [['baseline', null], ['candidate', options.arms.candidate]];
-  if (options.arms.incumbent !== undefined) armDirs.push(['incumbent', options.arms.incumbent]);
+  const { specs: armSpecs, candidate: candidateSpec, evaluated } = armTable(options);
   const rows: ComparisonRow[] = [];
   const samples: ArmSample[] = [];
   try {
     for (let rep = 0; rep < options.k; rep++) {
       const sessions = new Map<Arm, { sandbox: string; transcript: Transcript | null; retried: boolean }>();
-      for (const [arm, skillDir] of armDirs) sessions.set(arm, await runArm(deps, suite, options, arm, skillDir, rep, suite.name));
+      for (const [arm, spec] of armSpecs) sessions.set(arm, await runArm(deps, suite, options, arm, spec, evaluated, rep, suite.name));
       for (const subCase of suite.cases) {
         const checksByArm = new Map<Arm, CheckResult[]>();
-        for (const [arm] of armDirs) {
+        for (const [arm] of armSpecs) {
           const session = sessions.get(arm)!;
           const checks = runChecks(subCase.checks, session.transcript ?? emptyTranscript, session.sandbox);
           checksByArm.set(arm, checks);
           // The session-level efficiency values are deliberately repeated for every defect row.
           samples.push(sampleFor(arm, subCase.name, rep, session.transcript, session.retried, checks));
         }
-        for (const opponent of ['baseline', 'incumbent'] as const) {
-          if (!armDirs.some(([arm]) => arm === opponent)) continue;
+        for (const opponent of OPPONENTS) {
+          if (!armSpecs.some(([arm]) => arm === opponent)) continue;
           // Suites never have a rubric; an equal check result is therefore the no-judge tie.
           const outcome = await decide(deps, { ...suite, name: subCase.name, checks: subCase.checks }, sessions.get('candidate')!.transcript, sessions.get(opponent)!.transcript, checksByArm.get('candidate') ?? [], checksByArm.get(opponent) ?? []);
           rows.push({
-            skill: options.skillName, kind: 'execution', case: subCase.name, rep,
+            skill: candidateSpec.name, kind: 'execution', case: subCase.name, rep,
             comparison: `candidate-vs-${opponent}`,
             outcome: outcome.result, decided_by: outcome.decidedBy, reason: outcome.reason,
             checks_candidate: checksByArm.get('candidate') ?? [], checks_opponent: checksByArm.get(opponent) ?? [],

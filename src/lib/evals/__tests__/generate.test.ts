@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { AgentRunError, Transcript, type AgentApi } from '../agent.js';
 import { loadCase, loadSuite } from '../execution.js';
-import { GENERATION_TIMEOUT_MS, casePrompt, generate } from '../generate.js';
+import { BRIEF_MAX, GENERATION_TIMEOUT_MS, casePrompt, checkBriefNeutrality, deriveBrief, generate } from '../generate.js';
 import { parseTriggers } from '../triggers.js';
 
 const skill = '---\nname: deploy\ndescription: deploy safely\nlicense: UNLICENSED\nmetadata:\n  id: 11111111-1111-4111-8111-111111111111\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\nDeploy only after checks.';
@@ -318,5 +318,90 @@ describe('generated YAML round-trips byte for byte', () => {
     const result = await generate({ ...at(), agent: agent([applies, applies, applies], prompts) });
     expect(result).toMatchObject({ ok: true });
     expect(prompts).toHaveLength(1);
+  });
+});
+
+const briefFive = {
+  cases: ['one', 'two', 'three', 'four', 'five'].map((stem, index) => ({
+    name: `case-${stem}`,
+    task: `Do the job for step ${index + 1}.`,
+    checks: [{ transcript_mentions: 'done' }],
+    bucket: index === 4 ? 'adversarial' : 'explicit',
+  })),
+};
+const briefOpts = {
+  skill, files: ['SKILL.md'], catalog: '', model: 'sonnet', engineVersion: 'test',
+  now: new Date('2026-09-07T00:00:00Z'), cases: true as const,
+};
+
+describe('brief neutrality (IE6 §3.1)', () => {
+  it('refuses a multi-token name, warns on a single-token one, and is bounded by word edges', () => {
+    expect(checkBriefNeutrality('Audit the spec with live-trigger-monitoring.', ['live-trigger-monitoring'])).toEqual({ kind: 'refuse', name: 'live-trigger-monitoring' });
+    // `search` and `ls` are real skills here; a brief cannot describe the job without them.
+    expect(checkBriefNeutrality('Search the codebase for the failing test.', ['search'])).toEqual({ kind: 'warn', name: 'search' });
+    expect(checkBriefNeutrality('List the tools and report on false positives.', ['ls'])).toEqual({ kind: 'ok' });
+    expect(checkBriefNeutrality('Describe the job plainly.', ['search', 'codex-spec'])).toEqual({ kind: 'ok' });
+    // A refusal outranks a warning whichever name is hit first.
+    expect(checkBriefNeutrality('Run search, then codex-spec.', ['search', 'codex-spec'])).toEqual({ kind: 'refuse', name: 'codex-spec' });
+  });
+});
+
+describe('brief derivation (IE6 §3.1)', () => {
+  const skills = [
+    { name: 'zebra-auditor', skill: '# zebra', files: ['SKILL.md'] },
+    { name: 'alpha-auditor', skill: '# alpha', files: ['SKILL.md'] },
+  ];
+
+  it('aliases both skills and orders them by name, never by argument position', async () => {
+    const prompts: string[] = [];
+    const result = await deriveBrief({ agent: agent([{ brief: 'Review a written plan and report what is wrong with it.' }], prompts), model: 'sonnet', skills });
+    expect(result).toMatchObject({ ok: true, value: { order: ['alpha-auditor', 'zebra-auditor'] } });
+    expect(prompts[0]).toContain('SKILL 1 — SKILL.md:\n# alpha');
+    expect(prompts[0]).toContain('SKILL 2 — SKILL.md:\n# zebra');
+    expect(prompts[0]).not.toContain('zebra-auditor');
+    expect(prompts[0]).not.toContain('alpha-auditor');
+    // Assembled from escapes; a literal backslash-n would reach the model as text.
+    expect(prompts[0]).not.toContain(String.raw`\n`);
+  });
+
+  it('re-asks when the brief names a skill, caps its length, and reports a single-token warning', async () => {
+    const named = { brief: 'Use alpha-auditor to review the plan.' };
+    expect(await deriveBrief({ agent: agent([named, named, named]), model: 'sonnet', skills }))
+      .toMatchObject({ ok: false, error: expect.stringContaining('--brief') });
+
+    const long = { brief: 'x'.repeat(BRIEF_MAX + 1) };
+    expect(await deriveBrief({ agent: agent([long, long, long]), model: 'sonnet', skills })).toMatchObject({ ok: false });
+
+    expect(await deriveBrief({
+      agent: agent([{ brief: 'Search the plan for contradictions and report them.' }]),
+      model: 'sonnet', skills: [{ name: 'search', skill: '# s', files: [] }, { name: 'zebra-auditor', skill: '# z', files: [] }],
+    })).toMatchObject({ ok: true, value: { warning: 'search' } });
+  });
+});
+
+describe('brief-seeded case generation (IE6 §3.2)', () => {
+  it('sees the brief alone, fixes the cases shape, and raises the floor to five', async () => {
+    const prompts: string[] = [];
+    const result = await generate({ ...briefOpts, agent: agent([briefFive], prompts), brief: 'Summarise what changed in a document.' });
+    expect(result).toMatchObject({ ok: true });
+    if (!result.ok) return;
+    expect(Object.keys(result.value.cases!.files)).toHaveLength(5);
+    expect(result.value.suite).toBeUndefined(); // the suite shape is not offered in this mode
+    expect(prompts[0]).toContain('Summarise what changed in a document.');
+    expect(prompts[0]).toContain('between 5 and 7');
+    expect(prompts[0]).not.toContain('deploy safely'); // neither SKILL.md enters the prompt
+    expect(prompts[0]).not.toContain('CANDIDATE FILE LISTING');
+  });
+
+  it('rejects a brief-seeded set below the head-to-head floor', async () => {
+    const three = { cases: briefFive.cases.slice(0, 3) };
+    expect(await generate({ ...briefOpts, agent: agent([three, three, three]), brief: 'b' }))
+      .toMatchObject({ ok: false, error: expect.stringContaining('between 5 and 7') });
+  });
+
+  it('leaves ordinary generation on the 3-case floor and the skill text', async () => {
+    const prompts: string[] = [];
+    await generate({ ...briefOpts, agent: agent([validCases], prompts) });
+    expect(prompts[0]).toContain('deploy safely');
   });
 });

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MachineRemovalProvider } from '../../app/MachineRemovalProvider';
 import { App } from '../../app/App';
 import { Providers } from '../../app/providers';
@@ -45,7 +45,7 @@ it('a sidebar project row reveals, copies, and jumps to the Projects list', asyn
   open('#/library/global');
   const row = await screen.findByRole('link', { name: new RegExp('^' + root.label) });
   fireEvent.contextMenu(row, { clientX: 10, clientY: 10 });
-  expect(await names()).toEqual(['Show in Finder', 'Copy path', 'Manage projects…']);
+  expect(await names()).toEqual(['Show in Finder', 'Copy path', 'Rename…', 'Manage projects…']);
   await act(async () => { fireEvent.click(await item('Copy path')); });
   expect(copy).toHaveBeenCalledWith(root.root);
   fireEvent.contextMenu(row, { clientX: 10, clientY: 10 });
@@ -100,4 +100,32 @@ it('the detail title copies the name and install command, and the rail version c
   expect(copy.mock.calls.at(-1)![0]).toMatch(/^npx -y terum-skills@latest install /);
   await act(async () => { fireEvent.click(screen.getByRole('button', { name: design.DETAIL.version })); });
   expect(copy).toHaveBeenLastCalledWith(design.DETAIL.version);
+});
+
+
+// Rename (2026-09-19): a project row's menu offers Rename… only while the CLI advertises `projectRename`; the dialog
+// is prefilled with the row's name, trims what is typed, and closes on the CLI's result.
+it('a sidebar project row renames through project rename, prefilled with the current name', async () => {
+  const rename = vi.spyOn(backend.projects, 'rename');
+  open('#/library/global');
+  const row = await screen.findByRole('link', { name: /^Terum/ });
+  fireEvent.contextMenu(row, { clientX: 10, clientY: 10 });
+  fireEvent.click(await item('Rename…'));
+  const field = await screen.findByRole('textbox', { name: 'Project name' });
+  expect(field).toHaveValue('Terum');
+  fireEvent.change(field, { target: { value: '  Payments ' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Rename' }));
+  await waitFor(() => expect(rename).toHaveBeenCalledWith({ path: '/Users/you/code/terum', name: 'Payments' }));
+  await waitFor(() => expect(screen.queryByRole('textbox', { name: 'Project name' })).toBeNull());
+  // This harness renders Providers outside the test backend, so no query is invalidated here; the refetch
+  // after a rename is the adapter's `['config']` touch, which invalidation.test.ts pins for status.
+  // The mock keeps chosen names for the session; put the board's name back for the tests after this one.
+  await backend.projects.rename({ path: '/Users/you/code/terum', name: 'Terum' }).done;
+});
+
+it('a sidebar project row offers no Rename… when the CLI does not advertise project rename', async () => {
+  vi.spyOn(backend, 'features').mockResolvedValue({ ...await backend.features(), projectRename: false });
+  open('#/library/global');
+  fireEvent.contextMenu(await screen.findByRole('link', { name: /^SSM/ }), { clientX: 10, clientY: 10 });
+  expect(await names()).toEqual(['Show in Finder', 'Copy path', 'Manage projects…']);
 });

@@ -154,6 +154,7 @@ hello lines under `.planning/codex-runs/*/frames/` precede B5's three skill verb
   "project add",
   "project remove",
   "project list",
+  "project rename",
   "login",
   "setup",
   "team create",
@@ -193,16 +194,16 @@ hello lines under `.planning/codex-runs/*/frames/` precede B5's three skill verb
 caller to run it from a terminal (D24). The refresh feature is true, but there is no standalone refresh
 command: use `sync`. Neither belongs in the advertised verb list.
 
-`hello.features` names `libraryProjects`, `projects`, `memberRole`, `localIdentity`, `roles`, `favorites`, `follow`, `lastSeen`, `installScope`, `inviteScoping`, `disablePerMachine`, `projectMembers`, `liftOnCards`, `runEvalInApp`, `perCase`, `progress`, `refresh`, `appUpdate`, `reconcile`, `serve`, `usage`, and `misses`.
+`hello.features` names `libraryProjects`, `projectRename`, `projects`, `memberRole`, `localIdentity`, `roles`, `favorites`, `follow`, `lastSeen`, `installScope`, `inviteScoping`, `disablePerMachine`, `projectMembers`, `liftOnCards`, `runEvalInApp`, `perCase`, `progress`, `refresh`, `appUpdate`, `reconcile`, `serve`, `usage`, and `misses`.
 
-True: `libraryProjects`, `projects`, `memberRole`, `localIdentity`, `roles`, `installScope`,
+True: `libraryProjects`, `projectRename`, `projects`, `memberRole`, `localIdentity`, `roles`, `installScope`,
 `disablePerMachine`, `liftOnCards`, `runEvalInApp`, `perCase`, `progress`, `refresh`, `appUpdate`,
 `reconcile`, `serve`, `usage`.
 False: `favorites`, `follow`, `lastSeen`, `inviteScoping`, `projectMembers`.
 
 `perCase` turned true with eval-engine spec rev 20 (2026-09-14): receipts now carry `per_case` rows and a `case_runs` tally, and the desktop gates its per-case table on this flag.
 
-`libraryProjects` is the explicit local registry (`project add`, `project remove`, `project list`);
+`libraryProjects` is the explicit local registry (`project add`, `project remove`, `project list`), and `projectRename` its `project rename`;
 `projects` is team grouping (`team project create`). `memberRole` is the owner-written job label;
 `roles` supports GitHub Admin/Member permissions from `status --permissions` (otherwise unknown).
 `installScope` supports destinations and destination-aware removal. `appUpdate` and `serve`
@@ -416,7 +417,7 @@ These are additive result fields; protocol stays 1.
 a fetch stamp. It neither places skills nor replays pending work. See `f-sync` for the result
 shape and per-team failures. Over frames it emits hello and result; there is no separate refresh verb.
 
-`project add [path]` · `project remove <path>` · `project list` are the Library's local project registry. `add` asks `Which folder?` as a `path` ask when no argument is given (default: the nearest git repository above the cwd) and returns `{ path, label, added, reconcile? }`; after a newly added project it scans only that project, and frame mode carries the non-writing reconcile result so the shell can open a dialog only when it is non-empty. `remove` returns `{ path, placementsRemaining }` and forgets the path only, so nothing on disk changes; `list` returns `{ projects: { path, label, rootState, skillFolders }[] }`. A project is added only by an explicit act: no verb registers one as a side effect, and `install --into <path>` refuses a path that is not already a project rather than adding it.
+`project add [path]` · `project remove <path>` · `project list` · `project rename <path> --to <name>` are the Library's local project registry. `add` asks `Which folder?` as a `path` ask when no argument is given (default: the nearest git repository above the cwd) and returns `{ path, label, added, parent, reconcile? }`; after a newly added project it scans only that project, and frame mode carries the non-writing reconcile result so the shell can open a dialog only when it is non-empty. `remove` returns `{ path, placementsRemaining, subProjectsRemaining }` and forgets the path only, so nothing on disk changes; `list` returns `{ projects: { path, label, parent, rootState, skillFolders }[] }` in tree order; `rename` returns `{ path, label, previous }` and changes display text only, never the folder. A project registered inside another registered project is its sub-project: `parent` is that project's root (null at the top level), read off the paths on every call so the tree always matches the folder structure, and every `ls --local` project section carries the same `parent`. A sub-project's derived label is its path inside the parent (`apps/web`); a renamed label is kept as typed until renamed again, and the derived labels move out of its way. A project is added only by an explicit act: no verb registers one as a side effect, and `install --into <path>` refuses a path that is not already a project rather than adding it.
 
 ### App updates
 

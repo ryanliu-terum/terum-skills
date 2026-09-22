@@ -469,3 +469,29 @@ it('Sync now says what happened, not that it finished: every unfetched team is a
  await within(again).findByText('Fetched 1 of 2 teams.',{selector:'[role=status]'});
  expect(within(again).getByRole('alert')).toHaveTextContent('beta: no usable clone on this machine · no clone for this team on this machine');
 });
+
+
+// Sub-projects and rename (2026-09-19): the Projects list draws a sub-project under its parent and says so, and each
+// row's Rename opens the shared dialog, prefilled, which drives `project rename`.
+it('names a sub-project under its parent and renames a project from Settings through project rename',async()=>{
+ vi.spyOn(backend,'surfaces').mockResolvedValue({...await backend.surfaces(),libraryProjects:true});
+ const status=await backend.status();if(!status.ok)throw new Error(status.error);
+ const acme={id:'/a/acme',kind:'checkout' as const,root:'/a/acme',label:'acme',registered:true,rootState:'scanned' as const,count:'2',parent:null};
+ vi.spyOn(backend,'status').mockResolvedValue({ok:true,value:{...status.value,roots:[...status.value.roots.filter(r=>r.kind==='global'),acme,{...acme,id:'/a/acme/apps/web',root:'/a/acme/apps/web',label:'apps/web',count:'1',parent:'/a/acme'}]}});
+ const rename=vi.spyOn(backend.projects,'rename').mockImplementation(()=>createRun(async()=>({ok:true,value:{path:'/a/acme',label:'Payments',previous:'acme'}})));
+ open('#/settings/machine');await screen.findByText(/Adding a folder is not sharing/);
+ expect(screen.getByText(/\/a\/acme\/apps\/web · scanned · 1 skill folders · sub-project of acme/)).toBeVisible();
+ expect(screen.getByText(/\/a\/acme · scanned · 2 skill folders$/)).toBeVisible();
+ fireEvent.click(screen.getAllByRole('button',{name:'Rename'})[0]!);
+ const field=await screen.findByRole('textbox',{name:'Project name'});expect(field).toHaveValue('acme');
+ fireEvent.change(field,{target:{value:'Payments'}});fireEvent.keyDown(field,{key:'Enter'});
+ await waitFor(()=>expect(rename).toHaveBeenCalledWith({path:'/a/acme',name:'Payments'}));
+ await waitFor(()=>expect(screen.queryByRole('textbox',{name:'Project name'})).toBeNull());
+});
+it('offers no Rename in the Projects list when the CLI does not advertise project rename',async()=>{
+ vi.spyOn(backend,'surfaces').mockResolvedValue({...await backend.surfaces(),libraryProjects:true});
+ vi.spyOn(backend,'features').mockResolvedValue({...await backend.features(),projectRename:false});
+ open('#/settings/machine');await screen.findByText(/Adding a folder is not sharing/);
+ expect(screen.getAllByRole('button',{name:'Remove'}).length).toBeGreaterThan(0);
+ expect(screen.queryByRole('button',{name:'Rename'})).toBeNull();
+});

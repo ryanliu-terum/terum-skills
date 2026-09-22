@@ -1,7 +1,7 @@
 import { lstat, mkdir, readFile, readdir, rm, symlink, utimes, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { fsForTests, inspect, lockTarget, place, remove, resolveTarget } from '../placer.js';
+import { fsForTests, inspect, keptCopyPath, lockTarget, place, remove, resolveTarget } from '../placer.js';
 import { skillTargetLockPath, TARGET_LOCK_STALE_MS } from '../placer/vendor/skillhub/skill-target-lock.js';
 import { bareTeam, cloneWithIdentity, git, SYMLINKS_SUPPORTED, temporaryDirectory } from './fixtures.js';
 import { diffSkillFiles, snapshotSkillDirectory } from '../placer/vendor/skillhub/skill-fingerprint.js';
@@ -266,5 +266,26 @@ describe('native Placer (§7)', () => {
     expect(await readFile(join(failedExclude.path, 'SKILL.md'), 'utf8')).toBe('source');
     expect(failedExclude.notices.join('\n')).toContain('no git metadata');
     await expect(place(join(root, 'missing'), target, 'missing')).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+});
+
+describe('keptCopyPath', () => {
+  it('uses the plain name once, then a stamped sibling, and never returns an occupied path', async () => {
+    const root = await temporaryDirectory();
+    const skills = join(root, '.claude/skills');
+    const backups = join(root, '.claude/old-skills');
+    await mkdir(skills, { recursive: true });
+    const first = await keptCopyPath(skills, 'sample');
+    expect(first).toBe(join(backups, 'sample'));
+    await mkdir(first, { recursive: true });
+    const second = await keptCopyPath(skills, 'sample');
+    expect(second).not.toBe(first);
+    expect(dirname(second)).toBe(backups);
+    expect((await inspect(second)).kind).toBe('absent');
+    // A name already stamped this millisecond still resolves, so two replaces in one tick cannot collide.
+    await mkdir(second, { recursive: true });
+    const third = await keptCopyPath(skills, 'sample');
+    expect([first, second]).not.toContain(third);
+    expect((await inspect(third)).kind).toBe('absent');
   });
 });

@@ -292,7 +292,38 @@ it('asks once per project run, writes nothing before Yes, and keeps No silent', 
   }
   off();
 });
-it('shows failures from install in the centered error layout', async () => { vi.spyOn(pickBackend(), 'install').mockImplementation(() => { throw new Error('Cannot install project.'); }); open('#/marketplace/projects/docs?dialog=install'); const dialog = await screen.findByRole('dialog'); await waitFor(() => expect(within(dialog).getByRole('button', { name: 'Install 3 skills' })).toBeEnabled()); fireEvent.click(within(dialog).getByRole('button', { name: 'Install 3 skills' })); expect(await screen.findByRole('alert')).toHaveTextContent('Cannot install project.'); });
+it('reports a failed install as a failed install, not as an unreadable marketplace', async () => {
+  vi.spyOn(pickBackend(), 'install').mockImplementation(() => { throw new Error('Cannot install project.'); });
+  open('#/marketplace/projects/docs?dialog=install');
+  const dialog = await screen.findByRole('dialog');
+  await waitFor(() => expect(within(dialog).getByRole('button', { name: 'Install 3 skills' })).toBeEnabled());
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Install 3 skills' }));
+  const alert = await screen.findByRole('alert');
+  expect(alert).toHaveTextContent('Cannot install project.');
+  expect(alert).toHaveTextContent("Couldn't install Docs");
+  expect(screen.queryByText("Couldn't read the marketplace")).toBeNull();
+});
+// The bug this pins: the CLI's install-path refusal (`src/commands/install.ts`, the old-skills collision) reached the
+// catalog board, so the headline sent the reader to debug git and the network over a folder on their own disk.
+it('keeps a CLI install refusal off the catalog board and leaves the project page standing', async () => {
+  const refusal = '~/.claude/old-skills/decision-walk already exists; move the kept copy elsewhere before retrying.';
+  vi.spyOn(pickBackend(), 'install').mockImplementation(() => createRun(async () => ({ ok: false, error: refusal })));
+  open('#/marketplace/projects/docs?dialog=install');
+  const dialog = await screen.findByRole('dialog');
+  await waitFor(() => expect(within(dialog).getByRole('button', { name: 'Install 3 skills' })).toBeEnabled());
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Install 3 skills' }));
+  const alert = await screen.findByRole('alert');
+  expect(alert).toHaveTextContent(refusal);
+  expect(alert).toHaveTextContent("Couldn't install Docs");
+  expect(screen.queryByText("Couldn't read the marketplace")).toBeNull();
+  expect(screen.queryByText(/could not read the team catalog/)).toBeNull();
+  expect(screen.getByRole('heading', { name: 'Docs' })).toBeInTheDocument();
+});
+it('still blanks the page behind the catalog headline when the catalog read is what failed', async () => {
+  open('#/marketplace?__mock=error');
+  expect(await screen.findByText("Couldn't read the marketplace")).toBeInTheDocument();
+  expect(screen.getByRole('alert')).toHaveTextContent('Could not resolve host: github.com');
+});
 
 it('installs from a marketplace card via the install dialog without entering a mock scenario', async () => {
   open('#/marketplace/skills');
