@@ -10,8 +10,8 @@ import { ConfigStore, createConfigStore, selectTeam } from '../lib/config.js';
 import type { Config } from '../lib/schema.js';
 import { localReceiptsFor, newestReceiptAt } from '../lib/evals/receipt-store.js';
 import { type AgentApi, DEFAULT_MODEL, preflight as systemPreflight, systemAgent } from '../lib/evals/agent.js';
-import { type DroppedCase, type ArmSample, type ComparisonRow, loadCase, loadSuite, runCase, runSuite } from '../lib/evals/execution.js';
-import { generate, type GeneratedAssets } from '../lib/evals/generate.js';
+import { type Arm, type ArmSpec, type DroppedCase, type ArmSample, type ComparisonRow, loadCase, loadSuite, runCase, runSuite } from '../lib/evals/execution.js';
+import { BRIEF_MAX, assetHeader, checkBriefNeutrality, deriveBrief, generate, type GeneratedAssets } from '../lib/evals/generate.js';
 import { assessHygiene, exemptAuthorEmail, formatHygieneFindings, hygieneFrontmatter, HygieneRefused, inspectContent, reportHygieneWarnings } from '../lib/evals/hygiene.js';
 import { makeRng } from '../lib/evals/judge.js';
 import { receiptPath, buildReceipt, NO_TEAM_RUNNER_HANDLE } from '../lib/evals/receipt.js';
@@ -43,6 +43,10 @@ export interface EvalArgs extends WithForm {
   /** Queue-only: reuse a receipt found after refresh, before any paid work. */
   skipReceipted?: boolean;
   k?: number;
+  /** IE6 §1: the rival skill ref. Its presence is what enters head-to-head mode. */
+  vs?: string;
+  /** IE6 §3.1: a human-written shared brief, skipping derivation and the confirm gate. */
+  brief?: string;
   triggersOnly?: boolean;
   executionOnly?: boolean;
   case?: string;
@@ -111,10 +115,29 @@ export function missingSkillFolder(ref: string): string {
 export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResult>> {
   try {
     if (args.triggersOnly && args.executionOnly) return failure('--triggers-only and --execution-only cannot be used together.');
+    // IE6 §1.2 — every head-to-head refusal is checked before any agent call. The spec's list was
+    // written against the team-clone model; --working/--save/--gen no longer exist, and the flags
+    // below are their equivalents on the local-folder model (§6.3).
+    const headToHead = args.vs !== undefined;
+    if (headToHead) {
+      if (args.commit) return failure('head-to-head runs are never committed: a receipt pins one skill id and one content digest.');
+      if (args.case !== undefined) return failure('--vs cannot be combined with --case: a named case is an authored assertion belonging to one skill.');
+      if (args.triggersOnly) return failure('--vs cannot be combined with --triggers-only: trigger evals are per-skill, and head-to-head is execution only.');
+      // Cases come from the shared brief, so --no-gen would leave the run with zero cases — and a
+      // zero-row expectation reports `complete` (engine §7.1), a clean report over no evidence.
+      if (args.noGen) return failure('--vs cannot be combined with --no-gen: head-to-head cases are generated from the shared brief, so --no-gen would run zero cases.');
+      // The queue exists to produce receipts; a head-to-head never lands one.
+      if (args.expectedVersion !== undefined || args.skipReceipted) return failure('head-to-head runs are not queueable: the queue exists to land receipts, and this mode never commits one.');
+      if (args.brief === undefined && !io.interactive) {
+        return failure('A head-to-head needs a shared task brief confirmed by a human. This channel cannot ask, so write the brief yourself and pass --brief <path>.');
+      }
+    }
     // Default k=1 (spec rev 18; Ajay, 2026-09-10) — overrides the 2026-09-07 "keep default k=3"
     // ruling (Terum 5aa9a4b2) on cost: k=3 -> k=1 takes a 3-case run from ~$4.40 to ~$1.50 measured.
     // A receipt you intend to gate on wants --k 3 or more; §16.6 carries the noise caveat.
-    const k = args.k ?? 1;
+    // IE6 §7: the comparison is the noisier quantity and reps are the cheapest mitigation, so
+    // head-to-head keeps its own default rather than inheriting the k=1 cost default.
+    const k = args.k ?? (headToHead ? 5 : 1);
     if (!Number.isInteger(k) || k < 1) return failure('--k must be a positive integer.');
     const store = args.config ?? createConfigStore();
     const runner = args.runner ?? systemRunner;
@@ -150,6 +173,36 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
     // scan's own detail against the path — the miss above is reserved for a name no root holds.
     const unusable = unusableSkillFolder(local);
     if (unusable !== undefined) return failure(unusable);
+    // IE6 §1: the rival resolves the same way the candidate does. The spec said "the rival is
+    // always a committed version" against the old team-clone model; on the local-folder model
+    // (§6.3) neither side is a committed tree, so both are Library folders and the run records
+    // each one's content digest instead.
+    let rival: { name: string; dir: string; id: string | null; digest?: string } | undefined;
+    if (args.vs !== undefined) {
+      const rivalMatch = await resolveLibrarySkill(args.home ?? homedir(), config, store.root, args.vs);
+      if (rivalMatch === undefined) return failure(missingSkillFolder(args.vs));
+      const rivalUnusable = unusableSkillFolder(rivalMatch);
+      if (rivalUnusable !== undefined) return failure(rivalUnusable);
+      if (resolve(rivalMatch.path) === resolve(local.path)) return failure(`--vs ${args.vs} resolves to the same folder as ${args.ref ?? local.name}; a head-to-head needs two different skills.`);
+      rival = { name: rivalMatch.name, dir: rivalMatch.path, id: null };
+    }
+    // §1.2 / §3.1: a supplied brief is validated HERE — before hygiene, before preflight, and so
+    // before any agent call. Rejecting a brief that names a skill must not cost a run. Rev 1
+    // trusted supplied briefs because "a human wrote it", but --brief is mandatory without a
+    // terminal, which is exactly where nobody is watching.
+    let suppliedBrief: { text: string; path: string } | undefined;
+    if (rival !== undefined && args.brief !== undefined) {
+      const briefPath = resolve(args.brief);
+      const supplied = await optionalText(briefPath);
+      if (supplied === undefined) return failure(`No brief file at ${args.brief}.`);
+      const text = supplied.replace(/^#.*$/gm, '').trim();
+      if (!text) return failure(`The brief at ${args.brief} is empty.`);
+      if (text.length > BRIEF_MAX) return failure(`The brief at ${args.brief} is ${text.length} characters; the cap is ${BRIEF_MAX} so a human actually reads it before confirming.`);
+      const neutrality = checkBriefNeutrality(text, [local.name, rival.name]);
+      if (neutrality.kind === 'refuse') return failure(`The brief at ${args.brief} names '${neutrality.name}'. A brief that names a tool is describing the tool, not the job; describe the work both skills are competing to do.`);
+      if (neutrality.kind === 'warn') io.print(`Note: the brief contains the word '${neutrality.name}', which is also a skill name here. Continuing — it reads as an ordinary word.`);
+      suppliedBrief = { text, path: briefPath };
+    }
     // Best-effort, never a gate: a folder the team has never seen is still evaluable (§6.3).
     // By the FOLDER's name, not the ref: a path ref would never match a team skill, and the incumbent arm
     // would then silently treat a published skill as one the team has never seen.
@@ -194,6 +247,19 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
         return success({ team: teamName, id: skillId, name: local.name, runDir: '', ccVersion: newest.receipt.provenance.cc_version, executionStatus: newest.receipt.execution_status, alreadyEvaluated: true });
       }
     }
+    // §1: the rival passes the same hygiene gate as the candidate; a refusal names which of the
+    // two folders failed, since "Hygiene failed for X" alone is ambiguous with two skills in play.
+    if (rival !== undefined) {
+      const rivalFiles = await sourceFiles(rival.dir);
+      rival.digest = skillContentDigest(rivalFiles.files);
+      try {
+        reportHygieneWarnings((line) => io.print(line), assessHygiene(rival.name, rivalFiles, team?.policy.skill_license ?? null, false, true, undefined, 0));
+      } catch (error) {
+        if (!(error instanceof HygieneRefused)) throw error;
+        reportHygieneWarnings((line) => io.print(line), error.assessment);
+        return failure(`Hygiene failed for the rival skill ${rival.name}:\n${error.message}`);
+      }
+    }
     const dependencies = await dependencyPlan(candidateDir);
     const heavyScan = await scanHeavySkill(candidateDir, dependencies.staged[0]);
     let heavy = args.heavy;
@@ -228,7 +294,45 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
     const authoredSelected = args.case === undefined ? authoredCaseFiles : authoredCaseFiles.filter((file) => file.replace(/\.ya?ml$/i, '') === args.case);
     // A named case is an authored assertion; it intentionally never causes a model call.
     if (wantsCases && args.case !== undefined && authoredSelected.length === 0) return failure(`No eval case named ${args.case} for ${local.name}.`);
-    const { generateCases, generateTriggers } = plannedGeneration(args, assets);
+    const planned = plannedGeneration(args, assets);
+    // §3.2: head-to-head cases always come from the brief — authored cases belong to one skill,
+    // --case is refused, and --no-gen is refused above.
+    const generateCases = rival === undefined ? planned.generateCases : true;
+    const generateTriggers = rival === undefined && planned.generateTriggers;
+
+    // §3: the brief is the whole neutrality guarantee — the only thing the case generator sees,
+    // and a human signs its text.
+    let brief: { text: string; source: 'derived' | 'supplied'; order: string[]; path: string } | undefined;
+    if (rival !== undefined) {
+      const names = [local.name, rival.name];
+      if (suppliedBrief !== undefined) {
+        brief = { text: suppliedBrief.text, source: 'supplied', order: [...names].sort(), path: suppliedBrief.path };
+      } else {
+        const derived = await deriveBrief({
+          agent: args.agent ?? systemAgent, model,
+          skills: [
+            { name: local.name, skill: candidateFiles.files.get('SKILL.md')?.toString('utf8') ?? '', files: [...candidateFiles.files.keys()].sort() },
+            { name: rival.name, skill: (await sourceFiles(rival.dir)).files.get('SKILL.md')?.toString('utf8') ?? '', files: [] },
+          ],
+        });
+        if (!derived.ok) return failure(derived.error);
+        // --commit is refused in this mode, so generation never rewrites the skill and
+        // `regenerated` stays false: this is the same path the run tree gets below.
+        const briefDir = join(store.root, 'evals', 'local', candidateDigest.replace(/^sha256:/, ''), runId);
+        const briefPath = join(briefDir, 'brief.md');
+        await mkdir(briefDir, { recursive: true, mode: 0o700 });
+        await writeFile(briefPath, `${assetHeader(model, packageVersion() ?? 'unknown', runAt)}${derived.value.brief}\n`, 'utf8');
+        io.print('');
+        io.print(derived.value.brief);
+        io.print('');
+        io.print(`brief: ${briefPath}`);
+        if (derived.value.warning !== undefined) io.print(`Note: the brief contains the word '${derived.value.warning}', which is also a skill name here. It reads as an ordinary word — check that it does.`);
+        if (!await io.confirm('Use this brief?')) {
+          return failure(`Stopped without running. Edit ${briefPath} so it describes the job fairly to both skills, then re-run with --brief ${briefPath}.`);
+        }
+        brief = { text: derived.value.brief, source: 'derived', order: derived.value.order, path: briefPath };
+      }
+    }
     let generated: GeneratedAssets = {};
     if (generateCases || generateTriggers) {
       const catalog = await endorsedCatalog(local.libraryRoot, { name: local.name, description });
@@ -244,6 +348,7 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
         cases: generateCases,
         triggers: generateTriggers,
         shape: frontmatter?.metadata?.eval?.shape,
+        ...(brief === undefined ? {} : { brief: brief.text }),
       });
       if (!built.ok) return failure(built.error);
       generated = built.value;
@@ -335,8 +440,19 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
       }
       // §6.5: no clone, no team, no id, no receipted version — every one of them means NO incumbent
       // and a single-arm run, exactly as eval-engine §7.1 already names it.
-      const incumbent = clone === null || skillId === null ? undefined : await incumbentDir(clone, local.name, await listVersions(clone, local.name), skillId, evaluatedDigest);
-      const opponents = incumbent === undefined ? 1 : 2;
+      // IE6 §2.1: the incumbent arm is skipped entirely in head-to-head — not materialized, and
+      // candidate-vs-incumbent is not produced. Opponents are baseline and rival.
+      const incumbent = rival !== undefined || clone === null || skillId === null
+        ? undefined
+        : await incumbentDir(clone, local.name, await listVersions(clone, local.name), skillId, evaluatedDigest);
+      const opponents = rival !== undefined || incumbent !== undefined ? 2 : 1;
+      // IE6 §2: one arm table for both runners; identity travels with the tree.
+      const armTable: Partial<Record<Arm, ArmSpec>> = {
+        baseline: null,
+        candidate: { name: local.name, dir: candidateDir },
+        ...(incumbent === undefined ? {} : { incumbent: { name: local.name, dir: incumbent } }),
+        ...(rival === undefined ? {} : { rival: { name: rival.name, dir: rival.dir } }),
+      };
       // Includes every selected authored case before requirement probes or setup failures.
       expectedRows = (selected.length + (suite === undefined ? 0 : suite.value.cases.length)) * k * opponents;
       for (const file of selected) {
@@ -346,7 +462,7 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
         const output = await runCase(
           { agent: args.agent ?? systemAgent, rng, model, judgeModel: args.judgeModel ?? model, log: (line) => io.print(line) },
           parsed.value,
-          { k, skillName: local.name, caseDir: casesDir, arms: { candidate: candidateDir, ...(incumbent === undefined ? {} : { incumbent }) }, scratch, transcriptDir, dependencies },
+          { k, caseDir: casesDir, arms: armTable, scratch, transcriptDir, dependencies },
         );
         rows.push(...output.rows); arms.push(...output.arms);
         if (output.skipped) environmentSkips[name] = output.skipped;
@@ -356,7 +472,7 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
         const output = await runSuite(
           { agent: args.agent ?? systemAgent, rng, model, judgeModel: args.judgeModel ?? model, log: (line) => io.print(line) },
           suite.value,
-          { k, skillName: local.name, caseDir: generated.suite === undefined ? join(candidateDir, 'evals') : generatedRoot, arms: { candidate: candidateDir, ...(incumbent === undefined ? {} : { incumbent }) }, scratch, transcriptDir, dependencies },
+          { k, caseDir: generated.suite === undefined ? join(candidateDir, 'evals') : generatedRoot, arms: armTable, scratch, transcriptDir, dependencies },
         );
         // A skipped or seed-aborted suite has no shared session, so it cannot invalidate the
         // independence of ordinary case rows. A dead agent still yields samples and did run.
@@ -366,7 +482,7 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
         if (output.dropped) droppedCases[suite.value.name] = output.dropped;
       }
     }
-    const summary = aggregate(rows, arms, expectedRows, environmentSkips, droppedCases, suiteRan);
+    const summary = aggregate(rows, arms, expectedRows, environmentSkips, droppedCases, suiteRan, rival === undefined ? 'standard' : 'head-to-head');
     await writeRunTree(runDir, {
       team: teamName, skill_id: skillId, skill_name: local.name, run_id: runId,
       cc_version: preflight.value.ccVersion, model, judge_model: args.judgeModel ?? model,
@@ -423,7 +539,10 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
     const source = `${JSON.stringify(receipt.value, null, 2)}\n`;
     await writeFile(join(runDir, 'receipt.json'), source, 'utf8');
     if (generated.cases !== undefined || generated.suite !== undefined || generated.triggers !== undefined) announceGeneratedAssets(io, wantsCases, wantsTriggers, generated, join(runDir, 'generated'));
-    io.print(renderReport(summary, triggers));
+    io.print(renderReport(summary, triggers, rival === undefined || brief === undefined ? null : {
+      candidate: local.name, rival: rival.name, cases: caseNames.length, k,
+      briefPath: brief.path, briefSource: brief.source,
+    }));
 
     // Running the eval is the sharing step (Ajay, 2026-09-13). When these exact bytes are ALREADY a
     // published version, the receipt has a version to name and nothing else has to move — so it goes
@@ -444,7 +563,9 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
     // produced nothing to share — a folder with no cases and no triggers has no results, and
     // "to share these results" over an empty report is the kind of line users learn to skim.
     const hasResults = summary.expected_rows > 0 || triggers !== null;
-    if (shared === null && hasResults && args.commit !== false && teamName !== null && handle !== null) io.print(shareHint(local.name, summary.verdict, args.form));
+    // IE6 §5.2: a head-to-head never lands a receipt, so there is nothing to offer to share —
+    // and its verdict is null, which is exactly what the hint has no way to render.
+    if (rival === undefined && shared === null && hasResults && args.commit !== false && teamName !== null && handle !== null && summary.verdict !== null) io.print(shareHint(local.name, summary.verdict, args.form));
 
     return success({
       team: teamName, id: skillId, name: local.name, runDir, ccVersion: preflight.value.ccVersion,

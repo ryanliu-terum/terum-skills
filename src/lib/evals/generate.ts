@@ -25,6 +25,88 @@ const CASE_NAME = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const MIN_CASES = 3;
 const MAX_CASES = 7;
 /**
+ * IE6 §7.2: head-to-head raises the FLOOR only. Three is too thin a denominator for a
+ * comparison anyone will act on, and the cases are cheaper here than the arms; #236's
+ * generator-chosen count still picks the number, just from a narrower range.
+ */
+const MIN_HEAD_TO_HEAD_CASES = 5;
+/** §7.3: long enough for a real task description, short enough that a human reads it. */
+export const BRIEF_MAX = 1_500;
+
+export type NeutralityVerdict =
+  | { kind: 'ok' }
+  | { kind: 'warn'; name: string }
+  | { kind: 'refuse'; name: string };
+
+/**
+ * IE6 §3.1: the deterministic neutrality check, a PURE function rather than logic inside the
+ * correction loop — the supplied-brief path calls it too and must not pay a model round-trip.
+ *
+ * A multi-token name (hyphenated or spaced) appearing in the brief means the brief is describing
+ * the tool, so it refuses. A single-token name is usually an ordinary English word — this project
+ * ships skills called `search`, `eval`, `ls`, `run` — and a hard refusal there makes exactly those
+ * skills uncomparable, so it warns and continues. No dictionary: the rule is the token count of
+ * the NAME, so there is nothing to maintain.
+ */
+export function checkBriefNeutrality(brief: string, names: readonly string[]): NeutralityVerdict {
+  let warned: string | undefined;
+  for (const name of names) {
+    if (!nameAppears(brief, name)) continue;
+    if (name.split(/[^A-Za-z0-9]+/).filter(Boolean).length > 1) return { kind: 'refuse', name };
+    warned ??= name;
+  }
+  return warned === undefined ? { kind: 'ok' } : { kind: 'warn', name: warned };
+}
+
+/** Bounded by non-alphanumerics so `ls` does not match inside `tools` or `false`. */
+function nameAppears(haystack: string, name: string): boolean {
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`(?<![A-Za-z0-9])${escaped}(?![A-Za-z0-9])`, 'i').test(haystack);
+}
+
+export interface DeriveBriefOptions {
+  agent: AgentApi;
+  /** Both skills, each with its SKILL.md and file listing. The order given here is irrelevant. */
+  skills: readonly { name: string; skill: string; files: readonly string[] }[];
+  model: string;
+}
+
+export interface DerivedBrief {
+  brief: string;
+  /** §4 `_meta.brief_order`: the names in the order shown, so the aliasing is auditable. */
+  order: string[];
+  /** Set when a single-token name survived into the brief — printed above the confirm gate. */
+  warning?: string;
+}
+
+/**
+ * §3.1: derive the shared task brief. Both skills are aliased to `Skill 1` / `Skill 2` and
+ * ordered BY NAME, never by which was typed first — a fixed order would put the candidate in
+ * the same slot on every run, the position tilt §7.5 swaps judge orderings to avoid.
+ */
+export async function deriveBrief(options: DeriveBriefOptions): Promise<Result<DerivedBrief>> {
+  const ordered = [...options.skills].sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+  const names = ordered.map((entry) => entry.name);
+  let warning: string | undefined;
+  const prompt = briefPrompt(ordered);
+  const result = await askWithValidation<string>(options.agent, prompt, options.model, Buffer.byteLength(prompt, 'utf8'), (raw) => {
+    const brief = raw['brief'];
+    if (typeof brief !== 'string' || !brief.trim()) return Promise.resolve(failure("the brief must be a non-empty 'brief' string"));
+    if (brief.length > BRIEF_MAX) return Promise.resolve(failure(`the brief must be at most ${BRIEF_MAX} characters (got ${brief.length})`));
+    const neutrality = checkBriefNeutrality(brief, names);
+    if (neutrality.kind === 'refuse') return Promise.resolve(failure(`the brief names '${neutrality.name}'; describe the job, not either tool`));
+    warning = neutrality.kind === 'warn' ? neutrality.name : undefined;
+    return Promise.resolve(success(brief.trim()));
+  });
+  if (!result.ok) return failure(`Could not derive a shared brief: ${result.error}. Write one yourself and pass --brief <path>.`);
+  return success({ brief: result.value, order: names, ...(warning === undefined ? {} : { warning }) });
+}
+
+function briefPrompt(ordered: readonly { skill: string; files: readonly string[] }[]): string {
+  const blocks = ordered.map((entry, index) => `SKILL ${index + 1} — SKILL.md:\n${entry.skill}\n\nSKILL ${index + 1} — FILE LISTING (names only):\n${entry.files.join('\n')}`);
+  return `Two Claude Code skills do a similar job. Describe THE JOB — not either skill — as a task brief an evaluator will use to write test cases neither skill has seen.\n\nReturn ONLY JSON: {"brief":"..."}.\nThe brief must be plain prose, at most ${BRIEF_MAX} characters, and must NOT name either skill or any tool: a brief that names a tool is describing the tool, not the job. Describe what someone needs done and what a good result looks like.\n\n${blocks.join('\n\n')}`;
+}
+/**
  * Eval-gen D6 (2026-09-14): `askJson`'s 120 s default was sized for exactly three cases. Rev 3 asks
  * for up to seven and D1 asks each to carry a tool stub, and a 34 KB SKILL.md (single-fix) did not
  * finish in 120 s — three silent timeouts, no receipt. Arm runs get 600 s; generation gets half.
@@ -61,6 +143,11 @@ export interface GenerateOptions {
   now: Date;
   cases?: boolean;
   triggers?: boolean;
+  /**
+   * IE6 §3.2: head-to-head. When set, the case prompt sees the brief ALONE — no SKILL.md, no
+   * file listing — which removes eval-gen's accepted circularity rather than mitigating it.
+   */
+  brief?: string;
   /** Optional lenient `metadata.eval.shape` value; validity is owned by this generation boundary. */
   shape?: unknown;
   /** Where D3's dry-run sandboxes live; a private temp dir, removed afterwards, when omitted. */
@@ -68,8 +155,13 @@ export interface GenerateOptions {
 }
 
 /** Generate each requested asset kind with at most two validation-correction re-asks. */
+/** The provenance header every generated asset carries (§3.1: `brief.md` carries it too). */
+export function assetHeader(model: string, engineVersion: string, now: Date): string {
+  return `${HEADER}\n# model: ${model} · engine: ${engineVersion} · ${now.toISOString()}\n`;
+}
+
 export async function generate(options: GenerateOptions): Promise<Result<GeneratedAssets>> {
-  const header = `${HEADER}\n# model: ${options.model} · engine: ${options.engineVersion} · ${options.now.toISOString()}\n`;
+  const header = assetHeader(options.model, options.engineVersion, options.now);
   const skillBytes = Buffer.byteLength(options.skill, 'utf8');
   const out: GeneratedAssets = {};
   if (options.triggers) {
@@ -84,7 +176,15 @@ export async function generate(options: GenerateOptions): Promise<Result<Generat
     try {
       const shape = generationShape(options.shape);
       if (!shape.ok) return failure(`Could not generate execution cases: ${shape.error}. Retry the command or pass --no-gen.`);
-      generated = await askWithValidation(options.agent, suitePrompt(options, shape.value), options.model, skillBytes, (raw) => validateExecutionAssets(raw, scratch, shape.value, skillName));
+      // IE6 §3.2: head-to-head fixes the shape to `cases`. A suite plants defects into a
+      // repository the generator builds from the skill's own text; from a brief alone that is a
+      // longer leap than this mode needs, and the shape choice would vary between reruns of the
+      // same pair. The floor rises to MIN_HEAD_TO_HEAD_CASES; #236 still picks the number.
+      const headToHead = options.brief !== undefined;
+      const shapeValue: GenerationShape = headToHead ? 'cases' : shape.value;
+      const floor = headToHead ? MIN_HEAD_TO_HEAD_CASES : MIN_CASES;
+      const prompt = headToHead ? casePrompt(options, floor) : suitePrompt(options, shapeValue);
+      generated = await askWithValidation(options.agent, prompt, options.model, skillBytes, (raw) => validateExecutionAssets(raw, scratch, shapeValue, skillName, floor));
     } finally {
       if (options.scratch === undefined) await rm(scratch, { recursive: true, force: true });
     }
@@ -106,13 +206,13 @@ function generationShape(value: unknown): Result<GenerationShape> {
   return failure("SKILL.md metadata.eval.shape must be 'suite' or 'cases'");
 }
 
-async function validateExecutionAssets(raw: Record<string, unknown>, scratch: string, fixedShape: GenerationShape, skillName: string | undefined): Promise<Result<{ kind: 'cases'; cases: Record<string, Record<string, unknown>> } | { kind: 'suite'; file: string }>> {
+async function validateExecutionAssets(raw: Record<string, unknown>, scratch: string, fixedShape: GenerationShape, skillName: string | undefined, floor: number = MIN_CASES): Promise<Result<{ kind: 'cases'; cases: Record<string, Record<string, unknown>> } | { kind: 'suite'; file: string }>> {
   const isSuite = Object.hasOwn(raw, 'suite');
   const isCases = Object.hasOwn(raw, 'cases');
   if (isSuite === isCases) return failure("generated execution assets need exactly one of 'suite' or 'cases'");
   if (fixedShape !== undefined && (fixedShape === 'suite') !== isSuite) return failure(`The shape is fixed: return {"${fixedShape}": ${fixedShape === 'suite' ? '...}' : '[...]}'}`);
   if (isCases) {
-    const cases = await validateCases(raw, scratch, skillName);
+    const cases = await validateCases(raw, scratch, skillName, floor);
     return cases.ok ? success({ kind: 'cases', cases: cases.value }) : failure(cases.error);
   }
   const suite = await validateSuite(raw, scratch, skillName);
@@ -164,10 +264,10 @@ function validateTriggers(raw: Record<string, unknown>): Result<Record<string, u
  * has provably started before it is written into the skill (D3). Both used to surface only at
  * run time — one as a silently dropped case, the other as a dead eval.
  */
-async function validateCases(raw: Record<string, unknown>, scratch: string, skillName: string | undefined): Promise<Result<Record<string, Record<string, unknown>>>> {
+async function validateCases(raw: Record<string, unknown>, scratch: string, skillName: string | undefined, floor: number = MIN_CASES): Promise<Result<Record<string, Record<string, unknown>>>> {
   const supplied = raw['cases'];
   if (!Array.isArray(supplied)) return failure("generated cases need a 'cases' array");
-  if (supplied.length < MIN_CASES || supplied.length > MAX_CASES) return failure(`generated cases need between ${MIN_CASES} and ${MAX_CASES} cases (got ${supplied.length})`);
+  if (supplied.length < floor || supplied.length > MAX_CASES) return failure(`generated cases need between ${floor} and ${MAX_CASES} cases (got ${supplied.length})`);
   const files: Record<string, Record<string, unknown>> = {};
   for (const candidate of supplied) {
     if (candidate === null || typeof candidate !== 'object' || Array.isArray(candidate)) return failure('each generated case must be an object');
@@ -330,6 +430,8 @@ function selfInvocation(task: string, skillName: string | undefined): string | n
 const SETUP_RULE = 'setup is a POSIX shell script executed by /bin/sh -ce inside the case sandbox (cwd), with a 60-second cap; a non-zero exit drops the case. It must CREATE the precondition, never describe it: no prose, no "Assume ...". If a precondition is the state of an external tool (logged in, quota nearly used, a prior run\'s output), stub that tool: put a small executable script at bin/<tool> in files that answers exactly the invocations the skill makes, and have setup run chmod +x bin/<tool> and export PATH="$PWD/bin:$PATH". If even a stub is impossible, state the assumption inside the task text as something the user tells the agent and leave setup empty. Keys in files are sandbox-relative paths: never absolute, never containing "..", never under .claude/.';
 
 function context(options: GenerateOptions): string {
+  // §3.2: in head-to-head the brief is the ENTIRE context. Neither SKILL.md enters this prompt.
+  if (options.brief !== undefined) return `TASK BRIEF (the only context; a human has signed off on it):\n${options.brief}`;
   return `SKILL.md:\n${options.skill}\n\nCANDIDATE FILE LISTING (names only):\n${options.files.join('\n')}`;
 }
 
@@ -337,8 +439,11 @@ function triggerPrompt(options: GenerateOptions): string {
   return `Generate trigger evaluation assets for this Claude Code skill. Return ONLY JSON with exactly this shape:\n{"should_trigger":["five non-empty prompts"],"should_not_trigger":["five non-empty near-miss prompts"]}\nA should_not_trigger prompt must be a plausible near miss drawn from the endorsed catalog, not an unrelated request.\n${FIXTURE_RULE}\n\nENDORSED CATALOG:\n${options.catalog}\n\n${context(options)}`;
 }
 
-export function casePrompt(options: GenerateOptions): string {
-  return `Generate headlessly answerable execution evaluation cases for this Claude Code skill. Return ONLY JSON: {"cases":[{"name":"lowercase-hyphenated-stem","task":"...","files":{},"setup":"optional shell","checks":[{"transcript_mentions":"..."}],"bucket":"explicit"}]}.\nChoose how many cases this skill needs, between ${MIN_CASES} and ${MAX_CASES} inclusive, from its own complexity: a skill with one behaviour and one way to get it wrong wants ${MIN_CASES}; a skill with several distinct surfaces, decision branches, or refusal modes wants more, one case per thing that can independently go wrong. Do not pad — a case that tests nothing the others do not is worse than no case.\nEvery case needs a bucket from explicit, implicit, contextual, negative, adversarial; at least one must be adversarial, and a set larger than ${MIN_CASES} should spread across several buckets rather than repeat one. Do not include fixture. Checks may use ONLY transcript_mentions, transcript_omits, command_matching, no_command_matching, file_exists, file_absent. Do not use command_succeeds. ${TASK_RULE}\n${SETUP_RULE}\n${FIXTURE_RULE}\n\n${context(options)}`;
+export function casePrompt(options: GenerateOptions, floor: number = MIN_CASES): string {
+  const subject = options.brief === undefined
+    ? 'this Claude Code skill'
+    : 'the task brief below. Two different skills will be scored against these cases, so a case must not assume either one\'s conventions';
+  return `Generate headlessly answerable execution evaluation cases for ${subject}. Return ONLY JSON: {"cases":[{"name":"lowercase-hyphenated-stem","task":"...","files":{},"setup":"optional shell","checks":[{"transcript_mentions":"..."}],"bucket":"explicit"}]}.\nChoose how many cases this needs, between ${floor} and ${MAX_CASES} inclusive, from its own complexity: a simple job with one way to get it wrong wants ${floor}; a skill with several distinct surfaces, decision branches, or refusal modes wants more, one case per thing that can independently go wrong. Do not pad — a case that tests nothing the others do not is worse than no case.\nEvery case needs a bucket from explicit, implicit, contextual, negative, adversarial; at least one must be adversarial, and a set larger than ${floor} should spread across several buckets rather than repeat one. Do not include fixture. Checks may use ONLY transcript_mentions, transcript_omits, command_matching, no_command_matching, file_exists, file_absent. Do not use command_succeeds. ${TASK_RULE}\n${SETUP_RULE}\n${FIXTURE_RULE}\n\n${context(options)}`;
 }
 
 /** §4.1's ground-truth prompt. The contract portion before the case-shape appendix is verbatim. */
