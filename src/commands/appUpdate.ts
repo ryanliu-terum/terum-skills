@@ -107,7 +107,7 @@ export async function run(args: AppUpdateArgs, io: Prompter): Promise<Result<App
           if (download.code === 124) return failure(`Downloading the desktop app took longer than 10 minutes and was stopped. ${tail(args.form)}`);
           const text = (download.stderr || download.stdout).trim();
           if (RELEASE_ASSETS_MISSING.test(text)) return notPublished();
-          return failure(await explainDownloadFailure(text, version, asset, runner, args.form));
+          return explainDownloadFailure(text, version, asset, runner, args.form);
         }
         const file = join(staging, asset);
         if (!(await exists(file)) || !(await exists(`${file}.sha256`))) return notPublished();
