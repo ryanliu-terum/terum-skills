@@ -3,6 +3,20 @@
 .nav-add-project,.nav-row-button {width:100%;border:0;cursor:pointer;text-align:left;font:inherit;font-size:13px;font-weight:500;}
 .nav-add-project:disabled {cursor:default;opacity:0.6;}
 /* The chevron marker on a toggle-only row; inside a link row the same span sits in the chevron button. */
-.nav-chevron {display:flex;flex-shrink:0;}
+.nav-chevron {display:flex;flex-shrink:0;color:var(--tk-text4);}
 .nav-empty {font-size:13px;font-weight:400;}
 .nav-error {padding:4px 8px 4px 32px;font-size:12px;color:var(--tk-bad);}
+/* Rest, selected, hover and pressed colours for every interactive row: the links, the toggle-only section row and
+   Add project. `.nav-empty` is not interactive and gets none of them. The row icon reads `--nav-icon`, so the same
+   rules recolour it. None of this may be inline: an inline colour beats every :hover rule (2026-09-22). */
+.shell-link.nav-row {--nav-icon:var(--tk-text3);background:transparent;color:var(--tk-text2);}
+.shell-link.nav-row .nav-count {color:var(--tk-text3);}
+.shell-link.nav-add-project {color:var(--tk-text3);}
+.shell-link.nav-row[aria-current="page"] {--nav-icon:var(--tk-text1);background:var(--tk-bg3);color:var(--tk-text1);}
+.shell-link.nav-row[aria-current="page"] .nav-count {color:var(--tk-text2);}
+.shell-link.nav-row:hover:not(:disabled) {--nav-icon:var(--tk-text1);background:var(--tk-bg3);color:var(--tk-text1);}
+.shell-link.nav-row:hover:not(:disabled) .nav-count {color:var(--tk-text2);}
+.shell-link.nav-row[aria-current="page"]:hover,.shell-link.nav-row:active:not(:disabled) {background:var(--tk-bg4);}
+/* The chevron button sits on a hovered row's bg3, so its own hover steps to bg4 and brightens the marker. */
+.shell-link.nav-row .icon-button:hover {background:var(--tk-bg4);}
+.shell-link.nav-row .icon-button:hover .nav-chevron {color:var(--tk-text1);}

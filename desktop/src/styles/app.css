@@ -88,6 +88,13 @@ button.icon-button:hover {background:var(--tk-bg3);color:var(--tk-text1);}
 /* One child today (the name). The column stays so the machine name can join it when the CLI reports one. */
 .footer-lines {display:flex;flex-direction:column;gap:1px;flex-grow:1;min-width:0;}
 .footer-login {font-size:13px;font-weight:500;color:var(--tk-text1);}
+/* The footer links hover like the sidebar rows. The settings door keeps bg4 while Settings is open (aria-current), and
+   needs its own hover rule because the icon-button hover above is scoped to buttons. The identity link takes 4px of
+   padding inside a -4px margin so its hover box has room and nothing moves at rest. */
+.footer a.icon-button:hover {background:var(--tk-bg3);color:var(--tk-text1);}
+.footer a.icon-button[aria-current="page"] {background:var(--tk-bg4);color:var(--tk-text1);}
+a.footer-identity {padding:4px 6px 4px 4px;margin-left:-4px;border-radius:6px;}
+a.footer-identity:hover {background:var(--tk-bg3);}
 .placeholder {padding:24px;font-size:13px;color:var(--tk-text3);}
 .not-found {display:flex;flex:1;align-items:center;justify-content:center;flex-direction:column;gap:12px;font-size:13px;color:var(--tk-text3);}
 

@@ -20,10 +20,11 @@ function SectionHeader({label,trailing}:{label:string;trailing?:ReactNode}){retu
  */
 function NavRow({label,icon,href,selected=false,nested=false,depth=0,expandable=false,collapsed=false,onToggle,count,trailing,menu=null}:{label:string;icon:IconName;href?:string;selected?:boolean;nested?:boolean;/** Sub-projects: one indent step per level under the nested row's own. */depth?:number;expandable?:boolean;collapsed?:boolean;onToggle?:()=>void;count?:string|undefined;trailing?:ReactNode;menu?:ContextMenuBuilder|null}){
  const menuRef=useContextMenu(menu);
- const style={paddingLeft:nested?32+16*depth:8,background:selected?'var(--tk-bg3)':'transparent',color:selected?'var(--tk-text1)':'var(--tk-text2)'};
+ // Rest, selected and hover colours live in Sidebar.css (keyed on aria-current and :hover); only the indent is inline.
+ const style={paddingLeft:nested?32+16*depth:8};
  const toggleLabel=(collapsed?'Expand ':'Collapse ')+label;
- const chevron=<span className="nav-chevron"><Icon name={collapsed?'chevron-right':'chevron-down'} size={12} color="var(--tk-text4)" stroke="2"/></span>;
- const inner=<><div className="nav-label"><Icon name={icon} color={selected?'var(--tk-text1)':'var(--tk-text3)'}/><span>{label}</span>{expandable?href!==undefined?<button type="button" className="icon-button" aria-label={toggleLabel} aria-expanded={!collapsed} style={{width:12,height:12,flexShrink:0}} onClick={event=>{event.preventDefault();event.stopPropagation();onToggle?.();}}>{chevron}</button>:chevron:null}</div>{count!==undefined?<span className="nav-count" style={{color:selected?'var(--tk-text2)':'var(--tk-text3)'}}>{count}</span>:null}{trailing}</>;
+ const chevron=<span className="nav-chevron"><Icon name={collapsed?'chevron-right':'chevron-down'} size={12} stroke="2"/></span>;
+ const inner=<><div className="nav-label"><Icon name={icon} color="var(--nav-icon)"/><span>{label}</span>{expandable?href!==undefined?<button type="button" className="icon-button" aria-label={toggleLabel} aria-expanded={!collapsed} style={{width:12,height:12,flexShrink:0}} onClick={event=>{event.preventDefault();event.stopPropagation();onToggle?.();}}>{chevron}</button>:chevron:null}</div>{count!==undefined?<span className="nav-count">{count}</span>:null}{trailing}</>;
  if(href===undefined)return <button type="button" ref={menuRef} className="shell-link nav-row nav-row-button" aria-label={toggleLabel} aria-expanded={!collapsed} style={style} onClick={()=>onToggle?.()}>{inner}</button>;
  return <a href={href} ref={menuRef} className="shell-link nav-row" aria-current={selected?'page':undefined} style={style}>{inner}</a>;
 }
@@ -60,5 +61,5 @@ function ProjectRow({root,depth,selected,showCount,menu}:{root:Root;depth:number
 function AddProjectRow({busy,error,onChoose}:{busy:boolean;error:string|null;onChoose:()=>void}) {
  const features=useFeatures();
  if(!features?.libraryProjects)return null; // an older CLI has no `project add`, and this is the only way in
- return <><button type="button" className="shell-link nav-row nav-add-project" style={{paddingLeft:32,background:'transparent',color:'var(--tk-text3)'}} disabled={busy} onClick={onChoose}><div className="nav-label"><Icon name="plus" color="var(--tk-text3)"/><span>Add project</span></div></button>{error?<div role="alert" className="nav-error">{error}</div>:null}</>;
+ return <><button type="button" className="shell-link nav-row nav-add-project" style={{paddingLeft:32}} disabled={busy} onClick={onChoose}><div className="nav-label"><Icon name="plus" color="var(--nav-icon)"/><span>Add project</span></div></button>{error?<div role="alert" className="nav-error">{error}</div>:null}</>;
 }
