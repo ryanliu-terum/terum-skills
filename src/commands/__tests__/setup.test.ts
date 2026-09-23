@@ -763,6 +763,79 @@ describe('the desktop app hand-off (D4/D5 2026-09-08; auto-launch, Teddy 2026-09
     expect(io.lines.some((line) => line.startsWith('Could not reach GitHub'))).toBe(true);
     expect(io.asked).toEqual([APP_QUESTION, ROLE_QUESTION]);
   });
+
+  // The wizard boots the app. When the hand-off at the top fails (gh logged out, offline) the wizard finishes in the
+  // terminal — and a join that ran here must still end with the app open, because the GitHub step may have removed
+  // the cause in between. The second attempt is the last thing the wizard does, after the summary the person still
+  // needs to read, and carries no target and no intent: the join is done, the app opens to the Library. Nothing here
+  // reaches the network: the app verb is a fake.
+  const launched = success({ platform: 'darwin-arm64' as const, version: '0.1.6', action: 'launched' as const, appPath: '/Applications/Terum Skills.app', statePath: '/tmp/app.json' });
+  const RETRY_LINE = 'print:Setup continues here and tries the app once more when it finishes.';
+  const failsThenLaunches = (calls: Record<string, unknown>[]) => (async (a: Record<string, unknown>, io: Prompter) => {
+    calls.push(a);
+    if (calls.length === 1) return failure('GitHub CLI is not logged in. Everything works from the terminal.');
+    io.print('Opened Terum Skills 0.1.6.');
+    return launched;
+  }) as never;
+  it.each([undefined, 'alice/team'])('a failed hand-off is tried again after the closing summary, without a join target (target=%s)', async (target) => {
+    const args = await optionalSetup();
+    const calls: Record<string, unknown>[] = [];
+    const io = optionalAnswers();
+    const result = await run({ ...args, app: undefined, evidence: mac, ...(target ? { target } : {}), verbs: { ...args.verbs, app: failsThenLaunches(calls) } }, io);
+    expect(result).toMatchObject({ ok: true, value: { role: target ? 'joiner' : 'creator', team: 'team', steps: { app: 'done', team: 'skipped', done: 'printed' } } });
+    expect(calls).toHaveLength(2);
+    expect(calls[0]).toMatchObject({ offer: false, intent: 'setup', ...(target ? { target } : {}) });
+    expect(calls[1]).toMatchObject({ offer: false });
+    expect(calls[1]).not.toHaveProperty('target');
+    expect(calls[1]).not.toHaveProperty('intent');
+    // The failure is said once, with what happens next, before the wizard goes on; the second attempt comes after the
+    // whole closing summary and is the last thing the wizard prints.
+    const failedAt = io.at(event => event === 'print:GitHub CLI is not logged in. Everything works from the terminal.');
+    const announcedAt = io.at(event => event === RETRY_LINE);
+    const summaryAt = io.at(event => event.startsWith('print:README: '));
+    const openedAt = io.at(event => event === 'print:Opened Terum Skills 0.1.6.');
+    expect(failedAt).toBeGreaterThanOrEqual(0);
+    expect(announcedAt).toBe(failedAt + 1);
+    expect(summaryAt).toBeGreaterThan(announcedAt);
+    expect(openedAt).toBeGreaterThan(summaryAt);
+    expect(openedAt).toBe(io.events.length - 1);
+  });
+
+  it('a second failure is printed last and the wizard still succeeds', async () => {
+    const args = await optionalSetup();
+    const calls: unknown[] = [];
+    const io = optionalAnswers();
+    const offline = 'Could not reach GitHub to download the desktop app; you appear to be offline. Everything works from the terminal.';
+    const alwaysFailing = (async (a: unknown) => { calls.push(a); return failure(offline); }) as never;
+    expect(await run({ ...args, app: undefined, evidence: mac, verbs: { ...args.verbs, app: alwaysFailing } }, io)).toMatchObject({ ok: true, value: { steps: { app: 'skipped', done: 'printed' } } });
+    expect(calls).toHaveLength(2);
+    expect(io.events.filter(event => event === `print:${offline}`)).toHaveLength(2);
+    expect(io.events.at(-1)).toBe(`print:${offline}`);
+  });
+
+  it('a permanent failure, a non-launch that is not a failure, and a policy skip are never retried', async () => {
+    const args = await optionalSetup();
+    // Nothing published for this version: the app verb says so once, and no retry is promised or made.
+    const settled: unknown[] = [];
+    const notPublished = (async (a: unknown) => { settled.push(a); return { ...failure('No desktop app is published for terum-skills 0.1.6. Everything works from the terminal.'), permanent: true as const }; }) as never;
+    const io = optionalAnswers();
+    expect(await run({ ...args, app: undefined, evidence: mac, verbs: { ...args.verbs, app: notPublished } }, io)).toMatchObject({ ok: true, value: { steps: { app: 'skipped', done: 'printed' } } });
+    expect(settled).toHaveLength(1);
+    expect(io.events.filter(event => event.startsWith('print:No desktop app is published'))).toHaveLength(1);
+    expect(io.events).not.toContain(RETRY_LINE);
+    // An `unavailable` outcome is not a failure: nothing is printed by setup and nothing is promised.
+    const unavailable: unknown[] = [];
+    const noApp = (async (a: unknown) => { unavailable.push(a); return success({ platform: 'linux' as const, version: '0.1.6', action: 'unavailable' as const, appPath: null, statePath: null }); }) as never;
+    const silent = optionalAnswers();
+    expect(await run({ ...args, app: undefined, evidence: mac, verbs: { ...args.verbs, app: noApp } }, silent)).toMatchObject({ ok: true, value: { steps: { app: 'skipped', done: 'printed' } } });
+    expect(unavailable).toHaveLength(1);
+    expect(silent.events).not.toContain(RETRY_LINE);
+    // --no-app, and a machine with no app, never attempt the hand-off, so there is nothing to retry either.
+    const untouched: unknown[] = [];
+    expect(await run({ ...args, app: false, evidence: mac, verbs: { ...args.verbs, app: appOk(untouched) } }, optionalAnswers())).toMatchObject({ ok: true, value: { steps: { app: 'skipped', done: 'printed' } } });
+    expect(await run({ ...args, app: undefined, evidence: linux, verbs: { ...args.verbs, app: appOk(untouched) } }, optionalAnswers())).toMatchObject({ ok: true, value: { steps: { app: 'skipped', done: 'printed' } } });
+    expect(untouched).toEqual([]);
+  });
 });
 
 it.each([undefined,'alice/team'])('preserves a delegated team cancellation (target=%s)',async target=>{

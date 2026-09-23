@@ -12,7 +12,7 @@ The first frame of every run is `hello`, and it carries the feature switches tha
 npx -y terum-skills@latest app
 ```
 
-On macOS and Windows, `setup` runs this before the rest of the wizard. When the app launches, setup prints `Continuing in the app.` and returns, so you create or join the team in the app rather than in the terminal. When you named a team to join, the line is `Continuing in the app. Join <org>/<repo> there.` `setup --no-app` keeps the whole wizard in the terminal, and so does any setup that is not at an interactive terminal. See [Install](../getting-started/install.md).
+On macOS and Windows, `setup` runs this before the rest of the wizard. When the app launches, setup prints `Continuing in the app.` and returns, so you create or join the team in the app rather than in the terminal. When you named a team to join, the line is `Continuing in the app. Join <org>/<repo> there.` If the app could not be installed at that point (gh logged out, offline), setup finishes in the terminal and tries the app once more after its closing summary, so a join that ran in the terminal still ends with the app open. `setup --no-app` keeps the whole wizard in the terminal, and so does any setup that is not at an interactive terminal. See [Install](../getting-started/install.md).
 
 `app` needs a logged-in `gh`: it downloads through `gh release download` and has no HTTP client of its own.
 

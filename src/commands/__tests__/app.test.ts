@@ -201,7 +201,7 @@ describe('terum-skills app (D1, D3, D7, D8)', () => {
   it('a checksum mismatch discards the download, leaves no <version>/ directory, and says so with the two next steps', async () => {
     const root = await temporaryDirectory();
     const result = await run({ config: createConfigStore(root), runner: fakeGhRelease({ download: 'corrupt' }), exec: fakeExec().exec, version: V, evidence: mac, applicationsDir: applications(root), form: 'bare' }, new ScriptedPrompter());
-    expect(result).toMatchObject({ ok: false, error: expect.stringContaining('did not match its published checksum') });
+    expect(result).toMatchObject({ ok: false, permanent: true, error: expect.stringContaining('did not match its published checksum') });
     expect(result).toMatchObject({ ok: false, error: expect.stringContaining('Everything works from the terminal. Run `terum-skills app` later to try again.') });
     expect(await readdir(join(root, 'app'))).toEqual([]);
   });
@@ -210,11 +210,11 @@ describe('terum-skills app (D1, D3, D7, D8)', () => {
     const root = await temporaryDirectory();
     const args = { config: createConfigStore(root), exec: fakeExec().exec, version: V, evidence: mac, applicationsDir: applications(root), form: 'bare' as const };
     const invalid = fakeGhRelease({ attestation: 'invalid' });
-    expect(await run({ ...args, runner: invalid }, new ScriptedPrompter())).toMatchObject({ ok: false, error: `The downloaded desktop app has no valid build attestation from ${APP_REPOSITORY}, so it was discarded: ✗ No attestations found matching the given subject. Everything works from the terminal. Run \`terum-skills app\` later to try again.` });
+    expect(await run({ ...args, runner: invalid }, new ScriptedPrompter())).toMatchObject({ ok: false, permanent: true, error: `The downloaded desktop app has no valid build attestation from ${APP_REPOSITORY}, so it was discarded: ✗ No attestations found matching the given subject. Everything works from the terminal. Run \`terum-skills app\` later to try again.` });
     expect(invalid.calls.map((call) => call.args.slice(0, 2))).toEqual([['release', 'download'], ['attestation', 'verify']]);
     expect(await readdir(join(root, 'app'))).toEqual([]);
     expect(existsSync(placed(root))).toBe(false);
-    expect(await run({ ...args, runner: fakeGhRelease({ attestation: 'old-gh' }) }, new ScriptedPrompter())).toMatchObject({ ok: false, error: expect.stringContaining('gh 2.49 or newer is needed') });
+    expect(await run({ ...args, runner: fakeGhRelease({ attestation: 'old-gh' }) }, new ScriptedPrompter())).toMatchObject({ ok: false, permanent: true, error: expect.stringContaining('gh 2.49 or newer is needed') });
     expect(await readdir(join(root, 'app'))).toEqual([]);
     // A good asset is verified exactly once, after the checksum, before anything is unpacked.
     const good = fakeGhRelease();
@@ -225,13 +225,21 @@ describe('terum-skills app (D1, D3, D7, D8)', () => {
   it('per-cause wording (D7): no release for this version, offline, gh logged out, asset absent', async () => {
     const root = await temporaryDirectory();
     const at = (runner: ReturnType<typeof fakeGhRelease>) => run({ config: createConfigStore(root), runner, exec: fakeExec().exec, version: V, evidence: mac, applicationsDir: applications(root) }, new ScriptedPrompter());
-    expect(await at(fakeGhRelease({ download: 'no-release' }))).toMatchObject({ ok: false, error: expect.stringContaining(`No desktop app is published for terum-skills ${V}`) });
-    expect(await at(fakeGhRelease({ download: 'offline' }))).toMatchObject({ ok: false, error: expect.stringContaining('offline or behind a proxy') });
-    expect(await at(fakeGhRelease({ authenticated: false }))).toMatchObject({ ok: false, error: expect.stringContaining('gh auth login') });
-    expect(await at(fakeGhRelease({ download: 'missing' }))).toMatchObject({ ok: false, error: expect.stringContaining('looked for') });
+    // Nothing published for this version cannot change during one run and is marked `permanent`; offline and logged
+    // out may well have changed by the time a caller tries again before it exits, so they carry no mark.
+    expect(await at(fakeGhRelease({ download: 'no-release' }))).toMatchObject({ ok: false, permanent: true, error: expect.stringContaining(`No desktop app is published for terum-skills ${V}`) });
+    const offline = await at(fakeGhRelease({ download: 'offline' }));
+    expect(offline).toMatchObject({ ok: false, error: expect.stringContaining('offline or behind a proxy') });
+    expect(offline).not.toHaveProperty('permanent');
+    const loggedOut = await at(fakeGhRelease({ authenticated: false }));
+    expect(loggedOut).toMatchObject({ ok: false, error: expect.stringContaining('gh auth login') });
+    expect(loggedOut).not.toHaveProperty('permanent');
+    expect(await at(fakeGhRelease({ download: 'missing' }))).toMatchObject({ ok: false, permanent: true, error: expect.stringContaining('looked for') });
     // A gh that cannot be started (absent from the PATH the app replays) and a download past its ten-minute deadline get a sentence each, never a raw rejection.
-    expect(await at(fakeGhRelease({ download: 'spawn-error' }))).toMatchObject({ ok: false, error: 'Could not download the desktop app: spawn gh ENOENT. Everything works from the terminal. Run `npx -y terum-skills@latest app` later to try again.' });
-    expect(await at(fakeGhRelease({ download: 'timeout' }))).toMatchObject({ ok: false, error: 'Downloading the desktop app took longer than 10 minutes and was stopped. Everything works from the terminal. Run `npx -y terum-skills@latest app` later to try again.' });
+    const spawnError = await at(fakeGhRelease({ download: 'spawn-error' }));
+    expect(spawnError).toMatchObject({ ok: false, error: 'Could not download the desktop app: spawn gh ENOENT. Everything works from the terminal. Run `npx -y terum-skills@latest app` later to try again.' });
+    expect(spawnError).not.toHaveProperty('permanent');
+    expect(await at(fakeGhRelease({ download: 'timeout' }))).toMatchObject({ ok: false, permanent: true, error: 'Downloading the desktop app took longer than 10 minutes and was stopped. Everything works from the terminal. Run `npx -y terum-skills@latest app` later to try again.' });
     for (const dir of await readdir(join(root, 'app'))) expect(dir).not.toMatch(/^\.download-/);
   });
 

@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile, access, realpath } from 'node:fs/promises';
+import { mkdir, readFile, readdir, writeFile, access, realpath } from 'node:fs/promises';
 import { join } from 'node:path';
 import { expect, it } from 'vitest';
 import { run } from '../install.js';
@@ -110,13 +110,18 @@ it('adds to the profile with no question, refreshes one profile entry, and unins
   expect(JSON.parse(await readFile(path, 'utf8'))).toMatchObject({ installed: [], profile: before.profile, declined: [] });
   expect(io.lines).toContain('Your profile is unchanged.');
 });
-it('keeps both the current folder and an existing backup when repeated-backup policy is unresolved', async () => {
-  const f = await fixture(), backup = join(f.home, '.claude/old-skills/sample');
+it('rotates the kept copy so a repeated replace neither overwrites the older backup nor refuses', async () => {
+  const f = await fixture(), backups = join(f.home, '.claude/old-skills'), backup = join(backups, 'sample');
   await mkdir(f.target, { recursive: true }); await writeFile(join(f.target, 'mine'), 'current');
   await mkdir(backup, { recursive: true }); await writeFile(join(backup, 'mine'), 'older');
-  expect(await run(f.args, new ScriptedPrompter([], [true]))).toMatchObject({ ok: false, error: `${backup} already exists; move the kept copy elsewhere before retrying.` });
-  expect(await readFile(join(f.target, 'mine'), 'utf8')).toBe('current');
+  expect(await run(f.args, new ScriptedPrompter([], [true]))).toMatchObject({ ok: true });
+  // The first backup is untouched, the displaced folder is beside it under a stamped name, and
+  // the install landed: no copy was overwritten and nothing had to be moved by hand.
   expect(await readFile(join(backup, 'mine'), 'utf8')).toBe('older');
+  const rotated = (await readdir(backups)).filter(entry => entry.startsWith('sample-'));
+  expect(rotated).toHaveLength(1);
+  expect(await readFile(join(backups, rotated[0]!, 'mine'), 'utf8')).toBe('current');
+  expect(await readFile(join(f.target, 'SKILL.md'), 'utf8')).toContain('sample');
 });
 it('retries an uninstall after both the disk copy and people record are already gone', async () => {
   const f = await fixture();

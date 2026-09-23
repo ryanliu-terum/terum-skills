@@ -166,6 +166,28 @@ export async function snapshotIfPresent(path: string): Promise<SkillSnapshot | u
   return snapshotSkillDirectory(path);
 }
 
+/**
+ * Where a displaced copy is kept: `old-skills/<name>` while that path is free, and a timestamped
+ * sibling once it is not. The no-loss rule stands — nothing here overwrites, merges or deletes a
+ * kept copy — but a single fixed name made the second replace of the same skill impossible until
+ * the person moved a folder by hand, which no screen in this product can do for them (the refusal
+ * it replaces was B5's conservative reading of a policy §9.1.1 left deferred).
+ */
+export async function keptCopyPath(skillsRoot: string, name: string): Promise<string> {
+  const root = join(dirname(skillsRoot), 'old-skills');
+  const plain = join(root, name);
+  if ((await inspect(plain)).kind === 'absent') return plain;
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  // The stamp alone settles every realistic repeat; the counter is for two runs inside one
+  // millisecond, and the bound is there so a directory that cannot be read becomes an error
+  // with a path in it rather than a spin.
+  for (let attempt = 0; attempt < 50; attempt++) {
+    const candidate = join(root, `${name}-${stamp}${attempt === 0 ? '' : `-${attempt}`}`);
+    if ((await inspect(candidate)).kind === 'absent') return candidate;
+  }
+  throw new Error(`Could not find a free path for the kept copy of ${name} under ${root}.`);
+}
+
 export async function moveToQuarantine(path: string, quarantineRoot: string, name: string, planned?: string): Promise<string> {
   const destination = planned ?? join(quarantineRoot, new Date().toISOString().replace(/[:.]/g, '-'), name);
   const directory = dirname(destination);
