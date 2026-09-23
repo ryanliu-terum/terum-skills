@@ -46,7 +46,12 @@ export function HeadToHeadDialog({skill:s,onClose}:{skill:SkillDetail;onClose:()
  }
 
  const unavailable=backend.deriveBrief===undefined;
- return <Dialog open onOpenChange={value=>{if(!value)onClose();}}><DialogPopup>
+ // The CLI's own preflight questions (a subagent-calling skill is asked about heavy mode) render as
+ // their own dialog beside this one, not inside it — see providers.tsx. Answering one hands focus back
+ // here, and Base UI reads that as a dismissal: without this guard the derivation already paid for is
+ // thrown away mid-flight, and once a brief is on screen it takes the very text the human has to sign
+ // with it. Only Close/Cancel ends this dialog; the same guard the manage dialogs use (SkillScreen).
+ return <Dialog open onOpenChange={(value,details)=>{if(value)return;if((busy||brief!==null)&&(details.reason==='outside-press'||details.reason==='focus-out')){details.cancel();return;}onClose();}}><DialogPopup>
   <DialogTitle>Compare {s.name} with another skill</DialogTitle>
   <DialogDescription>
    {unavailable

@@ -117,8 +117,16 @@ it('offers no retry and no log region before a run starts',async()=>{
  await open();
  // IE6: the head-to-head question sits beside the ordinary run. It is hidden when the CLI on this
  // machine has no `--derive-brief`, so a backend without it renders the original three.
- expect(within(screen.getByRole('dialog')).getAllByRole('button').map(button=>button.textContent)).toEqual(['Cancel','Compare with another skill…','Queue for overnight','Run eval']);
+ expect(within(screen.getByRole('dialog')).getAllByRole('button').map(button=>button.textContent)).toEqual(['Cancel','Compare…','Queue for overnight','Run eval']);
  expect(screen.queryByRole('log')).toBeNull();
+});
+it('opens the head-to-head question from Compare\u2026',async()=>{
+ // The action routes through `?dialog=head-to-head`, so the screen's dialog allowlist has to admit
+ // that name: without it the button closed this dialog and opened nothing at all.
+ await open();
+ fireEvent.click(within(screen.getByRole('dialog')).getByRole('button',{name:'Compare\u2026'}));
+ expect(await screen.findByText('Compare deploy-check with another skill')).toBeVisible();
+ expect(within(screen.getByRole('dialog')).getByRole('button',{name:'Derive the brief'})).toBeDisabled();
 });
 it('Queue for overnight queues this one skill through the several-skills verb and shows the queued line',async()=>{
  const {backend,evalSpy}=await open();const many=vi.spyOn(backend,'evalMany');
