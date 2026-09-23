@@ -18,5 +18,5 @@ import { Icon } from '../ui/Icon';
  */
 export function Footer({me,settings=false}:{me?:StatusResult['me']|undefined;settings?:boolean}){
  const identity=<><div className="avatar">{me?.initials||'—'}</div><div className="footer-lines"><span className="footer-login">{me?.footerLabel||'—'}</span></div></>;
- return <footer className="footer">{me?.handle?<a href={'#/marketplace/people/'+encodeURIComponent(me.handle)} aria-label="Your profile" className="shell-link footer-identity">{identity}</a>:<div className="footer-identity">{identity}</div>}<a href="#/settings/account" aria-label="Settings" className="shell-link icon-button" style={{background:settings?'var(--tk-bg4)':'transparent',color:settings?'var(--tk-text1)':'var(--tk-text3)'}}><Icon name="settings"/></a></footer>;
+ return <footer className="footer">{me?.handle?<a href={'#/marketplace/people/'+encodeURIComponent(me.handle)} aria-label="Your profile" className="shell-link footer-identity">{identity}</a>:<div className="footer-identity">{identity}</div>}<a href="#/settings/account" aria-label="Settings" aria-current={settings?'page':undefined} className="shell-link icon-button"><Icon name="settings"/></a></footer>;
 }
