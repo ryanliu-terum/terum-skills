@@ -6,11 +6,30 @@ import { describe, expect, it, vi } from 'vitest';
 import { GuardError } from '../guard.js';
 import { Runner, systemRunner } from '../runner.js';
 import { packageVersion } from '../package.js';
-import { skillVersions, describeClone, cloneOrigin, assertSafePath, CloneBusy, cloneTeam, localPushGuardLauncher, openTeamRepo, pushGuardHook, PushRefused, refreshClone, SafeWriteExhausted, shellQuote, treeText, withCloneLock, cloneLockPath, lockWait } from '../teamRepo.js';
+import { skillVersions, describeClone, cloneOrigin, assertSafePath, CloneBusy, cloneTeam, localPushGuardLauncher, openTeamRepo, pushGuardHook, PushRefused, pinCheckoutBytes, refreshClone, SafeWriteExhausted, VERBATIM_ATTRIBUTES, shellQuote, treeText, withCloneLock, cloneLockPath, lockWait } from '../teamRepo.js';
 import { bareTeam, cloneWithIdentity, holdCloneLock, mappedRunner, git, originSha, person, pushFromSeed, SYMLINKS_SUPPORTED, temporaryDirectory, wrapRunner } from './fixtures.js';
 
 const exists = (path: string) => access(path).then(() => true, () => false);
 const personJson = (handle: string) => `${JSON.stringify(person(handle))}\n`;
+
+describe('pinCheckoutBytes', () => {
+  it('rewrites a clone git converted to CRLF with its committed bytes, keeps other attribute lines, and is one read after that', async () => {
+    const fixture = await bareTeam();
+    const clone = join(fixture.root, 'windows');
+    // Git for Windows' default, forced through the environment (the highest config level) for the clone and the pin alike.
+    const env = { ...process.env, GIT_CONFIG_COUNT: '2', GIT_CONFIG_KEY_1: 'core.autocrlf', GIT_CONFIG_VALUE_1: 'true' };
+    await git(['clone', '-q', '--branch', 'main', fixture.bare, clone], undefined, env);
+    expect(await readFile(join(clone, 'team.json'), 'utf8')).toContain('\r\n');
+    await writeFile(join(clone, '.git', 'info', 'attributes'), '*.png binary');
+    await pinCheckoutBytes(clone, systemRunner, env);
+    expect(await readFile(join(clone, 'team.json'), 'utf8')).toBe(await git(['show', 'main:team.json'], fixture.bare));
+    expect(await readFile(join(clone, '.git', 'info', 'attributes'), 'utf8')).toBe(`*.png binary\n${VERBATIM_ATTRIBUTES}\n`);
+    expect(await git(['status', '--porcelain'], clone, env)).toBe('');
+    const gitCalls: string[][] = [];
+    await pinCheckoutBytes(clone, wrapRunner(systemRunner, (command, args, _options, next) => { gitCalls.push([...args]); return next(); }), env);
+    expect(gitCalls).toEqual([]);
+  });
+});
 
 describe('safeWrite (§6.0)', () => {
   it('regenerates README only for generic remotes before the push', async () => {
