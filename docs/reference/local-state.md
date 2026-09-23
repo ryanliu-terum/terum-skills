@@ -192,7 +192,7 @@ One more lock lives in the system temporary directory, because it protects a des
 
 ## Claude Code files
 
-These are the only files terum-skills writes outside its own state root. Setup offers the two hook entries and the eight skills separately, each with its own question, and each can be declined. What each of them runs, and when, is summarised in [security](../../SECURITY.md).
+These are the only files terum-skills writes outside its own state root. Setup places the eight skills without asking and offers the two hook entries separately, each with its own question, and either hook can be declined. What each of them runs, and when, is summarised in [security](../../SECURITY.md).
 
 ### ~/.claude/settings.json
 
@@ -242,7 +242,7 @@ The eight skills terum-skills places for Claude Code and, when `~/.codex` exists
 
 The `terum-skills` manual among them tells the agent how to run terum-skills on your behalf: that the shell tool has no TTY, to invoke the CLI in that one spelling and no other, which verbs it may run in-session, which verbs it must hand to your terminal because they ask questions, and what an eval costs. The other seven each wrap one verb with `--format md` and show its board.
 
-A copy of terum-skills' own that this CLI has moved past is refreshed without a second question, both by `setup` and by `sync --hook` at every session start. The comparison is against the bundled text already rendered in this copy's spelling, so a copy placed by a different release counts as outdated and is rewritten. A root holding none of Terum's copies is left alone by everything but `setup`, because that means you said no; a root that holds some receives the ones that are missing.
+A copy of terum-skills' own that this CLI has moved past is refreshed without a question, both by `setup` and by `sync --hook` at every session start. The comparison is against the bundled text already rendered in this copy's spelling, so a copy placed by a different release counts as outdated and is rewritten. A root holding none of Terum's copies is left alone by everything but `setup`, which places the whole set without asking; a root that holds some receives the ones that are missing from `sync --hook` too.
 
 The discovery scan also refuses this folder by name, so it can never be published as a team skill.
 

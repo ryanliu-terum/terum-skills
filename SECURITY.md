@@ -5,8 +5,8 @@ you can verify each claim yourself; every command below is one you can run.
 
 ## What runs on your machine
 
-Everything is opt-in at `terum-skills setup`, each with its own y/N, and everything is removed by
-`terum-skills uninstall`.
+The two hooks are opt-in at `terum-skills setup`, each with its own y/N; the eight skills are placed
+by every `setup` run. Everything is removed by `terum-skills uninstall`.
 
 | Piece | When it runs | What it runs | What it touches |
 | --- | --- | --- | --- |

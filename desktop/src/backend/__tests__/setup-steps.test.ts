@@ -42,7 +42,15 @@ it('does not mistake an added project path for the wrapper step',()=>{
   '/x exists and is not the bundled /terum-skills skill; left alone. Move it aside and re-run setup to install the bundled one.',
   'The /terum-skills Claude Code skill at /x is current.', 'Updated the /terum-skills Claude Code skill at /x.',
   'Skipped the /terum-skills skill; re-run setup to install it later.', 'Installed the /terum-skills Claude Code skill at /x.',
- ])expect(printedSetupStep(line)).toBe('wrapper');
+  // The eight-skills wording, printed since setup places them without asking.
+  'No /x/.codex on this machine; Codex skills skipped.',
+  'Installed the terum-skills skills at /x/.claude/skills: eval, eval-report, list-skills, search-skills, skill-info, skill-status, sync-skills, terum-skills.',
+  'Updated the terum-skills skills at /x/.codex/skills: terum-skills.',
+  'The terum-skills skills at /x/.claude/skills and /x/.codex/skills are current.',
+  'The terum-skills skills are not bundled in this copy of terum-skills (expected under /x); skipped.',
+  '/x/.claude/skills/eval exists and is not a bundled terum-skills skill (it is a different skill); left alone. Move it aside and re-run setup to install the bundled one.',
+  'Could not install the terum-skills skill eval at /x/.codex/skills: disk full',
+ ])expect(printedSetupStep(line),line).toBe('wrapper');
 });
 
 it.each(['Queued 2 evals for later. Run them with `npx -y terum-skills@latest eval --drain`.', 'Evaluated 2 of 3; 1 failed.', 'Queued 3 evals for overnight: the app runs them in parallel between 01:00 and 05:00 while it is open and idle.'])('maps the new eval outcome %s', line => {

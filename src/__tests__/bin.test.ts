@@ -182,7 +182,7 @@ describe.skipIf(!SYMLINKS_SUPPORTED)('the built bin (dist/index.js)', () => {
     // The built package pins every placed skill to its own version, never @latest.
     const version = (JSON.parse(await readFile(resolve(root, 'package.json'), 'utf8')) as { version: string }).version;
     expect(options.prefix).toBe(`npx -y terum-skills@${version}`);
-    expect(await wrapper.refreshManagedSkills(options)).toEqual([]);
+    expect(await wrapper.refreshManagedSkills(options)).toEqual({ written: [], failed: [] });
     const states = await wrapper.managedSkillStates(options);
     if (states.kind !== 'ready') throw new Error(states.kind);
     for (const name of names) expect(await wrapper.installManagedSkill(options.roots[0]!.root, name, states.bundled.get(name)!)).toBe('installed');
@@ -191,7 +191,7 @@ describe.skipIf(!SYMLINKS_SUPPORTED)('the built bin (dist/index.js)', () => {
       expect(placed, name).toBe(wrapper.renderWrapper(canonical.get(name)!, options.prefix));
       expect(placed, name).not.toContain('@latest');
     }
-    expect(await wrapper.refreshManagedSkills(options)).toEqual([]);
+    expect(await wrapper.refreshManagedSkills(options)).toEqual({ written: [], failed: [] });
     expect((await wrapper.listManagedSkills(options.roots[1]!.root))).toEqual([]);
 
     // The edit hook ships on the same contract, from assets/ rather than .claude/ (it is run, not loaded).

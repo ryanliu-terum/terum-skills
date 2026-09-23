@@ -165,17 +165,21 @@ export async function run(args: SyncArgs, io: Prompter): Promise<Result<SyncResu
     }
     // The SessionStart entry itself. Every release before 0.21 wrote `npx -y terum-skills@latest`,
     // so the first hook run of a pinning release re-points the entry at the copy that is running.
-    // Same consent as the two refreshes below (the entry exists because the user said yes to it),
-    // and nothing is installed where nothing of ours is. A settings file this run cannot edit is
-    // reported, never fatal: the fetch above already happened.
+    // The entry exists because the user said yes to it, and like the two refreshes below nothing is
+    // installed where nothing of ours is. A settings file this run cannot edit is reported, never
+    // fatal: the fetch above already happened.
     if (args.hook) {
       const target = { ...defaultHookOptions(store.root, undefined, args.form), ...args.settings };
       try { if (await migrateHook(target) === 'migrated') notices.push(`Pinned your session hook to this copy of terum-skills (${target.command}); it no longer fetches the newest release at session start. Re-run \`${invocation(args.form, 'setup')}\` after an update to move it.`); }
       catch (error) { notices.push(`Could not pin the session hook in ${target.settingsFile}: ${error instanceof Error ? error.message : String(error)}`); }
     }
+    // The eight skills: a root that already holds a marked copy has its outdated ones rewritten and its
+    // missing ones added; a root holding none is setup's to fill (setup places the set without asking).
+    // A write that fails is a notice, never fatal, for the same reason as the hook entry above.
     if (args.hook) {
-      const written = await refreshManagedSkills({ ...defaultWrapperOptions(undefined, args.form), ...args.wrapper });
+      const { written, failed } = await refreshManagedSkills({ ...defaultWrapperOptions(undefined, args.form), ...args.wrapper });
       if (written.length) notices.push('Updated your terum-skills skills for this CLI.');
+      for (const failure of failed) notices.push(`Could not update your terum-skills skills for this CLI: ${failure}`);
     }
     // Same rule for the edit hook's script, and only the same case: a copy of OUR OWN that this CLI
     // has moved past. `absent` means the user declined it, or never saw the offer — an hourly hook

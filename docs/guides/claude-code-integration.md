@@ -1,6 +1,6 @@
 # Claude Code integration
 
-terum-skills puts four things inside your Claude Code setup, and the first of them inside Codex too. Three of them are separate offers during setup, each with its own question, and every question defaults to No, so nothing below is on your machine unless you answered yes. The fourth, the per-machine switch, is a verb you run.
+terum-skills puts four things inside your Claude Code setup, and the first of them inside Codex too. Setup places the first, the eight skills, without asking. The two hooks are separate offers during setup, each with its own question, and both default to No, so neither hook is on your machine unless you answered yes. The fourth, the per-machine switch, is a verb you run.
 
 | Integration | Where it lives | What it does |
 |---|---|---|
@@ -28,21 +28,22 @@ terum-skills ships eight skills inside the npm package. Setup places them for Cl
 
 None of the copies that land on your machine is the bundled copy byte for byte. Every `npx -y terum-skills@latest` in each of them is rewritten to the spelling this machine uses: `terum-skills` where the [bare invocation form](../reference/cli.md#invocation) is available, and `npx -y terum-skills@<the version that placed it>` everywhere else, including every Windows machine. A session therefore runs the copy you installed, never whatever the registry has published since.
 
-Setup asks once for the whole set:
+Setup places the whole set without asking and reports what it wrote:
 
 ```
-Install the terum-skills skills for Claude Code and Codex so they can run terum-skills for you? (writes ~/.claude/skills/{eval, eval-report, list-skills, search-skills, skill-info, skill-status, sync-skills, terum-skills} and ~/.codex/skills/{eval, eval-report, list-skills, search-skills, skill-info, skill-status, sync-skills, terum-skills}) [y/N]
+Installed the terum-skills skills at ~/.claude/skills: eval, eval-report, list-skills, search-skills, skill-info, skill-status, sync-skills, terum-skills.
+Installed the terum-skills skills at ~/.codex/skills: eval, eval-report, list-skills, search-skills, skill-info, skill-status, sync-skills, terum-skills.
 ```
 
-On a machine without `~/.codex` the question names Claude Code alone and the run says `No ~/.codex on this machine; Codex skills skipped.` Answering no prints `Skipped the terum-skills skills; re-run setup to install them later.` and writes nothing.
+On a machine without `~/.codex` the run says `No ~/.codex on this machine; Codex skills skipped.` and writes the Claude Code set alone. When every copy is already current it says `The terum-skills skills at ~/.claude/skills and ~/.codex/skills are current.` and writes nothing.
 
 ### How they are recognised and refreshed
 
 Terum's copies are marked in each SKILL.md frontmatter: the skill's own `name` plus `metadata.managed-by: terum-skills`. That marker is the whole idempotency key.
 
-An outdated copy carrying that marker is refreshed in place without a second question, because the consent was given when it was installed and a stale skill teaches the agent the wrong verbs. Setup does it, and so does `sync --hook`: in a root that already holds one of Terum's copies it rewrites the outdated ones and adds any that are missing, which is how a release that ships a new skill reaches you, printing `Updated your terum-skills skills for this CLI.` on its notice channel. Outdated means byte-different from the bundled copy rendered in this machine's spelling, so a copy placed by a different copy of the CLI is outdated by that definition and is rewritten on the next setup or hook run.
+An outdated copy carrying that marker is refreshed in place without a question, because a stale skill teaches the agent the wrong verbs. Setup does it, and so does `sync --hook`: in a root that already holds one of Terum's copies it rewrites the outdated ones and adds any that are missing, which is how a release that ships a new skill reaches you, printing `Updated your terum-skills skills for this CLI.` on its notice channel. Outdated means byte-different from the bundled copy rendered in this machine's spelling, so a copy placed by a different copy of the CLI is outdated by that definition and is rewritten on the next setup or hook run.
 
-Anything else at one of those paths is foreign and is never written to or removed: a symlink, a plain file, a folder with no SKILL.md, or a different skill. The CLI names it and leaves it alone. A root holding none of Terum's copies is one you declined, and the hook never installs into it.
+Anything else at one of those paths is foreign and is never written to or removed: a symlink, a plain file, a folder with no SKILL.md, or a different skill. The CLI names it and leaves it alone. The hook never installs into a root holding none of Terum's copies; placing the set into an empty root is setup's job alone.
 
 ### What the agent may run, and what it hands you
 
@@ -66,7 +67,7 @@ The manual's own rules keep that line honest: never pipe `y` on stdin, never inv
 
 ### Removing them
 
-There is no separate remove verb. `npx -y terum-skills@latest uninstall` removes the managed copies as part of the machine teardown and prints `Removed the terum-skills skills from <root>: <names>.` for each root. Otherwise delete the folders under `~/.claude/skills/` and `~/.codex/skills/` yourself; setup offers them again next time.
+There is no separate remove verb. `npx -y terum-skills@latest uninstall` removes the managed copies as part of the machine teardown and prints `Removed the terum-skills skills from <root>: <names>.` for each root. Otherwise delete the folders under `~/.claude/skills/` and `~/.codex/skills/` yourself; setup places them again next time.
 
 ## The session-start hook
 

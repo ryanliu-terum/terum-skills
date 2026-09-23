@@ -65,7 +65,7 @@ We're interested in collaborators, and just as much in feedback and the things y
 
 Two more things worth knowing:
 
-- Setup offers eight skills for Claude Code and Codex (`list-skills`, `skill-info`, `search-skills`, `eval`, `eval-report`, `skill-status`, `sync-skills`, and `terum-skills` for any other verb), so either assistant can run these commands for you inside a session and show the result as a board, and a session-start hook that keeps the team repo fetched.
+- Setup places eight skills for Claude Code and Codex (`list-skills`, `skill-info`, `search-skills`, `eval`, `eval-report`, `skill-status`, `sync-skills`, and `terum-skills` for any other verb) in your global skills folders, so either assistant can run these commands for you inside a session and show the result as a board, and offers a session-start hook that keeps the team repo fetched.
 - The desktop app is a window onto the CLI. Every verb works from the terminal without it.
 
 ## How evaluation works

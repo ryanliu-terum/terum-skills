@@ -124,14 +124,16 @@ export async function managedSkillStates(options: Required<WrapperOptions>): Pro
   const roots: RootStatus[] = [];
   for (const root of options.roots) {
     const skills: ManagedSkillStatus[] = [];
+    // An ineligible root has no parent folder, so nothing can be under it: every copy is absent by definition and nothing is probed.
+    const isEligible = await eligible(root);
     for (const [name, rendered] of bundled) {
       const directory = managedSkillDirectory(root.root, name);
-      const presence = await inspectManagedSkill(root.root, name);
+      const presence: SkillPresence = isEligible ? await inspectManagedSkill(root.root, name) : { kind: 'absent' };
       if (presence.kind === 'absent') skills.push({ name, root: root.root, directory, state: 'absent' });
       else if (presence.kind === 'foreign') skills.push({ name, root: root.root, directory, state: 'foreign', why: presence.why });
       else skills.push({ name, root: root.root, directory, state: presence.raw === rendered ? 'current' : 'outdated' });
     }
-    roots.push({ host: root.host, root: root.root, eligible: await eligible(root), skills });
+    roots.push({ host: root.host, root: root.root, eligible: isEligible, skills });
   }
   return { kind: 'ready', bundled, roots };
 }
@@ -171,58 +173,84 @@ export async function removeManagedSkill(root: string, name: string): Promise<'r
   return 'removed';
 }
 
-export type WrapperOffer = 'installed' | 'replaced' | 'present' | 'declined' | 'foreign' | 'unavailable';
-const HOST_LABEL: Record<ManagedHost, string> = { claude: 'Claude Code', codex: 'Codex' };
+/**
+ * `installed` and `replaced`: something was written. `present`: nothing needed writing because every copy of
+ * ours is current. `foreign`: nothing of ours is in place anywhere and nothing could be written, because every
+ * name in every eligible root is taken by something else. `failed`: nothing was written and at least one write
+ * failed. `unavailable`: this copy of the package carries no bundle.
+ */
+export type ManagedSkillsPlacement = 'installed' | 'replaced' | 'present' | 'foreign' | 'failed' | 'unavailable';
 const listNames = (skills: ManagedSkillStatus[]): string => skills.map((skill) => skill.name).join(', ');
+const reason = (error: unknown): string => error instanceof Error ? error.message : String(error);
 
-export async function offerWrapper(io: Prompter, options: Required<WrapperOptions>): Promise<WrapperOffer> {
-  const states = await managedSkillStates(options);
-  if (states.kind === 'unavailable') { io.print(`The terum-skills skills are not bundled in this copy of terum-skills (expected under ${states.bundle}); skipped.`); return 'unavailable'; }
-  const roots = states.roots.filter((root) => root.eligible);
-  for (const root of states.roots) if (!root.eligible) io.print(`No ${dirname(root.root)} on this machine; Codex skills skipped.`);
-  for (const root of roots) for (const skill of root.skills) if (skill.state === 'foreign') io.print(`${skill.directory} exists and is not a bundled terum-skills skill (${skill.why}); left alone. Move it aside and re-run setup to install the bundled one.`);
-  const consented = roots.some((root) => root.skills.some((skill) => skill.state === 'current' || skill.state === 'outdated'));
-  if (!consented) {
-    const targets = roots.map((root) => ({ root, absent: root.skills.filter((skill) => skill.state === 'absent') })).filter((target) => target.absent.length);
-    if (!targets.length) return 'foreign';
-    const hosts = targets.map((target) => HOST_LABEL[target.root.host]).join(' and ');
-    const where = targets.map((target) => `${target.root.root}/{${listNames(target.absent)}}`).join(' and ');
-    if (!(await io.confirm(`Install the terum-skills skills for ${hosts} so ${targets.length > 1 ? 'they' : 'it'} can run terum-skills for you? (writes ${where})`))) {
-      io.print('Skipped the terum-skills skills; re-run setup to install them later.');
-      return 'declined';
-    }
-  }
-  let installed = 0, replaced = 0;
+/** What one root received: the copies written, the outdated copies rewritten, and the writes that failed. */
+export interface RootPlacement { root: RootStatus; written: ManagedSkillStatus[]; refreshed: ManagedSkillStatus[]; failed: { skill: ManagedSkillStatus; error: unknown }[] }
+
+/**
+ * The one write loop behind setup and the session hook: every absent or outdated copy in each given root is
+ * written from the rendered bundle. A failed write is recorded against its skill and the loop goes on, so one
+ * unwritable root (a read-only Codex profile, a full disk, a folder that appeared since the states were read)
+ * never blocks the copies that can be written; the caller decides what a failure means.
+ */
+async function placeInto(states: Extract<ManagedStates, { kind: 'ready' }>, roots: RootStatus[]): Promise<RootPlacement[]> {
+  const placements: RootPlacement[] = [];
   for (const root of roots) {
-    const written: ManagedSkillStatus[] = [], refreshed: ManagedSkillStatus[] = [];
+    const placement: RootPlacement = { root, written: [], refreshed: [], failed: [] };
     for (const skill of root.skills) {
       if (skill.state !== 'absent' && skill.state !== 'outdated') continue;
-      const outcome = await installManagedSkill(root.root, skill.name, states.bundled.get(skill.name)!);
-      if (outcome === 'installed') written.push(skill); else refreshed.push(skill);
+      try {
+        const outcome = await installManagedSkill(root.root, skill.name, states.bundled.get(skill.name)!);
+        (outcome === 'installed' ? placement.written : placement.refreshed).push(skill);
+      } catch (error) { placement.failed.push({ skill, error }); }
     }
+    placements.push(placement);
+  }
+  return placements;
+}
+
+/**
+ * Setup's skills step: place the bundled skills into every eligible global root without asking
+ * (Teddy, 2026-09-21; until then this was a y/N offer defaulting to No). Absent copies are written,
+ * outdated marked copies are rewritten, current ones are left as they are, and anything foreign is
+ * named and left alone. A write that fails is named and is never fatal: the team work before this step
+ * is durable, and a re-run places whatever it can. The Prompter is only printed to: nothing here asks,
+ * so the step is the same over a pipe, over frames and in `install`'s quiet bootstrap.
+ */
+export async function placeManagedSkills(io: Prompter, options: Required<WrapperOptions>): Promise<ManagedSkillsPlacement> {
+  const states = await managedSkillStates(options);
+  if (states.kind === 'unavailable') { io.print(`The terum-skills skills are not bundled in this copy of terum-skills (expected under ${states.bundle}); skipped.`); return 'unavailable'; }
+  for (const root of states.roots) if (!root.eligible) io.print(`No ${dirname(root.root)} on this machine; Codex skills skipped.`);
+  const roots = states.roots.filter((root) => root.eligible);
+  for (const root of roots) for (const skill of root.skills) if (skill.state === 'foreign') io.print(`${skill.directory} exists and is not a bundled terum-skills skill (${skill.why}); left alone. Move it aside and re-run setup to install the bundled one.`);
+  const placements = await placeInto(states, roots);
+  for (const { root, written, refreshed, failed } of placements) {
     if (written.length) io.print(`Installed the terum-skills skills at ${root.root}: ${listNames(written)}.`);
     if (refreshed.length) io.print(`Updated the terum-skills skills at ${root.root}: ${listNames(refreshed)}.`);
-    installed += written.length; replaced += refreshed.length;
+    for (const { skill, error } of failed) io.print(`Could not install the terum-skills skill ${skill.name} at ${root.root}: ${reason(error)}`);
   }
-  if (installed) return 'installed';
-  if (replaced) return 'replaced';
-  io.print(`The terum-skills skills at ${roots.map((root) => root.root).join(' and ')} are current.`);
+  if (placements.some((placement) => placement.written.length)) return 'installed';
+  if (placements.some((placement) => placement.refreshed.length)) return 'replaced';
+  if (placements.some((placement) => placement.failed.length)) return 'failed';
+  // Nothing needed writing: every name in every root is either our current copy or somebody else's, so only
+  // the roots that hold a copy of ours are reported as current.
+  const current = roots.filter((root) => root.skills.some((skill) => skill.state === 'current'));
+  if (!current.length) return 'foreign';
+  io.print(`The terum-skills skills at ${current.map((root) => root.root).join(' and ')} are current.`);
   return 'present';
 }
 
-export async function refreshManagedSkills(options: Required<WrapperOptions>): Promise<string[]> {
+/**
+ * `sync --hook`'s half of the same loop: only a root that already holds a marked copy qualifies (a root
+ * holding none is setup's to fill), and a failed write comes back as a line for the caller to report.
+ */
+export async function refreshManagedSkills(options: Required<WrapperOptions>): Promise<{ written: string[]; failed: string[] }> {
   const states = await managedSkillStates(options);
-  if (states.kind === 'unavailable') return [];
-  const written: string[] = [];
-  for (const root of states.roots) {
-    if (!root.skills.some((skill) => skill.state === 'current' || skill.state === 'outdated')) continue;
-    for (const skill of root.skills) {
-      if (skill.state !== 'absent' && skill.state !== 'outdated') continue;
-      await installManagedSkill(root.root, skill.name, states.bundled.get(skill.name)!);
-      written.push(skill.directory);
-    }
-  }
-  return written;
+  if (states.kind === 'unavailable') return { written: [], failed: [] };
+  const placements = await placeInto(states, states.roots.filter((root) => root.skills.some((skill) => skill.state === 'current' || skill.state === 'outdated')));
+  return {
+    written: placements.flatMap((placement) => [...placement.written, ...placement.refreshed].map((skill) => skill.directory)),
+    failed: placements.flatMap((placement) => placement.failed.map(({ skill, error }) => `${skill.directory}: ${reason(error)}`)),
+  };
 }
 
 export interface ManagedInventory {
