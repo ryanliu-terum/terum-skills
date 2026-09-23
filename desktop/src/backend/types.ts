@@ -191,7 +191,14 @@ export interface SetupArgs {target?:string}
 export const SETUP_STEP_KEYS = ['welcome','app','role','github','team','invite','projects','existing','evals','community','hook','wrapper','editHook','done'] as const;
 export type SetupStep = typeof SETUP_STEP_KEYS[number];
 export interface SetupResult {team:string;role:'creator'|'joiner';steps?:Partial<Record<SetupStep,'done'|'skipped'|'printed'|'queued'|'batched'>>|null}
-export interface EvalArgs {team?:string;ref:string;cases?:number}
+export interface EvalArgs {team?:string;ref:string;cases?:number;
+ /** IE6: the rival skill's ref. Present only for a head-to-head run. */
+ vs?:string;
+ /** IE6 §3.1: the reviewed brief's path. A head-to-head run REQUIRES one — the app derives first. */
+ brief?:string}
+/** IE6 §3.1: derive the shared brief and stop, so the human can review it before anything is spent. */
+export interface DeriveBriefArgs {team?:string;ref:string;vs:string}
+export interface DerivedBrief {brief:string;briefPath:string}
 /** §6.3: `team` and `id` are null for a folder that belongs to no team, which is now the common case. */
 export interface EvalResult {name:string;runDir:string;executionStatus:'complete'|'partial'|'failed';team:string|null;id:string|null;shareHint:boolean}
 /** Several skills in one CLI run — `eval <skill>… [--batch n] [--window w] [--pending]`: the wizard's Now / In batches /
