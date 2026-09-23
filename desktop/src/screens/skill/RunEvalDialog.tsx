@@ -1,6 +1,7 @@
 import { localActionReason, localRef } from '../../components/domain/skill-card-actions';
 import { useEffect, useRef, useState } from 'react';
-import { useCapabilities } from '../../backend';
+import { useSearchParams } from 'react-router';
+import { useBackend, useCapabilities } from '../../backend';
 import type { SkillDetail } from '../../backend/types';
 import { useEvalRun } from '../../app/eval-run-context';
 import { runStatus } from '../../app/eval-run-status';
@@ -11,7 +12,8 @@ import { Dialog, DialogPopup, DialogTitle, DialogDescription } from '../../compo
 import { Button } from '../../components/ui/Button';
 
 export function RunEvalDialog({skill:s,open,onClose}:{skill:SkillDetail;open:boolean;onClose:()=>void}){
- const capabilities=useCapabilities(),evalRun=useEvalRun();
+ const capabilities=useCapabilities(),evalRun=useEvalRun(),backend=useBackend(),[,setParams]=useSearchParams();
+ const canCompare=backend.deriveBrief!==undefined;
  const [error,setError]=useState<string|null>(null);
  const active=evalRun.current&&evalRun.current.name===s.name&&(evalRun.current.team??null)===s.team?evalRun.current:null;
  const done=active?.state==='done';
@@ -41,7 +43,11 @@ export function RunEvalDialog({skill:s,open,onClose}:{skill:SkillDetail;open:boo
  // EvalsEmpty primary and a pasted `?dialog=run-eval` — so B3 is safe standing alone, before B4 and
  // B5 add their disabled menu rows on the surfaces they own.
  const reason=localActionReason(s,'eval'),missing=reason!==null;
- if(!active)return <Dialog open onOpenChange={value=>{if(!value)close();}}><DialogPopup><DialogTitle>{title}</DialogTitle><DialogDescription>{missing?reason:estimate}</DialogDescription>{missing?null:<TerminalHint command={s.evalCommand}/>}{error?<div role="alert">{error}</div>:null}<div className="skill-dialog-actions"><Button onClick={close}>{missing?'Close':'Cancel'}</Button>{missing?null:<Button onClick={queue}>Queue for overnight</Button>}{missing?null:<Button kind="primary" onClick={start}>Run eval</Button>}</div></DialogPopup></Dialog>;
+ // IE6: the head-to-head lives behind its own question because it costs roughly double a normal
+ // run and needs a human to sign the shared brief first. Hidden when the app's CLI has no
+ // `--derive-brief`, rather than offered and then failing at spawn time.
+ function compare(){setParams(p=>{p.set('dialog','head-to-head');return p;},{replace:true});}
+ if(!active)return <Dialog open onOpenChange={value=>{if(!value)close();}}><DialogPopup><DialogTitle>{title}</DialogTitle><DialogDescription>{missing?reason:estimate}</DialogDescription>{missing?null:<TerminalHint command={s.evalCommand}/>}{error?<div role="alert">{error}</div>:null}<div className="skill-dialog-actions"><Button onClick={close}>{missing?'Close':'Cancel'}</Button>{missing||!canCompare?null:<Button onClick={compare}>Compare with another skill…</Button>}{missing?null:<Button onClick={queue}>Queue for overnight</Button>}{missing?null:<Button kind="primary" onClick={start}>Run eval</Button>}</div></DialogPopup></Dialog>;
  // `missing` gates this branch too. The run can outlive its folder — the comment below says so —
  // and a retry for an absent folder is the same guaranteed failure the pre-run gate exists to stop.
  const busy=active?.state==='running',finished=active!==null&&!busy,retryable=canRetry(active,missing);

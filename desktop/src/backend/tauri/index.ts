@@ -17,7 +17,7 @@ import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import { writeText, writeImage } from '@tauri-apps/plugin-clipboard-manager';
 import { Image } from '@tauri-apps/api/image';
 import type { Backend } from '../Backend';
-import type { Root, LibraryScope, IdentityWrite, Catalog, Roster, Person, Library, SkillCard, SkillDetail, UpdateAdvice, StatusResult, Settings, Capabilities, Surfaces, ReadOptions, ChangeSource, EvalArgs, EvalManyArgs, EvalResult, InstallArgs, InstalledResult, InviteArgs, InviteResult, MachineUninstallResult, PublishArgs, PublishResult, UnpublishArgs, UnpublishResult, ReconcileResult, Result, Run, SearchArgs, SearchHit, SetupArgs, SetupResult, Subscription, SyncArgs, SyncResult, TeamArgs, TeamResult, UninstallArgs, UninstalledResult, ValidateArgs, ValidateResult } from '../types';
+import type { Root, LibraryScope, IdentityWrite, Catalog, Roster, Person, Library, SkillCard, SkillDetail, UpdateAdvice, StatusResult, Settings, Capabilities, Surfaces, ReadOptions, ChangeSource, DeriveBriefArgs, DerivedBrief, EvalArgs, EvalManyArgs, EvalResult, InstallArgs, InstalledResult, InviteArgs, InviteResult, MachineUninstallResult, PublishArgs, PublishResult, UnpublishArgs, UnpublishResult, ReconcileResult, Result, Run, SearchArgs, SearchHit, SetupArgs, SetupResult, Subscription, SyncArgs, SyncResult, TeamArgs, TeamResult, UninstallArgs, UninstalledResult, ValidateArgs, ValidateResult } from '../types';
 import { tauriBridge, type AppState, type Bridge } from './bridge';
 import { cliRun } from './run';
 import { createReadSession } from './session.js';
@@ -89,6 +89,7 @@ export const cliSetup = z.object({ role: z.enum(['creator', 'joiner']), team: z.
 // §6.3: a local eval runs against a folder in the Library, which may belong to no team at all —
 // hence the nullable `team` and `id`. `shareHint` is the caller's cue to offer publishing.
 export const cliEval = z.object({ name:z.string(),runDir:z.string(),executionStatus:z.enum(['complete','partial','failed']),team:z.string().nullish().transform(v=>v??null),id:z.string().nullish().transform(v=>v??null),shareHint:z.literal(true).optional(),alreadyEvaluated:z.boolean().optional() }).passthrough();
+export const cliDerivedBrief = z.object({ brief:z.string(),briefPath:z.string(),derivedBriefOnly:z.literal(true) }).passthrough();
 const cliValidate = z.object({ name: z.string(), findings: z.number(), warnings: z.number(), repairable: z.number().optional().transform(value => value ?? 0), repairs: z.array(z.string()).optional().transform(value => value ?? []) });
 export const cliSearch = z.array(z.object({ team: z.string().optional(), id: z.string(), name: z.string(), author: z.string(), category: z.string(), installs: z.number(), latest: z.string(), description: z.string(), grants: z.string().nullable(), grantsHash: z.string().nullable(), updated: z.string() }));
 
@@ -1043,7 +1044,9 @@ export function createTauriBackend(bridge: Bridge = tauriBridge()): Backend {
       : run(teamArgv(args), cliTeam, (value): TeamResult => ({ name: value.team, kind: args.kind }), ['config', 'clone', 'placed']),
     setup: (args: SetupArgs) => run(['setup', ...(args.target ? ['--', args.target] : [])], cliSetup, (value): SetupResult => ({ team: value.team, role: value.role, steps: value.steps ?? null }), ['config', 'clone', 'placed']),
     // Settings ▸ Evals defaults reach every run as explicit flags ("the flags the app passes") through the one producer in eval-flags.ts; an unset pref (or the k '—' sentinel) passes nothing and the CLI falls back to its own defaults (k = 1, model sonnet).
-    eval: (args: EvalArgs) => run(['eval', ...evalPrefFlags(prefs), ...(args.team ? ['--team', args.team] : []), '--', args.ref], cliEval, (value): EvalResult => ({ name:value.name,runDir:value.runDir,executionStatus:value.executionStatus,team:value.team,id:value.id,shareHint:value.shareHint===true }), ['config', 'placed']),
+    eval: (args: EvalArgs) => run(['eval', ...evalPrefFlags(prefs), ...(args.team ? ['--team', args.team] : []), ...(args.vs ? ['--vs', args.vs] : []), ...(args.brief ? ['--brief', args.brief] : []), '--', args.ref], cliEval, (value): EvalResult => ({ name:value.name,runDir:value.runDir,executionStatus:value.executionStatus,team:value.team,id:value.id,shareHint:value.shareHint===true }), ['config', 'placed']),
+    // IE6 §3.1: derivation only — no arms run, so this spends one model call and nothing else.
+    deriveBrief: (args: DeriveBriefArgs) => run(['eval', ...evalPrefFlags(prefs), ...(args.team ? ['--team', args.team] : []), '--vs', args.vs, '--derive-brief', '--', args.ref], cliDerivedBrief, (value): DerivedBrief => ({ brief:value.brief,briefPath:value.briefPath }), []),
     // Several at once: the same receipts land locally, so the same boards move. A request the CLI would refuse throws here, before any spawn.
     evalMany: (args: EvalManyArgs) => run(evalManyArgv(args, prefs), cliEvalMany, mapEvalMany, ['config', 'placed']),
     validate: (args: ValidateArgs, options?: ReadOptions) => args.ref || args.cwd ? cached<ValidateResult>(['validate', ...(args.cwd && args.ref ? ['--cwd', args.cwd] : []), ...(args.team ? ['--team', args.team] : []), '--', args.ref || args.cwd || ''], cliValidate, options).then(result) : fail('validate needs a skill name or a folder.'),

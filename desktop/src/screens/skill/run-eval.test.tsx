@@ -115,7 +115,9 @@ it("shows the CLI's waiting line in the run log while it waits",async()=>{
 });
 it('offers no retry and no log region before a run starts',async()=>{
  await open();
- expect(within(screen.getByRole('dialog')).getAllByRole('button').map(button=>button.textContent)).toEqual(['Cancel','Queue for overnight','Run eval']);
+ // IE6: the head-to-head question sits beside the ordinary run. It is hidden when the CLI on this
+ // machine has no `--derive-brief`, so a backend without it renders the original three.
+ expect(within(screen.getByRole('dialog')).getAllByRole('button').map(button=>button.textContent)).toEqual(['Cancel','Compare with another skill…','Queue for overnight','Run eval']);
  expect(screen.queryByRole('log')).toBeNull();
 });
 it('Queue for overnight queues this one skill through the several-skills verb and shows the queued line',async()=>{
