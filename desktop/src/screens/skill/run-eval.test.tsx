@@ -117,8 +117,30 @@ it('offers no retry and no log region before a run starts',async()=>{
  await open();
  // IE6: the head-to-head question sits beside the ordinary run. It is hidden when the CLI on this
  // machine has no `--derive-brief`, so a backend without it renders the original three.
- expect(within(screen.getByRole('dialog')).getAllByRole('button').map(button=>button.textContent)).toEqual(['Cancel','Compare with another skill…','Queue for overnight','Run eval']);
+ expect(within(screen.getByRole('dialog')).getAllByRole('button').map(button=>button.textContent)).toEqual(['Cancel','Compare…','Queue for overnight','Run eval']);
  expect(screen.queryByRole('log')).toBeNull();
+});
+it('a run on screen does not cover another skill\u2019s question',async()=>{
+ // The host renders the RUN's dialog on any route so the chip can reopen it (UI policy \u00a75), and it
+ // paints after RouteView. Asking a different skill's question put the stale run on top of it, so
+ // that question's actions \u2014 Compare\u2026 among them \u2014 could not be reached at all.
+ const {evalSpy}=await open();const {run}=longRun();evalSpy.mockReturnValue(run);start();
+ await screen.findByText('preflight ok');
+ await act(async()=>{location.hash='#/skill/migration-guard?tab=evals&dialog=run-eval';});
+ // The page's own question, and ONLY it: the run's dialog covering this is the defect.
+ expect(await screen.findByText('Run an eval on migration-guard?')).toBeVisible();
+ expect(screen.getAllByRole('dialog')).toHaveLength(1);
+ const dialog=screen.getByRole('dialog');
+ expect(within(dialog).getByRole('button',{name:'Compare\u2026'})).toBeVisible();
+ expect(within(dialog).queryByText('Run an eval on deploy-check?')).toBeNull();
+});
+it('opens the head-to-head question from Compare\u2026',async()=>{
+ // The action routes through `?dialog=head-to-head`, so the screen's dialog allowlist has to admit
+ // that name: without it the button closed this dialog and opened nothing at all.
+ await open();
+ fireEvent.click(within(screen.getByRole('dialog')).getByRole('button',{name:'Compare\u2026'}));
+ expect(await screen.findByText('Compare deploy-check with another skill')).toBeVisible();
+ expect(within(screen.getByRole('dialog')).getByRole('button',{name:'Derive the brief'})).toBeDisabled();
 });
 it('Queue for overnight queues this one skill through the several-skills verb and shows the queued line',async()=>{
  const {backend,evalSpy}=await open();const many=vi.spyOn(backend,'evalMany');
@@ -146,4 +168,26 @@ it('a finished run keeps its chip: Close leaves it, the chip reopens the finishe
  expect(screen.getByRole('button',{name:'Eval finished · deploy-check'})).toBeVisible();
  fireEvent.click(screen.getByRole('button',{name:'Dismiss eval status'}));
  await waitFor(()=>expect(screen.queryByRole('button',{name:'Eval finished · deploy-check'})).toBeNull());
+});
+
+it('a finished head-to-head keeps its report on screen',async()=>{
+ // A normal run closes its dialog on done because the Evals tab behind it refreshes to the new
+ // receipt. \u00a75.2 refuses a head-to-head one \u2014 it pins two skills \u2014 so there is nothing to close
+ // onto: the tab shows nothing new and the report, which exists only as these lines, reads as
+ // having vanished. That is what "where is the report" was.
+ const {evalSpy}=await open();
+ const line='head-to-head: deploy-check vs migration-guard \u2014 6 cases \u00b7 k=1';
+ const run=createRun<EvalResult>(async ctx=>{ctx.print(line);return {ok:true,value};});
+ runs.push(run);evalSpy.mockReturnValue(run);
+
+ await act(async()=>{location.hash='#/skill/deploy-check?tab=evals&dialog=head-to-head';});
+ await screen.findByRole('option',{name:'migration-guard'});
+ fireEvent.change(screen.getByRole('combobox'),{target:{value:'migration-guard'}});
+ fireEvent.click(screen.getByRole('button',{name:/derive the brief/i}));
+ fireEvent.click(await screen.findByRole('button',{name:/approve and run/i}));
+
+ // The run settles, the chip appears \u2014 and the report is still on screen.
+ await screen.findByRole('button',{name:/^Eval finished/});
+ expect(screen.getByRole('dialog')).toBeVisible();
+ expect(within(screen.getByRole('dialog')).getByText(line)).toBeVisible();
 });

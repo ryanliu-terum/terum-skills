@@ -21,8 +21,12 @@ export function RunEvalDialog({skill:s,open,onClose}:{skill:SkillDetail;open:boo
  // A finished run closes its dialog ONCE (the Evals tab refreshes to the new receipt); the run itself stays, so the
  // top-bar chip reads "Eval finished" and clicking it reopens this dialog in its finished state (UI policy §5). The ref
  // keeps a re-render (the host's `onClose` is a fresh function each time) from closing the reopened dialog again.
+ // A head-to-head is the exception: §5.2 refuses it a receipt (it pins two skills), so there is no
+ // receipt view behind this dialog to close onto — the tab would refresh to nothing new and the
+ // report, which exists only as these lines, would read as having vanished. It stays until closed.
+ const comparison=active?.vs!==undefined;
  const closedOnDone=useRef(false);
- useEffect(()=>{if(done&&!closedOnDone.current){closedOnDone.current=true;dismiss();onClose();}},[done,dismiss,onClose]);
+ useEffect(()=>{if(done&&!comparison&&!closedOnDone.current){closedOnDone.current=true;dismiss();onClose();}},[done,comparison,dismiss,onClose]);
  const visible=open||(evalRun.dialogOpen&&active!==null);
  if(!visible||!capabilities)return null;
  function close(){if(active)evalRun.dismiss();onClose();}
@@ -47,7 +51,7 @@ export function RunEvalDialog({skill:s,open,onClose}:{skill:SkillDetail;open:boo
  // run and needs a human to sign the shared brief first. Hidden when the app's CLI has no
  // `--derive-brief`, rather than offered and then failing at spawn time.
  function compare(){setParams(p=>{p.set('dialog','head-to-head');return p;},{replace:true});}
- if(!active)return <Dialog open onOpenChange={value=>{if(!value)close();}}><DialogPopup><DialogTitle>{title}</DialogTitle><DialogDescription>{missing?reason:estimate}</DialogDescription>{missing?null:<TerminalHint command={s.evalCommand}/>}{error?<div role="alert">{error}</div>:null}<div className="skill-dialog-actions"><Button onClick={close}>{missing?'Close':'Cancel'}</Button>{missing||!canCompare?null:<Button onClick={compare}>Compare with another skill…</Button>}{missing?null:<Button onClick={queue}>Queue for overnight</Button>}{missing?null:<Button kind="primary" onClick={start}>Run eval</Button>}</div></DialogPopup></Dialog>;
+ if(!active)return <Dialog open onOpenChange={value=>{if(!value)close();}}><DialogPopup><DialogTitle>{title}</DialogTitle><DialogDescription>{missing?reason:estimate}</DialogDescription>{missing?null:<TerminalHint command={s.evalCommand}/>}{error?<div role="alert">{error}</div>:null}<div className="skill-dialog-actions"><Button onClick={close}>{missing?'Close':'Cancel'}</Button>{missing||!canCompare?null:<Button onClick={compare} title="Score this skill against another on one shared brief">Compare…</Button>}{missing?null:<Button onClick={queue}>Queue for overnight</Button>}{missing?null:<Button kind="primary" onClick={start}>Run eval</Button>}</div></DialogPopup></Dialog>;
  // `missing` gates this branch too. The run can outlive its folder — the comment below says so —
  // and a retry for an absent folder is the same guaranteed failure the pre-run gate exists to stop.
  const busy=active?.state==='running',finished=active!==null&&!busy,retryable=canRetry(active,missing);
