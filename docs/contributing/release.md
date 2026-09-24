@@ -32,10 +32,10 @@ Run `.github/workflows/release.yml` from the Actions tab, on `main`, with:
 | --- | --- |
 | `expected_version` | the version you are releasing, for example `0.20.1` |
 | `expected_sha` | the full 40-hex SHA of the merge commit |
-| `dry_run` | `true` for the first run, then `false` |
+| `dry_run` | `false`, unless `.github/workflows/release.yml` changed since the last release; then `true` for the first run, then `false` |
 | `dist_tag` | `latest`, unless you are backfilling an older stable version. A prerelease dispatched under `latest` is published under `next` instead |
 
-Dispatch with `dry_run=true` first. A dry run runs `validate`, `build`, `desktop` and `audit`, so it proves the gates, the tarball and the desktop matrix, and it performs neither the npm write nor the GitHub write. It does not exercise the `npm` environment approval: `publish` is the job that declares that environment, and a dry run skips it (`release.yml:296-298`). Then re-dispatch with the same `expected_version` and `expected_sha` and `dry_run=false`.
+Dispatch with `dry_run=false` directly unless `.github/workflows/release.yml` changed since the last release. A real run already stops before anything is written when `validate`, `build` or `desktop` fails, because `publish` needs all three, so for a routine version bump a dry run only repeats that work. `git diff --stat v<previous version> origin/main -- .github/workflows/release.yml` prints nothing when the workflow is unchanged. When `release.yml` did change, dispatch with `dry_run=true` first: a dry run runs `validate`, `build`, `desktop` and `audit`, which proves the gates, the tarball and the desktop matrix, and it performs neither the npm write nor the GitHub write. It does not exercise the `npm` environment approval: `publish` is the job that declares that environment, and a dry run skips it (`release.yml:296-298`). Once it passes, re-dispatch with the same `expected_version` and `expected_sha` and `dry_run=false`.
 
 The workflow refuses a dispatch that is not on `refs/heads/main`, an `expected_sha` that is not 40 hex characters, and an `expected_sha` that does not equal the commit the dispatch actually resolved to. That last one is the common failure: `main` moved between the merge and the dispatch, so re-dispatch on the intended commit.
 
