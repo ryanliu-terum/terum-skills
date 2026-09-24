@@ -152,9 +152,13 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
     // Default k=1 (spec rev 18; Ajay, 2026-09-10) — overrides the 2026-09-07 "keep default k=3"
     // ruling (Terum 5aa9a4b2) on cost: k=3 -> k=1 takes a 3-case run from ~$4.40 to ~$1.50 measured.
     // A receipt you intend to gate on wants --k 3 or more; §16.6 carries the noise caveat.
-    // IE6 §7: the comparison is the noisier quantity and reps are the cheapest mitigation, so
-    // head-to-head keeps its own default rather than inheriting the k=1 cost default.
-    const k = args.k ?? (headToHead ? 5 : 1);
+    // Head-to-head took k=5 under IE6 §7 (the comparison is the noisier quantity, reps the
+    // cheapest mitigation) until the first real run priced it: 6 cases x 3 arms x 5 reps = 90
+    // sequential sessions, ~2h, against the 12 an ordinary run costs — and nothing quotes that
+    // before it is spent. It now inherits the k=1 cost default (Ajay, 2026-09-23). The sign test
+    // is correspondingly weaker at one comparison per case, so a head-to-head you intend to act
+    // on wants --k 5 passed back explicitly.
+    const k = args.k ?? 1;
     if (!Number.isInteger(k) || k < 1) return failure('--k must be a positive integer.');
     const store = args.config ?? createConfigStore();
     const runner = args.runner ?? systemRunner;
