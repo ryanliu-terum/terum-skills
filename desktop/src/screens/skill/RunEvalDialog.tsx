@@ -21,8 +21,12 @@ export function RunEvalDialog({skill:s,open,onClose}:{skill:SkillDetail;open:boo
  // A finished run closes its dialog ONCE (the Evals tab refreshes to the new receipt); the run itself stays, so the
  // top-bar chip reads "Eval finished" and clicking it reopens this dialog in its finished state (UI policy §5). The ref
  // keeps a re-render (the host's `onClose` is a fresh function each time) from closing the reopened dialog again.
+ // A head-to-head is the exception: §5.2 refuses it a receipt (it pins two skills), so there is no
+ // receipt view behind this dialog to close onto — the tab would refresh to nothing new and the
+ // report, which exists only as these lines, would read as having vanished. It stays until closed.
+ const comparison=active?.vs!==undefined;
  const closedOnDone=useRef(false);
- useEffect(()=>{if(done&&!closedOnDone.current){closedOnDone.current=true;dismiss();onClose();}},[done,dismiss,onClose]);
+ useEffect(()=>{if(done&&!comparison&&!closedOnDone.current){closedOnDone.current=true;dismiss();onClose();}},[done,comparison,dismiss,onClose]);
  const visible=open||(evalRun.dialogOpen&&active!==null);
  if(!visible||!capabilities)return null;
  function close(){if(active)evalRun.dismiss();onClose();}

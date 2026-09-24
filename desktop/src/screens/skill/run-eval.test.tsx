@@ -169,3 +169,25 @@ it('a finished run keeps its chip: Close leaves it, the chip reopens the finishe
  fireEvent.click(screen.getByRole('button',{name:'Dismiss eval status'}));
  await waitFor(()=>expect(screen.queryByRole('button',{name:'Eval finished · deploy-check'})).toBeNull());
 });
+
+it('a finished head-to-head keeps its report on screen',async()=>{
+ // A normal run closes its dialog on done because the Evals tab behind it refreshes to the new
+ // receipt. \u00a75.2 refuses a head-to-head one \u2014 it pins two skills \u2014 so there is nothing to close
+ // onto: the tab shows nothing new and the report, which exists only as these lines, reads as
+ // having vanished. That is what "where is the report" was.
+ const {evalSpy}=await open();
+ const line='head-to-head: deploy-check vs migration-guard \u2014 6 cases \u00b7 k=1';
+ const run=createRun<EvalResult>(async ctx=>{ctx.print(line);return {ok:true,value};});
+ runs.push(run);evalSpy.mockReturnValue(run);
+
+ await act(async()=>{location.hash='#/skill/deploy-check?tab=evals&dialog=head-to-head';});
+ await screen.findByRole('option',{name:'migration-guard'});
+ fireEvent.change(screen.getByRole('combobox'),{target:{value:'migration-guard'}});
+ fireEvent.click(screen.getByRole('button',{name:/derive the brief/i}));
+ fireEvent.click(await screen.findByRole('button',{name:/approve and run/i}));
+
+ // The run settles, the chip appears \u2014 and the report is still on screen.
+ await screen.findByRole('button',{name:/^Eval finished/});
+ expect(screen.getByRole('dialog')).toBeVisible();
+ expect(within(screen.getByRole('dialog')).getByText(line)).toBeVisible();
+});
