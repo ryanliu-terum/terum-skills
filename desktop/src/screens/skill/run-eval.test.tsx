@@ -120,6 +120,20 @@ it('offers no retry and no log region before a run starts',async()=>{
  expect(within(screen.getByRole('dialog')).getAllByRole('button').map(button=>button.textContent)).toEqual(['Cancel','Compare…','Queue for overnight','Run eval']);
  expect(screen.queryByRole('log')).toBeNull();
 });
+it('a run on screen does not cover another skill\u2019s question',async()=>{
+ // The host renders the RUN's dialog on any route so the chip can reopen it (UI policy \u00a75), and it
+ // paints after RouteView. Asking a different skill's question put the stale run on top of it, so
+ // that question's actions \u2014 Compare\u2026 among them \u2014 could not be reached at all.
+ const {evalSpy}=await open();const {run}=longRun();evalSpy.mockReturnValue(run);start();
+ await screen.findByText('preflight ok');
+ await act(async()=>{location.hash='#/skill/migration-guard?tab=evals&dialog=run-eval';});
+ // The page's own question, and ONLY it: the run's dialog covering this is the defect.
+ expect(await screen.findByText('Run an eval on migration-guard?')).toBeVisible();
+ expect(screen.getAllByRole('dialog')).toHaveLength(1);
+ const dialog=screen.getByRole('dialog');
+ expect(within(dialog).getByRole('button',{name:'Compare\u2026'})).toBeVisible();
+ expect(within(dialog).queryByText('Run an eval on deploy-check?')).toBeNull();
+});
 it('opens the head-to-head question from Compare\u2026',async()=>{
  // The action routes through `?dialog=head-to-head`, so the screen's dialog allowlist has to admit
  // that name: without it the button closed this dialog and opened nothing at all.

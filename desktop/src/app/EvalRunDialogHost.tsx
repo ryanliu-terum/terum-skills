@@ -29,5 +29,11 @@ export function EvalRunDialogHost(){
  if(bulk&&!(current!==null&&dialogOpen))return <BulkEvalDialog refs={params.getAll('ref')} pending={params.get('pending')==='1'} team={params.get('team')??undefined} onClose={closeBulk}/>;
  if(current?.queue)return dialogOpen?<WorkflowDialog title={`Queued eval · ${current.name}`} body="Running queued evals four at a time. Receipts are committed to the team." command="npx -y terum-skills@latest eval --drain --parallel 4" primary={null} close={dismiss} submit={()=>{}} busy={current.state==='running'} onStop={()=>void stop()} dismissKeepsRunning lines={current.lines} status={runStatus(current)} closeLabel="Close"/>:null;
  if(current?.many!==undefined)return dialogOpen?<BulkEvalRunDialog current={{...current,many:current.many}} onClose={dismiss} onStop={()=>void stop()}/>:null;
- return current&&skill?<RunEvalDialog key={current.startedAt} skill={skill} open={fromUrl} onClose={closeUrl}/>:null;
+ // A run's dialog reopens from the chip on any route (UI policy §5), but it must not sit on top of
+ // a DIFFERENT skill's question. `?dialog=run-eval` on a page this run is not about is that page
+ // asking, and SkillScreen already renders the question underneath — the host paints after
+ // RouteView, so without this a run left on screen covers it and its actions (Compare… among them)
+ // cannot be reached at all. The chip path is untouched: reopening from the chip sets no URL.
+ const askedElsewhere=params.get('dialog')==='run-eval'&&!fromUrl;
+ return current&&skill&&!askedElsewhere?<RunEvalDialog key={current.startedAt} skill={skill} open={fromUrl} onClose={closeUrl}/>:null;
 }
