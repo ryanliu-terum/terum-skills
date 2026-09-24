@@ -14,7 +14,7 @@ export function EvalRunProvider({children}:PropsWithChildren){
  const live=useRef<EvalRunState|null>(null),inFlight=useRef(false);
  function update(next:EvalRunState|null){live.current=next;setCurrent(next);}
  function assertAvailable(){if(inFlight.current)throw new Error(`An eval is already running for ${live.current?.ref??'another skill'}`);}
- async function track<T extends EvalRunValue>(run:Run<T>,args:{ref:string;name:string;team?:string;queue?:boolean;many?:EvalManyArgs}):Promise<Result<T>> {
+ async function track<T extends EvalRunValue>(run:Run<T>,args:{ref:string;name:string;team?:string;queue?:boolean;many?:EvalManyArgs;vs?:string}):Promise<Result<T>> {
   inFlight.current=true;
   update({...args,team:args.team,run,lines:[],startedAt:Date.now(),state:'running'});setDialogOpen(true);
   let result:Result<T>;
@@ -31,8 +31,10 @@ export function EvalRunProvider({children}:PropsWithChildren){
  }
  const start:EvalRunApi['start']=args=>{
   assertAvailable();
-  const run=backend.eval({ref:args.ref,...(args.team===undefined?{}:{team:args.team})});
-  void track(run,args);
+  // IE6: `brief` is required alongside `vs` — the CLI refuses a head-to-head with no reviewed
+  // brief on a channel that cannot ask, and a spawned CLI never can.
+  const run=backend.eval({ref:args.ref,...(args.team===undefined?{}:{team:args.team}),...(args.vs===undefined?{}:{vs:args.vs}),...(args.brief===undefined?{}:{brief:args.brief})});
+  void track(run,{ref:args.ref,name:args.name,...(args.team===undefined?{}:{team:args.team}),...(args.vs===undefined?{}:{vs:args.vs})});
  };
  // The chip and the dialog name the request, not a skill: there may be none (pending only) or many.
  const startMany:NonNullable<EvalRunApi['startMany']>=args=>{

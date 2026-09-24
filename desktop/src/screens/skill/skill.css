@@ -148,3 +148,16 @@
    a tab with more rows than fit squashed them toward their min-content height instead of overflowing into
    the pane's scroll region. On the mock both tabs fit, so no row shrinks and no board moves. */
 .hygiene-row,.activity-row{flex-shrink:0}
+
+/* IE6 head-to-head: the derived brief is the neutrality guarantee, so it is shown as a readable,
+   selectable block rather than a bare <blockquote> (which carries the UA's own margins and none of
+   the panel treatment). Metrics follow `.partial-banner` for the block and `.market-field` for the
+   picker; the brief can run long, so it scrolls inside the dialog instead of growing it. */
+.head-to-head-brief{margin:0;padding:10px 12px;border-radius:6px;background:var(--tk-bg2);border:1px solid var(--tk-border1);font-size:13px;line-height:20px;color:var(--tk-text2);text-wrap:pretty;white-space:pre-wrap;overflow-wrap:anywhere;max-height:260px;overflow-y:auto;scrollbar-width:none;box-sizing:border-box;user-select:text;-webkit-user-select:text}
+.head-to-head-path{margin:0;font-size:12px;line-height:16px;color:var(--tk-text3);white-space:normal;overflow-wrap:anywhere;user-select:text;-webkit-user-select:text}
+.head-to-head-path>code{font-family:var(--font-mono);font-size:11px;color:var(--tk-text2)}
+.head-to-head-pick{display:flex;flex-direction:column;gap:6px;font-size:12px;color:var(--tk-text3);white-space:normal;overflow:visible}
+.head-to-head-pick>select{height:32px;padding:0 8px;border-radius:8px;background:var(--tk-bg2);border:1px solid var(--tk-border1);color:var(--tk-text1);font:inherit;font-size:13px;outline:0;box-sizing:border-box}
+.head-to-head-pick>select:hover{border-color:var(--tk-border2)}
+.head-to-head-pick>select:focus-visible{box-shadow:0 0 0 2px var(--tk-accent)}
+.head-to-head-pick>select:disabled{opacity:.5}

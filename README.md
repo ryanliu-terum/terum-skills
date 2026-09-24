@@ -21,7 +21,7 @@
 npx -y terum-skills@latest setup
 ```
 
-Requires Node 22.12+ and `git`. Creating a team on GitHub, inviting people, and downloading the desktop app also need the GitHub CLI logged in (`gh auth login`); joining a team does not. On macOS and Windows, setup installs and opens the desktop app first and the rest continues there. On Linux and WSL there is no app yet, so setup runs in the terminal. `npx -y` runs the latest CLI release every time.
+Requires Node 22.12+ and `git`. Creating a team on GitHub, inviting people, and downloading the desktop app also need the GitHub CLI logged in (`gh auth login`); joining a team does not. On macOS and Windows, setup installs and opens the desktop app first and the rest continues there; if the app cannot be installed at that point (gh logged out, offline), setup finishes in the terminal and tries the app once more at the end. On Linux and WSL there is no app yet, so setup runs in the terminal. `npx -y` runs the latest CLI release every time.
 
 To join an existing team, a repository admin invites you from the app's Members page (or with `invite <github-login>`) using your GitHub username. GitHub emails you the invitation, and the app gives them the one-line join command to send you: `npx -y terum-skills@latest setup <org>/<repo>`.
 
@@ -65,7 +65,7 @@ We're interested in collaborators, and just as much in feedback and the things y
 
 Two more things worth knowing:
 
-- Setup offers eight skills for Claude Code and Codex (`list-skills`, `skill-info`, `search-skills`, `eval`, `eval-report`, `skill-status`, `sync-skills`, and `terum-skills` for any other verb), so either assistant can run these commands for you inside a session and show the result as a board, and a session-start hook that keeps the team repo fetched.
+- Setup places eight skills for Claude Code and Codex (`list-skills`, `skill-info`, `search-skills`, `eval`, `eval-report`, `skill-status`, `sync-skills`, and `terum-skills` for any other verb) in your global skills folders, so either assistant can run these commands for you inside a session and show the result as a board, and offers a session-start hook that keeps the team repo fetched.
 - The desktop app is a window onto the CLI. Every verb works from the terminal without it.
 
 ## How evaluation works

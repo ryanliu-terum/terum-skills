@@ -1,6 +1,6 @@
 import { packageRoot } from './package-root.js';
 import { existsSync, readFileSync } from 'node:fs';
-import { chmod, lstat, mkdir, readdir, realpath, rm, rmdir, stat, unlink, writeFile } from 'node:fs/promises';
+import { chmod, lstat, mkdir, readdir, readFile, realpath, rm, rmdir, stat, unlink, writeFile } from 'node:fs/promises';
 import { packageVersion } from './package.js';
 import { basename, dirname, join, posix, resolve, sep } from 'node:path';
 import lockfile from 'proper-lockfile';
@@ -212,6 +212,8 @@ async function safeWrite<R = void>(root: string, remote: string, runner: Runner,
       if (compromised) throw new Error(lostLock(root));
       await requireGit(['fetch', 'origin']);
       await requireGit(['reset', '--hard', 'origin/main']);
+      // The tree below reads existing versions from disk, so they must be the committed bytes.
+      await pinCheckoutBytes(root, runner);
       const index = (await requireGit(['ls-files', '--stage', '-z'])).stdout.split('\0').filter(Boolean);
       const tracked = new Set<string>(); const executable = new Set<string>();
       for (const entry of index) {
@@ -646,7 +648,35 @@ export async function cloneTeam(remote: string, destination: string, runner: Run
     const copy = explainGitAccessFailure(remoteToGitUrl(remote), clone.stderr);
     throw new Error(`Could not clone ${stripRemoteCredentials(remote)}: ${(clone.stderr || clone.stdout).trim()}${copy ? `\n${copy}` : ''}`);
   }
+  await pinCheckoutBytes(destination, runner);
   await installPushGuard(destination, runner);
+}
+
+/** The `.git/info/attributes` line that turns every end-of-line conversion off in a team clone. */
+export const VERBATIM_ATTRIBUTES = '* -text';
+
+/**
+ * Make a team clone's working tree the committed bytes, never a converted copy of them. Git for Windows
+ * ships `core.autocrlf=true`, so a clone there held every LF blob as CRLF on disk, and publish digests
+ * the existing versions from those files: an unchanged republish never matched its own version and
+ * minted a new one. Installs copy from the same files. `-text` in `.git/info/attributes` outranks
+ * `.gitattributes` and every `core.autocrlf`/`core.eol` level, including one set in the environment.
+ *
+ * The first call on a clone rewrites its tracked files from HEAD. `checkout-index --force` is not
+ * enough: it skips any file whose stat still matches the index, which is every converted file. So the
+ * index is dropped and the reset rebuilds it, writing every file. Later calls are one file read. Run
+ * it after a reset, so HEAD is already the commit the caller wants on disk.
+ */
+export async function pinCheckoutBytes(clone: string, runner: Runner = systemRunner, env?: NodeJS.ProcessEnv): Promise<void> {
+  const path = join(clone, '.git', 'info', 'attributes');
+  let existing = '';
+  try { existing = await readFile(path, 'utf8'); } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+  if (existing.split(/\r?\n/).includes(VERBATIM_ATTRIBUTES)) return;
+  await mkdir(dirname(path), { recursive: true });
+  await writeFile(path, `${existing}${existing === '' || existing.endsWith('\n') ? '' : '\n'}${VERBATIM_ATTRIBUTES}\n`);
+  await rm(join(clone, '.git', 'index'), { force: true });
+  const reset = await runner.run('git', ['reset', '-q', '--hard', 'HEAD'], { cwd: clone, env });
+  if (reset.code !== 0) throw new Error(`Could not rewrite ${clone} with its committed bytes: ${(reset.stderr || reset.stdout).trim()}`);
 }
 
 /** How the clone-local hook launches the guard: the node binary and the CLI entry that armed the clone. */
@@ -793,6 +823,8 @@ export async function refreshClone(runner: Runner, clone: string, options: { lab
         throw new Error(lock ? `${message}\nThe lock ${lock.path} is ${Math.round(lock.ageMs / 1000)} s old; if no git process is running on this clone, delete it and sync again.` : message);
       }
     }
+    assertHeld();
+    await pinCheckoutBytes(clone, runner, options.env);
   }, { lockStale: options.lockStale, label: options.label, lockWaitMs: options.lockWaitMs, onWaiting: options.onWaiting });
 }
 

@@ -207,7 +207,11 @@ describe('refresh', () => {
     await run({ config: store, runner }, new ScriptedPrompter());
     // §4.2 supplies the non-interactive env through refreshClone; local HEAD/status/origin probes do not contact credentials.
     const refreshCalls = calls.filter(c => c.args[0] === 'fetch' || c.args[0] === 'reset');
-    expect(refreshCalls.map(c => c.args[0])).toEqual(['fetch', 'reset']);
+    // The fixture clone predates pinCheckoutBytes, so its first refresh adds one local reset that rewrites it verbatim.
+    expect(refreshCalls.map(c => c.args.join(' '))).toEqual(['fetch origin', 'reset --hard origin/main', 'reset -q --hard HEAD']);
+    calls.length = 0;
+    await run({ config: store, runner }, new ScriptedPrompter());
+    expect(calls.filter(c => c.args[0] === 'fetch' || c.args[0] === 'reset').map(c => c.args.join(' '))).toEqual(['fetch origin', 'reset --hard origin/main']);
     // The pair index follows whatever GIT_CONFIG_* the test process itself carries, so the expectation is the producer's own answer plus the pair being present.
     for (const call of refreshCalls) { expect(call.options?.env).toEqual(nonInteractiveGitEnv()); expect(Object.entries(call.options?.env ?? {}).filter(([key, value]) => key.startsWith('GIT_CONFIG_KEY_') && value === 'credential.interactive')).toHaveLength(1); }
   });

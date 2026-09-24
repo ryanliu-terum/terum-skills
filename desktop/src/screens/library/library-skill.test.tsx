@@ -340,8 +340,10 @@ it('resets a local action error when navigating to another path',async()=>{
  openWith('#/skill/local?path=%2Ffirst%2Fdeploy-check',backend);
  fireEvent.click(await screen.findByRole('button',{name:'Edit'}));expect(await screen.findByRole('alert')).toHaveTextContent('Editor refused first folder');
  location.hash='#/skill/local?path=%2Fsecond%2Fdeploy-check';fireEvent(window,new HashChangeEvent('hashchange'));
- expect(await screen.findByRole('heading',{name:'deploy-check'})).toBeVisible();expect(screen.queryByRole('alert')).toBeNull();
- expect(document.querySelector('.detail-repo')).toHaveTextContent('/second/deploy-check');
+ // The failed action leaves the first page (and its heading) up, so wait for the second page itself before
+ // asserting the error is gone; otherwise the check runs against the page being navigated away from.
+ await waitFor(()=>expect(document.querySelector('.detail-repo')).toHaveTextContent('/second/deploy-check'));
+ expect(screen.getByRole('heading',{name:'deploy-check'})).toBeVisible();expect(screen.queryByRole('alert')).toBeNull();
 });
 // The Library Connect CTA was removed on 2026-09-10 (ratified override): global skills
 // auto-share at sync by ID check, and the
@@ -503,9 +505,10 @@ it('resets an action error when navigating to another origin of the same skill',
  fireEvent.click(await screen.findByRole('button',{name:'Edit'}));
  expect(await screen.findByRole('alert')).toHaveTextContent('Editor refused first root');
  location.hash='#/skill/deploy-check?root=%2FUsers%2Fyou%2Fcode%2Fssm';fireEvent(window,new HashChangeEvent('hashchange'));
- expect(await screen.findByRole('heading',{name:'deploy-check'})).toBeVisible();
+ // As above: wait for the other origin's page, not the heading both pages share.
+ await waitFor(()=>expect(document.querySelector('.detail-crumbs')?.textContent).toMatch(/^SSM\//));
+ expect(screen.getByRole('heading',{name:'deploy-check'})).toBeVisible();
  expect(screen.queryByRole('alert')).toBeNull();
- expect(document.querySelector('.detail-crumbs')?.textContent).toMatch(/^SSM\//);
 });
 it('maps the reachable global root URL to a global scope',async()=>{
  const backend=createMockBackend(),skill=vi.spyOn(backend,'skill');

@@ -29,14 +29,13 @@ const hookFor = (root: string) => ({ settingsFile: join(root, 'settings.json'), 
 const githubRemote = (owner: string, repository: string) => `https://github.com/${owner}/${repository}.git`;
 /**
  * Wrapper options for the cases that are not about the skills: a bundle folder that cannot exist, so
- * `offerWrapper` reports 'unavailable', prints one line and asks nothing. Explicit because the default
+ * `placeManagedSkills` reports 'unavailable', prints one line and asks nothing. Explicit because the default
  * bundle (BUNDLED_SKILLS) is resolved from the package root, so whether it exists depends on whether
  * this checkout happens to have been built — a fixture must never depend on that. `roots` is left to
  * defaultWrapperOptions(home): an unavailable bundle is reported before anything reads them.
  */
 const noBundledWrapper = { bundle: join(tmpdir(), `terum-skills-unbundled-${randomUUID()}`) };
 /** The first-install question for a home without ~/.codex: the Claude root alone, every bundled name. */
-const skillsQuestion = async (home: string) => `Install the terum-skills skills for Claude Code so it can run terum-skills for you? (writes ${join(home, '.claude', 'skills')}/{${(await bundledNames()).join(', ')}})`;
 /** The same trick for the edit hook, for the same reason: an unavailable bundled source reports, prints one line and asks nothing. */
 const noBundledEditHook = { source: join(tmpdir(), `terum-skills-unbundled-${randomUUID()}`, 'terum-skills-edit.mjs') };
 
@@ -162,7 +161,7 @@ describe('setup (§6.1)', () => {
     const result = await run(args, io);
     expect.soft(io.asked).toContain('Invite teammates by inputting their GitHub usernames (comma or space separated; blank to skip)');
     expect.soft(io.askedAbout('GitHub logins to invite')).toBe(false);
-    expect.soft(io.lines).toContain('This wizard helps you create a team, join one, invite teammates, and offer the session hook and the terum-skills skills for Claude Code and Codex and a reminder to publish a skill after Claude edits one; re-run it any time to continue, and leave the invitation question blank to skip it.');
+    expect.soft(io.lines).toContain('This wizard helps you create a team, join one, invite teammates, place the terum-skills skills for Claude Code and Codex, and offer the session hook and a reminder to publish a skill after Claude edits one; re-run it any time to continue, and leave the invitation question blank to skip it.');
     expect(result.ok).toBe(true);
   });
 
@@ -393,8 +392,8 @@ describe('setup (§6.1)', () => {
       'api -X PUT --include repos/alice/alpha-repo/collaborators/bob': { code: 0, stdout: 'HTTP/2 201\n', stderr: '' },
       'api -X PUT --include repos/alice/alpha-repo/collaborators/carol': { code: 0, stdout: 'HTTP/2 201\n', stderr: '' },
     }));
-    // Discovery no, then hook, wrapper and edit-hook installation.
-    const io = new ScriptedPrompter(['Create a new team', 'alpha', '', '', 'Alice', 'alice@example.com', 'alpha-repo', 'bob carol'], [false, true, true, true], true);
+    // Discovery no, then hook and edit-hook installation; the skills are placed without a question.
+    const io = new ScriptedPrompter(['Create a new team', 'alpha', '', '', 'Alice', 'alice@example.com', 'alpha-repo', 'bob carol'], [false, true, true], true);
     const result = await run({ app: false, config: store, home, runner, hook: hookFor(root), wrapper: wrapperFor(home), editHook: editHookFor(join(root, 'state'), hookFor(root).settingsFile), communityUrl: 'https://example.test/community' }, io);
     if (!result.ok) throw new Error(result.error);
 
@@ -404,12 +403,11 @@ describe('setup (§6.1)', () => {
       'Invite teammates by inputting their GitHub usernames (comma or space separated; blank to skip)',
       PROJECTS_QUESTION,
       `Install the Claude Code session-start hook so team skills sync automatically? (edits ${hookFor(root).settingsFile})`,
-      await skillsQuestion(home),
       `Remind Claude Code to publish a skill after it edits one? (installs ${join(root, 'state', 'hooks', 'terum-skills-edit.mjs')} and a Write/Edit hook in ${hookFor(root).settingsFile})`,
     ]);
     expect(io.lines).toEqual(expect.arrayContaining([
       'Welcome to terum-skills.', "Your team's skills live in one private git repository the team controls; each member installs what they want and publishes local skills explicitly.",
-      'This wizard helps you create a team, join one, invite teammates, and offer the session hook and the terum-skills skills for Claude Code and Codex and a reminder to publish a skill after Claude edits one; re-run it any time to continue, and leave the invitation question blank to skip it.',
+      'This wizard helps you create a team, join one, invite teammates, place the terum-skills skills for Claude Code and Codex, and offer the session hook and a reminder to publish a skill after Claude edits one; re-run it any time to continue, and leave the invitation question blank to skip it.',
       'Creating a new team creates a private GitHub repository under your account.',
       'GitHub: gh is logged in.', 'Next, from any terminal:',
       '  npx -y terum-skills@latest install alpha/<skill>   — install a shared skill (add @<version> to pin it)',
@@ -482,19 +480,26 @@ describe('setup (§6.1)', () => {
     const fixture = await bareTeam();
     const root = join(fixture.root, 'quiet'); const store = createConfigStore(join(root, 'state'));
     const remote = 'https://git.example/team.git'; const runner = mappedRunner(remote, fixture.bare, fakeGh('bob'));
-    const io = new ScriptedPrompter(['', '', 'Bob', 'bob@example.com'], [true, true, true]);
+    const io = new ScriptedPrompter(['', '', 'Bob', 'bob@example.com'], [true, true]);
     const home = join(root, 'home');
     const result = await run({ app: false, target: remote, quiet: true, config: store, runner, home, hook: hookFor(root), wrapper: wrapperFor(home), editHook: editHookFor(join(root, 'state'), hookFor(root).settingsFile), communityUrl: 'https://example.test/community' }, io);
     if (!result.ok) throw new Error(result.error);
     expect(result.value.steps).toEqual({ welcome: 'skipped', app: 'skipped', github: 'done', team: 'done', invite: 'skipped', projects: 'skipped', existing: 'skipped', evals: 'skipped', community: 'skipped', hook: 'done', wrapper: 'done', editHook: 'done', done: 'skipped' });
     expect(io.countAsked('Install the Claude Code session-start hook')).toBe(1);
-    expect(io.countAsked('Install the terum-skills skills')).toBe(1);
+    expect(io.askedAbout('Install the terum-skills skills')).toBe(false);
     expect(io.countAsked('Remind Claude Code to publish a skill after it edits one?')).toBe(1);
     expect(await exists(join(root, 'state', 'hooks', 'terum-skills-edit.mjs'))).toBe(true);
     expect(await exists(join(home, '.claude', 'skills', 'terum-skills', 'SKILL.md'))).toBe(true);
     const printed = io.lines.join('\n');
     for (const line of ['Welcome to terum-skills', 'GitHub: gh', 'Next, from any terminal', 'Feedback and requests', 'Repository:', 'README:']) expect(printed, line).not.toContain(line);
     expect(JSON.parse(await git(['show', 'main:people/bob.json'], fixture.bare)).email).toBe('bob@example.com');
+    // A second run finds every copy in place: the step still counts as done, and it asks nothing.
+    const again = new ScriptedPrompter();
+    const rerun = await run({ app: false, target: remote, quiet: true, config: store, runner, home, hook: hookFor(root), wrapper: wrapperFor(home), editHook: editHookFor(join(root, 'state'), hookFor(root).settingsFile), communityUrl: 'https://example.test/community' }, again);
+    if (!rerun.ok) throw new Error(rerun.error);
+    expect(rerun.value.steps.wrapper).toBe('done');
+    expect(again.asked).toEqual([]);
+    expect(again.lines).toContain(`The terum-skills skills at ${join(home, '.claude', 'skills')} are current.`);
   });
 
   it('keeps setup as an orchestrator: real verbs ask every consent question themselves', async () => {
@@ -517,9 +522,9 @@ describe('setup (§6.1)', () => {
       'repo create questions --private': { code: 0, stdout: '', stderr: '' },
       'repo view questions --json nameWithOwner -q .nameWithOwner': { code: 0, stdout: 'alice/questions\n', stderr: '' },
     }));
-    // Discovery no, eval select Skip, hook no, wrapper yes, edit hook no. (joinedIo below is
-    // non-interactive, so it is never offered any optional step.)
-    const io = new ScriptedPrompter(['Create a new team', 'questions', '', '', 'Alice', 'alice@example.com', 'questions', '', 'Skip'], [false, false, true, false], true);
+    // Discovery no, eval select Skip, hook no, edit hook no; the skills are placed without a question.
+    // (joinedIo below is non-interactive, so it is never offered any optional step.)
+    const io = new ScriptedPrompter(['Create a new team', 'questions', '', '', 'Alice', 'alice@example.com', 'questions', '', 'Skip'], [false, false, false], true);
     const created = await run({ app: false, config: createConfigStore(join(root, 'state')), home, runner, hook: hookFor(root), wrapper: wrapperFor(home), editHook: editHookFor(join(root, 'state'), hookFor(root).settingsFile), communityUrl: '' }, io);
     if (!created.ok) throw new Error(created.error);
     const joinFixture = await bareTeam();
@@ -527,7 +532,7 @@ describe('setup (§6.1)', () => {
     await pushFromSeed(joinFixture.seed, 'skills/tool/v1/SKILL.md', `---\nname: tool\ndescription: tool\nlicense: UNLICENSED\nallowed-tools: Bash(ls)\nmetadata:\n  id: ${id}\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\n`);
     await pushFromSeed(joinFixture.seed, 'team.json', JSON.stringify({ layout_version: 3, name: 'team', categories: [], projects: { Global: { remotes: [], skills: [id] } }, archived: [], policy: { skill_license: 'UNLICENSED' } }));
     const joinRoot = join(joinFixture.root, 'real-join'); const joinHome = join(joinRoot, 'home');
-    const joinedIo = new ScriptedPrompter(['', '', 'Bob', 'bob@example.com'], [true, true, false, false]);
+    const joinedIo = new ScriptedPrompter(['', '', 'Bob', 'bob@example.com'], [true, false]);
     const joined = await run({ app: false, target: 'https://git.example/team.git', config: createConfigStore(join(joinRoot, 'state')), home: joinHome, runner: mappedRunner('https://git.example/team.git', joinFixture.bare, fakeGh('bob')), hook: hookFor(joinRoot), wrapper: wrapperFor(joinHome), communityUrl: '' }, joinedIo);
     if (!joined.ok) throw new Error(joined.error);
     // §12 deleted the endorsement-driven auto-install, so join no longer offers one — and with no
@@ -535,8 +540,10 @@ describe('setup (§6.1)', () => {
     expect([...io.asked, ...joinedIo.asked]).toEqual(expect.arrayContaining([
       `Install the Claude Code session-start hook so team skills sync automatically? (edits ${hookFor(root).settingsFile})`,
       `Install the Claude Code session-start hook so team skills sync automatically? (edits ${hookFor(joinRoot).settingsFile})`,
-      await skillsQuestion(home), await skillsQuestion(joinHome),
     ]));
+    // The skills are placed, never offered: no question on either machine, and the copies are there.
+    for (const prompter of [io, joinedIo]) expect(prompter.askedAbout('Install the terum-skills skills')).toBe(false);
+    for (const skillsHome of [home, joinHome]) expect(await exists(join(skillsHome, '.claude', 'skills', 'terum-skills', 'SKILL.md'))).toBe(true);
   });
 
   it.each([undefined, 'bare'] as const)('skips invitations for a configured generic-git creator and prints the host handoff (form=%s)', async (form) => {
@@ -756,6 +763,79 @@ describe('the desktop app hand-off (D4/D5 2026-09-08; auto-launch, Teddy 2026-09
     expect(io.lines.some((line) => line.startsWith('Could not reach GitHub'))).toBe(true);
     expect(io.asked).toEqual([APP_QUESTION, ROLE_QUESTION]);
   });
+
+  // The wizard boots the app. When the hand-off at the top fails (gh logged out, offline) the wizard finishes in the
+  // terminal — and a join that ran here must still end with the app open, because the GitHub step may have removed
+  // the cause in between. The second attempt is the last thing the wizard does, after the summary the person still
+  // needs to read, and carries no target and no intent: the join is done, the app opens to the Library. Nothing here
+  // reaches the network: the app verb is a fake.
+  const launched = success({ platform: 'darwin-arm64' as const, version: '0.1.6', action: 'launched' as const, appPath: '/Applications/Terum Skills.app', statePath: '/tmp/app.json' });
+  const RETRY_LINE = 'print:Setup continues here and tries the app once more when it finishes.';
+  const failsThenLaunches = (calls: Record<string, unknown>[]) => (async (a: Record<string, unknown>, io: Prompter) => {
+    calls.push(a);
+    if (calls.length === 1) return failure('GitHub CLI is not logged in. Everything works from the terminal.');
+    io.print('Opened Terum Skills 0.1.6.');
+    return launched;
+  }) as never;
+  it.each([undefined, 'alice/team'])('a failed hand-off is tried again after the closing summary, without a join target (target=%s)', async (target) => {
+    const args = await optionalSetup();
+    const calls: Record<string, unknown>[] = [];
+    const io = optionalAnswers();
+    const result = await run({ ...args, app: undefined, evidence: mac, ...(target ? { target } : {}), verbs: { ...args.verbs, app: failsThenLaunches(calls) } }, io);
+    expect(result).toMatchObject({ ok: true, value: { role: target ? 'joiner' : 'creator', team: 'team', steps: { app: 'done', team: 'skipped', done: 'printed' } } });
+    expect(calls).toHaveLength(2);
+    expect(calls[0]).toMatchObject({ offer: false, intent: 'setup', ...(target ? { target } : {}) });
+    expect(calls[1]).toMatchObject({ offer: false });
+    expect(calls[1]).not.toHaveProperty('target');
+    expect(calls[1]).not.toHaveProperty('intent');
+    // The failure is said once, with what happens next, before the wizard goes on; the second attempt comes after the
+    // whole closing summary and is the last thing the wizard prints.
+    const failedAt = io.at(event => event === 'print:GitHub CLI is not logged in. Everything works from the terminal.');
+    const announcedAt = io.at(event => event === RETRY_LINE);
+    const summaryAt = io.at(event => event.startsWith('print:README: '));
+    const openedAt = io.at(event => event === 'print:Opened Terum Skills 0.1.6.');
+    expect(failedAt).toBeGreaterThanOrEqual(0);
+    expect(announcedAt).toBe(failedAt + 1);
+    expect(summaryAt).toBeGreaterThan(announcedAt);
+    expect(openedAt).toBeGreaterThan(summaryAt);
+    expect(openedAt).toBe(io.events.length - 1);
+  });
+
+  it('a second failure is printed last and the wizard still succeeds', async () => {
+    const args = await optionalSetup();
+    const calls: unknown[] = [];
+    const io = optionalAnswers();
+    const offline = 'Could not reach GitHub to download the desktop app; you appear to be offline. Everything works from the terminal.';
+    const alwaysFailing = (async (a: unknown) => { calls.push(a); return failure(offline); }) as never;
+    expect(await run({ ...args, app: undefined, evidence: mac, verbs: { ...args.verbs, app: alwaysFailing } }, io)).toMatchObject({ ok: true, value: { steps: { app: 'skipped', done: 'printed' } } });
+    expect(calls).toHaveLength(2);
+    expect(io.events.filter(event => event === `print:${offline}`)).toHaveLength(2);
+    expect(io.events.at(-1)).toBe(`print:${offline}`);
+  });
+
+  it('a permanent failure, a non-launch that is not a failure, and a policy skip are never retried', async () => {
+    const args = await optionalSetup();
+    // Nothing published for this version: the app verb says so once, and no retry is promised or made.
+    const settled: unknown[] = [];
+    const notPublished = (async (a: unknown) => { settled.push(a); return { ...failure('No desktop app is published for terum-skills 0.1.6. Everything works from the terminal.'), permanent: true as const }; }) as never;
+    const io = optionalAnswers();
+    expect(await run({ ...args, app: undefined, evidence: mac, verbs: { ...args.verbs, app: notPublished } }, io)).toMatchObject({ ok: true, value: { steps: { app: 'skipped', done: 'printed' } } });
+    expect(settled).toHaveLength(1);
+    expect(io.events.filter(event => event.startsWith('print:No desktop app is published'))).toHaveLength(1);
+    expect(io.events).not.toContain(RETRY_LINE);
+    // An `unavailable` outcome is not a failure: nothing is printed by setup and nothing is promised.
+    const unavailable: unknown[] = [];
+    const noApp = (async (a: unknown) => { unavailable.push(a); return success({ platform: 'linux' as const, version: '0.1.6', action: 'unavailable' as const, appPath: null, statePath: null }); }) as never;
+    const silent = optionalAnswers();
+    expect(await run({ ...args, app: undefined, evidence: mac, verbs: { ...args.verbs, app: noApp } }, silent)).toMatchObject({ ok: true, value: { steps: { app: 'skipped', done: 'printed' } } });
+    expect(unavailable).toHaveLength(1);
+    expect(silent.events).not.toContain(RETRY_LINE);
+    // --no-app, and a machine with no app, never attempt the hand-off, so there is nothing to retry either.
+    const untouched: unknown[] = [];
+    expect(await run({ ...args, app: false, evidence: mac, verbs: { ...args.verbs, app: appOk(untouched) } }, optionalAnswers())).toMatchObject({ ok: true, value: { steps: { app: 'skipped', done: 'printed' } } });
+    expect(await run({ ...args, app: undefined, evidence: linux, verbs: { ...args.verbs, app: appOk(untouched) } }, optionalAnswers())).toMatchObject({ ok: true, value: { steps: { app: 'skipped', done: 'printed' } } });
+    expect(untouched).toEqual([]);
+  });
 });
 
 it.each([undefined,'alice/team'])('preserves a delegated team cancellation (target=%s)',async target=>{
@@ -785,7 +865,7 @@ it('refuses another setup target before app, prompts, gh or clone and preserves 
 it('resumes setup for a raw-stored spelling of the same remote', async () => {
   const fixture = await configuredCreator({});
   const io = new ScriptedPrompter();
-  const result = await run({ ...fixture.args, target: 'alice/team', verbs: { ...fixture.args.verbs, offerWrapper: async () => 'present' } }, io);
+  const result = await run({ ...fixture.args, target: 'alice/team', verbs: { ...fixture.args.verbs, placeManagedSkills: async () => 'present' } }, io);
   expect(result.ok).toBe(true);
   expect(io.lines).toContain('Team team is already configured on this machine.');
 });
@@ -811,7 +891,7 @@ it('setup refusal survives createExecute with exit 1 and its partial value', asy
 });
 
 async function optionalSetup(count = 0) {
-  const fixture = await configuredCreator({}); const args = { ...fixture.args, verbs: { ...fixture.args.verbs, offerWrapper: async () => 'present' as const, offerEditHook: async () => 'present' as const } };
+  const fixture = await configuredCreator({}); const args = { ...fixture.args, verbs: { ...fixture.args.verbs, placeManagedSkills: async () => 'present' as const, offerEditHook: async () => 'present' as const } };
   await mkdir(args.home, { recursive: true });
   if (count) {
     const clone = args.config.teamClone('team');
@@ -1264,7 +1344,7 @@ describe('setup handed a new target while the configured team\'s repository is g
       await cloneWithIdentity((await bareTeam()).bare, store.teamClone('team-2'));
       return moveResult;
     }) as unknown as typeof runTeam;
-    const result = await run({ ...fixture.args, target: 'alice/team-2', gone: async () => true, verbs: { ...fixture.args.verbs, offerWrapper: async () => 'present' as const, team } }, io);
+    const result = await run({ ...fixture.args, target: 'alice/team-2', gone: async () => true, verbs: { ...fixture.args.verbs, placeManagedSkills: async () => 'present' as const, team } }, io);
     expect(result).toMatchObject({ ok: true, value: { role: 'joiner', team: 'team-2', remote: 'github.com/alice/team-2', steps: { team: 'done' } } });
     expect(moves).toEqual([expect.objectContaining({ kind: 'move', target: 'alice/team-2', from: 'team', yes: true })]);
     expect(io.events).toContain("print:Team team's repository https://github.com/alice/team no longer exists on GitHub.");
@@ -1291,7 +1371,7 @@ describe('setup handed a new target while the configured team\'s repository is g
   it('never probes the repository when the target is the configured team or no team is configured', async () => {
     const same = await configuredCreator({});
     const probed: string[] = [];
-    await run({ ...same.args, target: 'alice/team', gone: async (_runner, remote) => { probed.push(remote); return true; }, verbs: { ...same.args.verbs, offerWrapper: async () => 'present' as const } }, optionalAnswers());
+    await run({ ...same.args, target: 'alice/team', gone: async (_runner, remote) => { probed.push(remote); return true; }, verbs: { ...same.args.verbs, placeManagedSkills: async () => 'present' as const } }, optionalAnswers());
     expect(probed).toEqual([]);
   });
 });

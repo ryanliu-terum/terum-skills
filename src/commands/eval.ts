@@ -47,6 +47,14 @@ export interface EvalArgs extends WithForm {
   vs?: string;
   /** IE6 §3.1: a human-written shared brief, skipping derivation and the confirm gate. */
   brief?: string;
+  /**
+   * IE6 §3.1: derive the shared brief, write it, and STOP — no arms, no matrix. The confirm gate
+   * needs a human, and a GUI caller cannot answer `io.confirm` in a spawned CLI. This splits the
+   * gate into two invocations so the human still signs the brief: derive here, review it in the
+   * app, then run with `--brief <path>`. A caller passing neither still gets the cheap refusal
+   * rather than paying for a derivation it did not ask for.
+   */
+  deriveBrief?: boolean;
   triggersOnly?: boolean;
   executionOnly?: boolean;
   case?: string;
@@ -84,6 +92,11 @@ export interface EvalResult {
   runDir: string;
   ccVersion: string;
   executionStatus: 'complete' | 'partial' | 'failed';
+  /** IE6 §3.1: set by `--derive-brief`. Nothing was evaluated; the other fields are placeholders. */
+  derivedBriefOnly?: true;
+  /** IE6 §3.1: where the derived brief landed, and its text, so a GUI can show it for review. */
+  briefPath?: string;
+  brief?: string;
   receiptPath?: string;
   /** D11: what `renderReport` printed, as data — the normal run only; an already-evaluated answer carries none. */
   report?: { aggregate: Aggregate; triggers: TriggerSummary | null };
@@ -119,6 +132,7 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
     // written against the team-clone model; --working/--save/--gen no longer exist, and the flags
     // below are their equivalents on the local-folder model (§6.3).
     const headToHead = args.vs !== undefined;
+    if (args.deriveBrief && !headToHead) return failure('--derive-brief only applies to a head-to-head: pass --vs <other-skill>.');
     if (headToHead) {
       if (args.commit) return failure('head-to-head runs are never committed: a receipt pins one skill id and one content digest.');
       if (args.case !== undefined) return failure('--vs cannot be combined with --case: a named case is an authored assertion belonging to one skill.');
@@ -128,8 +142,11 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
       if (args.noGen) return failure('--vs cannot be combined with --no-gen: head-to-head cases are generated from the shared brief, so --no-gen would run zero cases.');
       // The queue exists to produce receipts; a head-to-head never lands one.
       if (args.expectedVersion !== undefined || args.skipReceipted) return failure('head-to-head runs are not queueable: the queue exists to land receipts, and this mode never commits one.');
-      if (args.brief === undefined && !io.interactive) {
-        return failure('A head-to-head needs a shared task brief confirmed by a human. This channel cannot ask, so write the brief yourself and pass --brief <path>.');
+      // --derive-brief is the GUI's half of the gate: it is allowed here precisely because it
+      // does not run anything, and the human confirms in the app before the second invocation.
+      if (args.brief !== undefined && args.deriveBrief) return failure('--derive-brief derives the shared brief; pass one or the other, not both.');
+      if (args.brief === undefined && !args.deriveBrief && !io.interactive) {
+        return failure('A head-to-head needs a shared task brief confirmed by a human. This channel cannot ask, so derive one with --derive-brief and re-run with --brief <path>, or write it yourself.');
       }
     }
     // Default k=1 (spec rev 18; Ajay, 2026-09-10) — overrides the 2026-09-07 "keep default k=3"
@@ -327,6 +344,15 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
         io.print('');
         io.print(`brief: ${briefPath}`);
         if (derived.value.warning !== undefined) io.print(`Note: the brief contains the word '${derived.value.warning}', which is also a skill name here. It reads as an ordinary word — check that it does.`);
+        // §3.1: the GUI's half of the gate. Nothing has been evaluated and nothing will be —
+        // the human reviews the text in the app and re-invokes with --brief.
+        if (args.deriveBrief) {
+          return success({
+            team: teamName, id: skillId, name: local.name, runDir: briefDir,
+            ccVersion: preflight.value.ccVersion, executionStatus: 'complete',
+            derivedBriefOnly: true, briefPath, brief: derived.value.brief,
+          });
+        }
         if (!await io.confirm('Use this brief?')) {
           return failure(`Stopped without running. Edit ${briefPath} so it describes the job fairly to both skills, then re-run with --brief ${briefPath}.`);
         }
@@ -497,6 +523,23 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
     }, [...rows, ...arms, ...(triggers === null ? [] : [triggers])]);
     const armSkillLists = Object.fromEntries([...new Set(arms.map((arm) => arm.arm))]
       .map((arm) => [arm, arms.find((sample) => sample.arm === arm)?.skill_list ?? null]));
+    const report = renderReport(summary, triggers, rival === undefined || brief === undefined ? null : {
+      candidate: local.name, rival: rival.name, cases: caseNames.length, k,
+      briefPath: brief.path, briefSource: brief.source,
+    });
+    // IE6 §5.2: no receipt, ever — not even the local one. A receipt pins ONE skill id and one
+    // content digest, and its candidate-vs-incumbent record gates publish; a head-to-head pins two
+    // unrelated trees, so writing it under either id would inject "lost to an unrelated skill" into
+    // that skill's gating record. `verdict` is also null here, which the frozen §5.3 schema rejects
+    // by design — the refusal to widen it is what makes this branch mandatory rather than optional.
+    if (rival !== undefined) {
+      io.print(report);
+      io.print(`No receipt was written: a receipt pins one skill, and this run compared two. The rows are in ${runDir}.`);
+      return success({
+        team: teamName, id: skillId, name: local.name, runDir,
+        ccVersion: preflight.value.ccVersion, executionStatus: summary.execution_status,
+      });
+    }
     // Source checkouts record their running product commit. Published packages have no checkout;
     // in that case the explicit unknown is more honest than a team-repo commit.
     const engineCommit = await runningEngineCommit(runner);
@@ -539,10 +582,7 @@ export async function run(args: EvalArgs, io: Prompter): Promise<Result<EvalResu
     const source = `${JSON.stringify(receipt.value, null, 2)}\n`;
     await writeFile(join(runDir, 'receipt.json'), source, 'utf8');
     if (generated.cases !== undefined || generated.suite !== undefined || generated.triggers !== undefined) announceGeneratedAssets(io, wantsCases, wantsTriggers, generated, join(runDir, 'generated'));
-    io.print(renderReport(summary, triggers, rival === undefined || brief === undefined ? null : {
-      candidate: local.name, rival: rival.name, cases: caseNames.length, k,
-      briefPath: brief.path, briefSource: brief.source,
-    }));
+    io.print(report);
 
     // Running the eval is the sharing step (Ajay, 2026-09-13). When these exact bytes are ALREADY a
     // published version, the receipt has a version to name and nothing else has to move — so it goes

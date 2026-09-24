@@ -68,16 +68,16 @@ describe('install (§6 refs)', () => {
     const root = join(fixture.root, 'fresh'); const store = createConfigStore(join(root, 'state')); const home = join(root, 'home');
     const remote = 'https://github.com/acme/team.git';
     const runner = mappedRunner(remote, fixture.bare, fakeGh('bob', { 'api user/repository_invitations': { code: 0, stdout: '[]\n', stderr: '' } }));
-    // Identity: GitHub login and handle default to gh's login, then name and email; the §8 hook offer and the terum-skills skills offer are declined.
-    const io = new ScriptedPrompter(['', '', 'Bob', 'bob@example.com'], [false, false, false]);
+    // Identity: GitHub login and handle default to gh's login, then name and email; the §8 hook offer and the edit-hook offer are declined, and the terum-skills skills are placed without a question.
+    const io = new ScriptedPrompter(['', '', 'Bob', 'bob@example.com'], [false, false]);
     const result = await run({ ref: 'acme/team/sample', config: store, home, runner, hook: { settingsFile: join(root, 'settings.json'), backupDir: join(root, 'backups') }, wrapper: wrapperFor(home), editHook: editHookFor(join(root, 'state'), join(root, 'settings.json')) }, io);
     expect(result).toMatchObject({ ok: true, value: [{ id, team: 'team', path: join(home, '.claude', 'skills', 'sample') }] });
     expect((await store.read()).teams.team).toMatchObject({ handle: 'bob' });
     expect(await readFile(join(home, '.claude', 'skills', 'sample', 'SKILL.md'), 'utf8')).toContain('name: sample');
     expect(JSON.parse(await git(['show', 'main:people/bob.json'], fixture.bare)).installed).toHaveLength(1);
     expect(io.countAsked('Install the Claude Code session-start hook')).toBe(1);
-    expect(io.countAsked('Install the terum-skills skills')).toBe(1);
-    await expect(readFile(join(home, '.claude', 'skills', 'terum-skills', 'SKILL.md'))).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(io.askedAbout('Install the terum-skills skills')).toBe(false);
+    expect(await readFile(join(home, '.claude', 'skills', 'terum-skills', 'SKILL.md'), 'utf8')).toContain('managed-by: terum-skills');
     const printed = io.lines.join('\n');
     expect(printed).not.toContain('Welcome to terum-skills');
     expect(printed).not.toContain('Next, from any terminal');

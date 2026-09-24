@@ -703,3 +703,121 @@ describe('B3 confirmation review — where saveGeneratedAssets stages, and what 
     expect(await stagingEntriesUnder(dirname(folder))).toEqual([]);
   });
 });
+
+describe('eval --vs head-to-head (IE6)', () => {
+  const rivalSkill = `---\nname: rival-checker\ndescription: also checks deployments\nlicense: UNLICENSED\nmetadata:\n  id: 22222222-2222-4222-8222-222222222222\n  author: Seed <seed@example.com>\n  terum-category: testing\n---\nprefer a dry run first`;
+
+  /** Two Library folders, so both refs resolve the way §6.3 resolves the candidate. */
+  const pairFixture = async () => {
+    const base = await evalFixture();
+    const rival = join(base.home, '.claude', 'skills', 'rival-checker');
+    await mkdir(rival, { recursive: true });
+    await writeFile(join(rival, 'SKILL.md'), rivalSkill);
+    return base;
+  };
+
+  const briefText = 'Take a change that is ready and get it live without surprising anyone.';
+  const pairAgent: AgentApi = {
+    runAgent: (_task, cwd) => {
+      const staged = ['sample', 'rival-checker'].find((name) => existsSync(join(cwd, '.claude', 'skills', name)));
+      return Promise.resolve(transcript(staged === undefined ? [] : [staged]));
+    },
+    askJson: (prompt) => {
+      if (prompt.includes('Describe THE JOB')) return Promise.resolve({ brief: briefText });
+      if (prompt.includes('Generate headlessly answerable')) {
+        return Promise.resolve({ cases: ['a', 'b', 'c', 'd', 'e'].map((stem, index) => ({
+          name: `case-${stem}`, task: `Ship step ${index + 1}.`,
+          checks: [{ transcript_mentions: 'deployed' }], bucket: index === 4 ? 'adversarial' : 'explicit',
+        })) });
+      }
+      return Promise.resolve({ selected: ['sample'] });
+    },
+  };
+  const noAgent = (counter: { calls: number }): AgentApi => ({
+    runAgent: () => { counter.calls++; return Promise.resolve(transcript([])); },
+    askJson: () => { counter.calls++; return Promise.resolve({}); },
+  });
+
+  it.each([
+    ['--commit', { commit: true }, 'never committed'],
+    ['--case', { case: 'happy' }, 'authored assertion'],
+    ['--no-gen', { noGen: true }, 'generated from the shared brief'],
+    ['--triggers-only', { triggersOnly: true }, 'execution only'],
+  ])('refuses --vs with %s before any agent call', async (_label, extra, fragment) => {
+    const { store, home } = await pairFixture();
+    const counter = { calls: 0 };
+    const result = await run(args(store, home, { vs: 'rival-checker', agent: noAgent(counter), ...extra }), new ScriptedPrompter([], [], true));
+    expect(result).toMatchObject({ ok: false, error: expect.stringContaining(fragment) });
+    expect(counter.calls).toBe(0);
+  });
+
+  it('refuses a rival that resolves to the same folder, and one that is not in the library', async () => {
+    const { store, home } = await pairFixture();
+    const counter = { calls: 0 };
+    expect(await run(args(store, home, { vs: 'sample', agent: noAgent(counter) }), new ScriptedPrompter([], [], true)))
+      .toMatchObject({ ok: false, error: expect.stringContaining('two different skills') });
+    expect(await run(args(store, home, { vs: 'not-a-skill', agent: noAgent(counter) }), new ScriptedPrompter([], [], true)))
+      .toMatchObject({ ok: false, error: expect.stringContaining('No local skill folder named') });
+    expect(counter.calls).toBe(0);
+  });
+
+  it('refuses a closed channel by naming the two ways out, not by throwing PromptClosedError', async () => {
+    const { store, home } = await pairFixture();
+    const counter = { calls: 0 };
+    const result = await run(args(store, home, { vs: 'rival-checker', agent: noAgent(counter) }), new NonInteractivePrompter());
+    expect(result).toMatchObject({ ok: false, error: expect.stringContaining('--derive-brief') });
+    expect(result).toMatchObject({ ok: false, error: expect.stringContaining('--brief <path>') });
+    expect(counter.calls).toBe(0);
+  });
+
+  it('--derive-brief writes the brief and stops without running a single arm', async () => {
+    const { store, home } = await pairFixture();
+    let arms = 0;
+    const counting: AgentApi = { runAgent: (...rest) => { arms++; return pairAgent.runAgent(...rest); }, askJson: pairAgent.askJson };
+    // The app's half of the gate: a closed channel is fine precisely because nothing runs.
+    const result = await run(args(store, home, { vs: 'rival-checker', deriveBrief: true, agent: counting }), new NonInteractivePrompter());
+    expect(result).toMatchObject({ ok: true, value: { derivedBriefOnly: true, brief: briefText } });
+    expect(arms).toBe(0);
+    if (!result.ok) return;
+    expect(await readFile(result.value.briefPath!, 'utf8')).toContain(briefText);
+  });
+
+  it('--derive-brief needs --vs, and refuses to be combined with --brief', async () => {
+    const { store, home } = await pairFixture();
+    expect(await run(args(store, home, { deriveBrief: true, agent: armAgent }), new ScriptedPrompter([], [], true)))
+      .toMatchObject({ ok: false, error: expect.stringContaining('--vs <other-skill>') });
+    expect(await run(args(store, home, { vs: 'rival-checker', deriveBrief: true, brief: '/tmp/b.md', agent: armAgent }), new ScriptedPrompter([], [], true)))
+      .toMatchObject({ ok: false, error: expect.stringContaining('one or the other') });
+  });
+
+  it('runs the two-step the app drives: derive, then run with the reviewed brief', async () => {
+    const { store, home } = await pairFixture();
+    const derived = await run(args(store, home, { vs: 'rival-checker', deriveBrief: true, agent: pairAgent }), new NonInteractivePrompter());
+    expect(derived.ok).toBe(true);
+    if (!derived.ok) return;
+
+    const io = new ScriptedPrompter([], [], false);
+    const result = await run(args(store, home, { vs: 'rival-checker', brief: derived.value.briefPath!, k: 1, agent: pairAgent }), io);
+    expect(result).toMatchObject({ ok: true });
+    if (!result.ok) return;
+    expect(result.value.receiptPath).toBeUndefined(); // §5.2: no receipt, ever
+    const report = io.lines.join('\n');
+    expect(report).toContain('head-to-head: sample vs rival-checker');
+    expect(report).toMatch(/candidate-vs-rival: .*sign test p=/);
+    expect(report).not.toMatch(/^verdict:/m);
+    expect(report).toContain('(supplied)');
+  });
+
+  it('checks a supplied brief instead of trusting it', async () => {
+    const { store, home } = await pairFixture();
+    const named = join(home, 'named.md');
+    await writeFile(named, 'Use rival-checker to get the change live.', 'utf8');
+    const counter = { calls: 0 };
+    let preflights = 0;
+    // §1.2: the deterministic checks precede every agent call — preflight is itself one (§7.4).
+    expect(await run(args(store, home, { vs: 'rival-checker', brief: named, agent: noAgent(counter), preflight: async () => { preflights++; return success({ ccVersion: 'stub' }); } }), new NonInteractivePrompter()))
+      .toMatchObject({ ok: false, error: expect.stringContaining("names 'rival-checker'") });
+    expect(counter.calls).toBe(0);
+    expect(preflights).toBe(0);
+  });
+});

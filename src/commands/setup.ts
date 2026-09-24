@@ -12,7 +12,7 @@ import { COMMUNITY_URL } from '../lib/community.js';
 import { ConfigStore, createConfigStore } from '../lib/config.js';
 import { preflight as systemPreflight } from '../lib/evals/agent.js';
 import { defaultHookOptions, HookOptions, offerHook as defaultOfferHook } from '../lib/hook.js';
-import { defaultWrapperOptions, offerWrapper as defaultOfferWrapper } from '../lib/wrapper.js';
+import { defaultWrapperOptions, placeManagedSkills as defaultPlaceManagedSkills } from '../lib/wrapper.js';
 import type { WrapperOptions } from '../lib/wrapper.js';
 import { defaultEditHookOptions, type EditHookOptions, offerEditHook as defaultOfferEditHook } from '../lib/editHook.js';
 import { MAX_SELECT_ATTEMPTS, Prompter } from '../lib/prompt.js';
@@ -27,7 +27,7 @@ import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import type { Launch } from '../lib/launch.js';
 import { assetSuffix, detectPlatform, type PlatformEvidence } from '../lib/platform.js';
-import { run as runApp } from './app.js';
+import { run as runApp, type AppArgs, type AppResult } from './app.js';
 import { reconcileHasRows, run as runReconcile } from './reconcile.js';
 import { run as evalRun, queueItemsFor, skillsWithoutReceipt, type EvalArgs } from './eval.js';
 import { FIXABLE_INVITE_REASONS, joinCommand, run as invite } from './invite.js';
@@ -38,7 +38,7 @@ export interface SetupVerbs {
   app: typeof runApp;
   invite: typeof invite;
   offerHook: typeof defaultOfferHook;
-  offerWrapper: typeof defaultOfferWrapper;
+  placeManagedSkills: typeof defaultPlaceManagedSkills;
   offerEditHook: typeof defaultOfferEditHook;
   eval: typeof evalRun;
   reconcile: typeof runReconcile;
@@ -70,7 +70,7 @@ export interface SetupArgs extends WithForm {
   home?: string;
   cwd?: string;
   hook?: HookOptions;
-  /** Where the bundled terum-skills skills are offered from and placed (test knob). */
+  /** Where the bundled terum-skills skills are read from and placed (test knob). */
   wrapper?: WrapperOptions;
   editHook?: Partial<EditHookOptions>;
   communityUrl?: string;
@@ -91,7 +91,7 @@ export interface SetupResult {
 const WELCOME = [
   'Welcome to terum-skills.',
   "Your team's skills live in one private git repository the team controls; each member installs what they want and publishes local skills explicitly.",
-  'This wizard helps you create a team, join one, invite teammates, and offer the session hook and the terum-skills skills for Claude Code and Codex and a reminder to publish a skill after Claude edits one; re-run it any time to continue, and leave the invitation question blank to skip it.',
+  'This wizard helps you create a team, join one, invite teammates, place the terum-skills skills for Claude Code and Codex, and offer the session hook and a reminder to publish a skill after Claude edits one; re-run it any time to continue, and leave the invitation question blank to skip it.',
 ];
 
 export const PROJECTS_QUESTION = 'Add a project?';
@@ -143,7 +143,7 @@ function unfinishedAtInvite(teamName: string, invited: readonly string[], form: 
     invited.length === 0
       ? `Team ${teamName} is set up; no invitation was sent.`
       : `Team ${teamName} is set up and ${invited.length} invitation${invited.length === 1 ? '' : 's'} ${invited.length === 1 ? 'was' : 'were'} sent; that stands.`,
-    `Setup stopped here, so the project, eval, session hook, terum-skills skills and edit-hook steps were not offered — run \`${invocation(form, 'setup')}\` again to finish.`,
+    `Setup stopped here, so the project, eval, session hook, terum-skills skills and edit-hook steps were not reached — run \`${invocation(form, 'setup')}\` again to finish.`,
   ];
 }
 
@@ -155,7 +155,7 @@ export async function run(args: SetupArgs, io: Prompter): Promise<Result<SetupRe
   const role: SetupResult['role'] = args.target === undefined ? 'creator' : 'joiner';
   const store = args.config ?? createConfigStore();
   const runner = args.runner ?? systemRunner;
-  const verbs: SetupVerbs = { team, app: runApp, invite, offerHook: defaultOfferHook, offerWrapper: defaultOfferWrapper, offerEditHook: defaultOfferEditHook, eval: evalRun, reconcile: runReconcile, preflight: systemPreflight, ...args.verbs };
+  const verbs: SetupVerbs = { team, app: runApp, invite, offerHook: defaultOfferHook, placeManagedSkills: defaultPlaceManagedSkills, offerEditHook: defaultOfferEditHook, eval: evalRun, reconcile: runReconcile, preflight: systemPreflight, ...args.verbs };
   const steps: SetupResult['steps'] = {};
   let teamName = '';
   let remote = '';
@@ -204,18 +204,33 @@ export async function run(args: SetupArgs, io: Prompter): Promise<Result<SetupRe
     // The desktop app, first (D5, 2026-09-08). Where an app exists for this machine and a person is at an interactive
     // terminal (never over a pipe, never over frames, never in install's quiet bootstrap), setup installs and opens it
     // without asking and continues there (Teddy, 2026-09-09: the wizard boots the app; the D4 opt-in question is gone).
-    // --no-app keeps the whole wizard in the terminal. A failed hand-off is printed and the terminal wizard continues.
+    // --no-app keeps the whole wizard in the terminal. A failed hand-off is printed and the terminal wizard continues;
+    // where the cause can change during the wizard, the app is tried once more after the closing summary (the end of
+    // this function), so a join that had to run here still ends with the app open.
+    // One path opens the app, now and then: the same verb with the same arguments, only the join target and the setup
+    // intent differ between the two calls, and `launched` is the one reading of its outcome.
+    const openApp = (extra: Pick<AppArgs, 'target' | 'intent'> = {}): Promise<Result<AppResult>> => verbs.app({ form: args.form, config: store, runner, launch: args.launch, evidence: args.evidence, offer: false, ...extra }, io);
+    const launched = (opened: Result<AppResult>): boolean => opened.ok && (opened.value.action === 'launched' || opened.value.action === 'installed-and-launched');
+    let retryApp = false;
     if (args.quiet || !io.interactive || io.channel === 'frames' || args.app === false || assetSuffix(detectPlatform(args.evidence ?? { platform: process.platform, arch: process.arch, env: process.env, procVersion: await readProcVersion() })) === null) {
       steps.app = 'skipped';
     } else {
       section('app');
-      const opened = await verbs.app({ form: args.form, config: store, runner, launch: args.launch, evidence: args.evidence, target: args.target, intent: 'setup', offer: false }, io);
-      if (opened.ok && (opened.value.action === 'launched' || opened.value.action === 'installed-and-launched')) {
+      const opened = await openApp({ target: args.target, intent: 'setup' });
+      if (launched(opened)) {
         io.print(args.target === undefined || movedFrom !== undefined ? 'Continuing in the app.' : `Continuing in the app. Join ${args.target} there.`);
         steps.app = 'done';
         return success({ role, team: teamName, remote, steps });
       }
-      if (!opened.ok) io.print(opened.error);
+      if (!opened.ok) {
+        io.print(opened.error);
+        // Tried once more at the end when the cause is one this very wizard can change: gh logged in at the GitHub
+        // step, a network that is back by the time the join runs. A cause the app verb marked permanent — nothing
+        // published for this version, a download rejected or stopped — would only cost a second wait and the same
+        // paragraph again, so it is said once and left there.
+        retryApp = opened.permanent !== true;
+        if (retryApp) io.print('Setup continues here and tries the app once more when it finishes.');
+      }
       steps.app = 'skipped';
     }
 
@@ -508,12 +523,16 @@ export async function run(args: SetupArgs, io: Prompter): Promise<Result<SetupRe
 
     // The terum-skills skills ship inside this package, and setup is the one onboarding step
     // (npm-first, Ryan 2026-09-08), so the skills that let Claude Code and Codex run these verbs are
-    // offered here, right after the hook and in the hook's shape: one offer with its own y/N on the same
-    // io, copies the tool recognises by their frontmatter marker (refreshed or added on a re-run without
-    // asking, removed by machine uninstall), and anything else at a destination left alone (src/lib/wrapper.ts).
+    // placed here, right after the hook, into the global roots (~/.claude/skills and, where ~/.codex
+    // exists, ~/.codex/skills) without a question (Teddy, 2026-09-21; the y/N offer that defaulted to
+    // No is gone): copies the tool recognises by their frontmatter marker, written or refreshed on
+    // every run and removed by machine uninstall, with anything else at a destination named and left
+    // alone (src/lib/wrapper.ts). The two hooks keep their own y/N.
     section('wrapper');
-    const wrapperOutcome = await verbs.offerWrapper(io, { ...defaultWrapperOptions(args.home, args.form), ...args.wrapper });
-    steps.wrapper = wrapperOutcome === 'installed' || wrapperOutcome === 'replaced' ? 'done' : 'skipped';
+    const wrapperOutcome = await verbs.placeManagedSkills(io, { ...defaultWrapperOptions(args.home, args.form), ...args.wrapper });
+    // `present` is the step having run and found every copy in place, so it is done like a write is; `skipped` is
+    // a step that placed nothing (no bundle, every name foreign, or every write failed).
+    steps.wrapper = wrapperOutcome === 'installed' || wrapperOutcome === 'replaced' || wrapperOutcome === 'present' ? 'done' : 'skipped';
 
     // The edit hook gets its OWN y/N, deliberately, instead of riding the session hook's. That one
     // fetches on a schedule; this one runs after every Write and Edit the agent makes and reads the
@@ -552,6 +571,18 @@ export async function run(args: SetupArgs, io: Prompter): Promise<Result<SetupRe
         for (const line of summary.filter(line => !line.startsWith('Members:') && !line.startsWith('  • @') && !line.startsWith('Repository:') && !line.startsWith('README:'))) io.print(line);
       }
       steps.done = 'printed';
+    }
+
+    // The hand-off at the top failed for a cause the wizard may have changed since, and everything the terminal had to
+    // say is on screen — a relaunch takes the focus, so it comes after the summary the person still needs to read. The
+    // wizard boots the app, and a person who joined from the terminal must not have to know about `app` to get it. No
+    // target and no intent: the join is done, so the app opens to the Library instead of replaying setup. A second
+    // failure is printed and is the end of it; the wizard has succeeded either way.
+    if (retryApp) {
+      section('app');
+      const opened = await openApp();
+      if (launched(opened)) steps.app = 'done';
+      else if (!opened.ok) io.print(opened.error);
     }
     return success({ role, team: teamName, remote, steps });
   } catch (error) { return failed(error, role, teamName, remote, steps); }

@@ -1,5 +1,5 @@
 import type { FileDropEvent, SkillFileResult, SkillToggleResult } from './types';
-import type { AppUpdateStaged, AppUpdateStatus, LaunchContext, IdentityArgs, IdentityWrite, Settings, Onboarding, Features, Capabilities, Surfaces, ReadOptions, Catalog, ChangeSource, EvalArgs, EvalManyArgs, EvalManyResult, EvalResult, UsageModel, MissesModel, EvalReportModel, InboxItem, InstallArgs, InstalledResult, InviteArgs, InviteResult, MachineUninstallResult, PrefStore, PublishArgs, PublishManyArgs, PublishResult, UnpublishArgs, UnpublishResult, Receipt, ReconcileResult, Result, Roster, Run, LibraryScope, ProjectAdded, ProjectRemoved, ProjectRenamed, ProjectCreated, SearchArgs, SearchHit, SetupArgs, SetupResult, Library, SkillDetail, StatusResult, Subscription, SyncArgs, SyncResult, TeamArgs, TeamResult, UninstallArgs, UninstalledResult, UpdateAdvice, ValidateArgs, ValidateResult } from './types';
+import type { AppUpdateStaged, AppUpdateStatus, LaunchContext, IdentityArgs, IdentityWrite, Settings, Onboarding, Features, Capabilities, Surfaces, ReadOptions, Catalog, ChangeSource, DeriveBriefArgs, DerivedBrief, EvalArgs, EvalManyArgs, EvalManyResult, EvalResult, UsageModel, MissesModel, EvalReportModel, InboxItem, InstallArgs, InstalledResult, InviteArgs, InviteResult, MachineUninstallResult, PrefStore, PublishArgs, PublishResult, UnpublishArgs, UnpublishResult, Receipt, ReconcileResult, Result, Roster, Run, LibraryScope, ProjectAdded, ProjectRemoved, ProjectRenamed, ProjectCreated, SearchArgs, SearchHit, SetupArgs, SetupResult, Library, SkillDetail, StatusResult, Subscription, SyncArgs, SyncResult, TeamArgs, TeamResult, UninstallArgs, UninstalledResult, UpdateAdvice, ValidateArgs, ValidateResult } from './types';
 export interface Backend {
   setWindowBackground(color: string): Promise<Result<void>>;
   quit(): Promise<void>;
@@ -77,6 +77,14 @@ export interface Backend {
   team(args: TeamArgs): Run<TeamResult>;
   setup(args: SetupArgs): Run<SetupResult>;
   eval(args: EvalArgs): Run<EvalResult>;
+  /**
+   * IE6 §3.1: derive the shared head-to-head brief and stop. The brief is the whole neutrality
+   * guarantee and a human signs it; a spawned CLI cannot ask, so the app asks instead — derive
+   * here, show the text for review, then call `eval` with the reviewed file as `brief`.
+   * Optional: an older CLI on this machine has no `--derive-brief`, and the caller hides the
+   * feature rather than failing at spawn time.
+   */
+  deriveBrief?(args: DeriveBriefArgs): Run<DerivedBrief>;
   /** Several skills at once, or every pending one: run now, in batches with a question between them, or queued for a window. */
   evalMany(args: EvalManyArgs): Run<EvalManyResult>;
   validate(args: ValidateArgs, options?: ReadOptions): Promise<Result<ValidateResult>>;

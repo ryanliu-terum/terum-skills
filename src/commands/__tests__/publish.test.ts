@@ -124,6 +124,32 @@ describe('publish (§5) — the only bridge between the two mirrors', () => {
     expect(io.lines.join('\n')).toContain('Nothing to publish: sample is identical to Version 1 and already in the team marketplace.');
   });
 
+  // Git for Windows ships `core.autocrlf=true`, so a fresh clone there checks every LF blob out as CRLF.
+  // The comparison reads the clone's files, so an LF Library folder never matched and every republish
+  // minted — shared-skills carries four such versions differing only in `author:`. The setting is
+  // injected through the environment, the highest config level, so no repo-local setting can outvote it.
+  it('an unchanged republish mints nothing on a clone checked out with core.autocrlf=true', async () => {
+    const { fixture, store, clone, home } = await prepared();
+    await librarySkill(home);
+    expect(await run({ ref: 'sample', home, config: store }, new ScriptedPrompter())).toMatchObject({ ok: true, value: { version: 'v1' } });
+    const afterFirst = await originSha(fixture.bare);
+    vi.stubEnv('GIT_CONFIG_COUNT', '2');
+    vi.stubEnv('GIT_CONFIG_KEY_1', 'core.autocrlf');
+    vi.stubEnv('GIT_CONFIG_VALUE_1', 'true');
+    try {
+      // Another machine's clone: checked out fresh, under the autocrlf the person's git carries.
+      await rm(clone, { recursive: true, force: true });
+      await cloneWithIdentity(fixture.bare, clone);
+      const again = await run({ ref: 'sample', home, config: store }, new ScriptedPrompter());
+      expect(again).toMatchObject({ ok: true, value: { version: null, created: false, identicalTo: 'v1' } });
+      expect(await originSha(fixture.bare)).toBe(afterFirst);
+      // The clone's working tree is the committed bytes, not a converted copy of them.
+      expect(await readFile(join(clone, 'skills', 'sample', 'v1', 'SKILL.md'), 'utf8')).toBe(await show(fixture.bare, 'skills/sample/v1/SKILL.md'));
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
   it('changed bytes mint the next ordinal from the HIGHEST version, never from the count', async () => {
     const { fixture, store, home } = await prepared();
     const folder = await librarySkill(home);
