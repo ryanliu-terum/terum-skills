@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { resolveAgentCommand, shimScripts, type AgentCommandEvidence } from '../agent-command.js';
+import { resolveAgentCommand, resolvePosixShell, shimScripts, type AgentCommandEvidence } from '../agent-command.js';
 
 const NODE = 'C:\\Program Files\\nodejs\\node.exe';
 const ARGS = ['-p', 'line one\nline two "quoted" %PATH% ^caret', '--output-format', 'json'];
@@ -132,5 +132,35 @@ describe('resolveAgentCommand follows a shim to a native binary (Claude Code ≥
     expect(none.ok).toBe(false);
     if (none.ok) throw new Error('expected a failure');
     expect(none.error).toContain('native Windows installer');
+  });
+});
+
+describe('resolvePosixShell (case setup, requires probes, command_succeeds)', () => {
+  const GIT = 'C:\\Program Files\\Git';
+  const PORTABLE = 'D:\\PortableGit\\bin';
+
+  it.each(['darwin', 'linux'] as const)('is /bin/sh on %s', (platform) => {
+    expect(resolvePosixShell(evidence([], { PATH: '' }, platform))).toBe('/bin/sh');
+  });
+
+  it('takes the sh.exe beside CLAUDE_CODE_GIT_BASH_PATH first, then that bash itself', () => {
+    const env = { CLAUDE_CODE_GIT_BASH_PATH: `"${PORTABLE}\\bash.exe"`, PATH: `${GIT}\\usr\\bin` };
+    expect(resolvePosixShell(evidence([`${PORTABLE}\\sh.exe`, `${PORTABLE}\\bash.exe`, `${GIT}\\usr\\bin\\sh.exe`], env))).toBe(`${PORTABLE}\\sh.exe`);
+    expect(resolvePosixShell(evidence([`${PORTABLE}\\bash.exe`, `${GIT}\\usr\\bin\\sh.exe`], env))).toBe(`${PORTABLE}\\bash.exe`);
+  });
+
+  it('finds sh.exe on PATH, as inside a Git Bash session', () => {
+    expect(resolvePosixShell(evidence([`${GIT}\\usr\\bin\\sh.exe`], { Path: `C:\\Windows;${GIT}\\usr\\bin` }))).toBe(`${GIT}\\usr\\bin\\sh.exe`);
+  });
+
+  it('finds the install behind the git on PATH, from either of its git.exe folders', () => {
+    const files = [`${GIT}\\cmd\\git.exe`, `${GIT}\\mingw64\\bin\\git.exe`, `${GIT}\\bin\\sh.exe`];
+    expect(resolvePosixShell(evidence(files, { PATH: `C:\\Windows;${GIT}\\cmd`, ProgramFiles: 'C:\\Nowhere' }))).toBe(`${GIT}\\bin\\sh.exe`);
+    expect(resolvePosixShell(evidence(files, { PATH: `${GIT}\\mingw64\\bin`, ProgramFiles: 'C:\\Nowhere' }))).toBe(`${GIT}\\bin\\sh.exe`);
+  });
+
+  it('falls back to the default install, and to /bin/sh when there is no Git for Windows at all', () => {
+    expect(resolvePosixShell(evidence([`${GIT}\\bin\\sh.exe`], { PATH: 'C:\\Windows' }))).toBe(`${GIT}\\bin\\sh.exe`);
+    expect(resolvePosixShell(evidence([], { PATH: 'C:\\Windows' }))).toBe('/bin/sh');
   });
 });

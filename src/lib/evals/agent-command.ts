@@ -10,6 +10,7 @@
  * refused on 2026-09-13 with the conventional path alone). A native `claude.exe` spawns as is.
  * Every other platform spawns the name unchanged.
  */
+import { statSync } from 'node:fs';
 import { win32 as winPath } from 'node:path';
 import type { Result } from '../result.js';
 import { failure, success } from '../result.js';
@@ -107,4 +108,38 @@ export function resolveAgentCommand(command: string, args: readonly string[], ev
   if (native !== undefined) return success({ file: native, args: [...args] });
   const looked = fromShim.length > 0 ? ` It launches ${fromShim.join(', ')}, which does not exist.` : text === null ? ' The shim could not be read.' : ' The shim names no script this tool can launch.';
   return failure(`\`${command}\` resolves to the batch shim ${found}, which cannot be launched without a shell.${looked} Install Claude Code with the native Windows installer, or point TERUM_SKILLS_AGENT_CMD at claude.exe.`);
+}
+
+/**
+ * The POSIX shell for a case's `setup` hook, its `requires` probes and its `command_succeeds` checks
+ * (SETUP_RULE in generate.ts). Windows has no `/bin/sh`, so every such case failed there with `spawn
+ * /bin/sh ENOENT` before the skill ran. Claude Code on Windows runs on Git for Windows, so its
+ * `sh.exe` is there to use: beside CLAUDE_CODE_GIT_BASH_PATH, on PATH, in the install that holds
+ * the `git` on PATH (whose `bin\sh.exe` sets up the POSIX PATH itself), or in the default install.
+ * Every other platform, and a Windows host with none of those, keeps `/bin/sh`.
+ */
+export function resolvePosixShell(evidence: Pick<AgentCommandEvidence, 'platform' | 'env' | 'isFile'>): string {
+  if (evidence.platform !== 'win32') return '/bin/sh';
+  const bash = envValue(evidence.env, 'CLAUDE_CODE_GIT_BASH_PATH')?.trim().replace(/^"(.*)"$/, '$1');
+  const entries = pathEntries(evidence.env);
+  // `git.exe` sits in `<install>\cmd` or `<install>\mingw64\bin`.
+  const installs = entries.filter((dir) => evidence.isFile(winPath.join(dir, 'git.exe'))).flatMap((dir) => [winPath.join(dir, '..'), winPath.join(dir, '..', '..')]);
+  const programFiles = envValue(evidence.env, 'ProgramFiles')?.trim() || 'C:\\Program Files';
+  const candidates = [
+    ...(bash ? [winPath.join(winPath.dirname(bash), 'sh.exe'), bash] : []),
+    ...entries.map((dir) => winPath.join(dir, 'sh.exe')),
+    ...installs.flatMap((install) => [winPath.join(install, 'bin', 'sh.exe'), winPath.join(install, 'usr', 'bin', 'sh.exe')]),
+    winPath.join(programFiles, 'Git', 'bin', 'sh.exe'),
+  ];
+  return candidates.find((candidate) => evidence.isFile(candidate)) ?? '/bin/sh';
+}
+
+let hostShell: string | undefined;
+/** `resolvePosixShell` for this host, resolved once per process. */
+export function posixShell(): string {
+  hostShell ??= resolvePosixShell({
+    platform: process.platform, env: process.env,
+    isFile: (path) => { try { return statSync(path).isFile(); } catch { return false; } },
+  });
+  return hostShell;
 }

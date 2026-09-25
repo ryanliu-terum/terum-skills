@@ -133,10 +133,22 @@ export class Transcript {
 
 interface SpawnOutcome { code: number; stdout: string; stderr: string; timedOut: boolean; }
 
+/**
+ * A prompt longer than this goes to `claude -p` on stdin instead of as an argv value. Windows caps a
+ * whole command line at 32,767 UTF-16 units (spawn ENAMETOOLONG), Linux one argument at 128 KiB, and
+ * generation and trigger prompts carry the full SKILL.md: a 31 KB skill failed on Windows on
+ * 2026-09-25. Quoting can double a value on Windows, so the cut sits well below half the cap.
+ */
+export const ARGV_PROMPT_LIMIT = 8_000;
+/** `-p <prompt>` when it fits on the command line; otherwise `-p` alone, and the prompt on stdin. */
+function promptArgs(prompt: string): { args: string[]; input?: string } {
+  return prompt.length > ARGV_PROMPT_LIMIT ? { args: ['-p'], input: prompt } : { args: ['-p', prompt] };
+}
+
 const liveChildren = new Set<ChildProcess>();
 let terminationHandlerInstalled = false;
 
-function spawnCollect(args: readonly string[], options: { cwd?: string; env?: Record<string, string>; timeoutMs: number; signal?: AbortSignal }): Promise<SpawnOutcome> {
+function spawnCollect(args: readonly string[], options: { cwd?: string; env?: Record<string, string>; timeoutMs: number; signal?: AbortSignal; input?: string }): Promise<SpawnOutcome> {
   if (!terminationHandlerInstalled) {
     terminationHandlerInstalled = true;
     // One implementation, two entry points: a POSIX SIGTERM (the shell's process-group kill) and the
@@ -157,14 +169,21 @@ function spawnCollect(args: readonly string[], options: { cwd?: string; env?: Re
   // child; the `close` handler then settles this promise as an ordinary non-zero run.
   if (options.signal?.aborted) return Promise.resolve({ code: 143, stdout: '', stderr: 'the caller abandoned this model call', timedOut: false });
   return new Promise((resolvePromise, reject) => {
-    const child = spawn(command.value.file, command.value.args, {
+    const spawnOptions = {
       cwd: options.cwd,
       env: { ...process.env, ...options.env },
-      stdio: ['ignore', 'pipe', 'pipe'],
       // Under the desktop app the agent must never flash a console window (matches the CLI runner).
       windowsHide: true,
-    });
+    };
+    const child = options.input === undefined
+      ? spawn(command.value.file, command.value.args, { ...spawnOptions, stdio: ['ignore', 'pipe', 'pipe'] })
+      : spawn(command.value.file, command.value.args, { ...spawnOptions, stdio: ['pipe', 'pipe', 'pipe'] });
     liveChildren.add(child);
+    if (options.input !== undefined && child.stdin) {
+      // A child that exits before reading everything closes the pipe (EPIPE); its exit code and stderr say why.
+      child.stdin.on('error', () => undefined);
+      child.stdin.end(options.input, 'utf8');
+    }
     const out: Buffer[] = [];
     const err: Buffer[] = [];
     let timedOut = false;
@@ -217,8 +236,9 @@ async function runAgent(task: string, cwd: string, options: RunAgentOptions = {}
 }
 
 function run(task: string, cwd: string, options: RunAgentOptions): Promise<SpawnOutcome> {
+  const prompt = promptArgs(task);
   return spawnCollect([
-    '-p', task,
+    ...prompt.args,
     '--output-format', 'stream-json', '--verbose',
     '--max-turns', String(options.maxTurns ?? 200),
     '--permission-mode', 'acceptEdits',
@@ -231,13 +251,14 @@ function run(task: string, cwd: string, options: RunAgentOptions): Promise<Spawn
     '--strict-mcp-config',
     '--append-system-prompt', HEADLESS_NOTE,
     '--model', options.model ?? DEFAULT_MODEL,
-  ], { cwd, env: { CLAUDE_PROJECT_DIR: cwd }, timeoutMs: options.timeoutMs ?? DEFAULT_TIMEOUT_MS });
+  ], { cwd, env: { CLAUDE_PROJECT_DIR: cwd }, timeoutMs: options.timeoutMs ?? DEFAULT_TIMEOUT_MS, ...(prompt.input === undefined ? {} : { input: prompt.input }) });
 }
 
 /** §7.2 / §7.5: single-turn, tool-free model call that must return a JSON object. */
 async function askJson(prompt: string, options: AskJsonOptions = {}): Promise<Record<string, unknown>> {
+  const delivered = promptArgs(prompt);
   const outcome = await spawnCollect([
-    '-p', prompt,
+    ...delivered.args,
     '--output-format', 'json',
     '--max-turns', '1', '--disallowedTools', '*',
     '--setting-sources', options.settingSources ?? 'project', '--strict-mcp-config',
@@ -245,7 +266,7 @@ async function askJson(prompt: string, options: AskJsonOptions = {}): Promise<Re
     // TCC hygiene: under the desktop app an inherited cwd is `/`, and agent startup work
     // scanning an unexpected root walks into macOS-protected dirs. Pin every spawn, like
     // runCase pins the sandbox; tool-free calls get the tmpdir.
-  ], { cwd: tmpdir(), timeoutMs: options.timeoutMs ?? 120_000, ...(options.signal ? { signal: options.signal } : {}) });
+  ], { cwd: tmpdir(), timeoutMs: options.timeoutMs ?? 120_000, ...(options.signal ? { signal: options.signal } : {}), ...(delivered.input === undefined ? {} : { input: delivered.input }) });
   if (outcome.timedOut) throw new AgentRunError(`model call timed out after ${options.timeoutMs ?? 120_000}ms`);
   if (outcome.code !== 0) throw new AgentRunError(`model call failed (rc=${outcome.code}): ${outcome.stderr.slice(-2000)}`);
   let text = outcome.stdout;

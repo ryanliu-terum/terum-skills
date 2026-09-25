@@ -2,7 +2,7 @@ import { chmod, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { AgentRunError, Transcript, preflight, systemAgent } from '../agent.js';
+import { ARGV_PROMPT_LIMIT, AgentRunError, Transcript, preflight, systemAgent } from '../agent.js';
 
 let scratch: string;
 const saved = process.env['TERUM_SKILLS_AGENT_CMD'];
@@ -108,6 +108,64 @@ describe('preflight (§7.4, VE7-adjacent)', () => {
     const outcome = await preflight();
     expect(outcome.ok).toBe(false);
     if (!outcome.ok) expect(outcome.error).toContain('logged in');
+  });
+});
+
+/**
+ * A Node stub that records its argv and stdin, so these run on Windows too, where the bug was: a
+ * `.cmd` shim naming `%~dp0\stub.cjs` resolves to the current Node (agent-command.ts); a POSIX
+ * script execs the same file.
+ */
+async function recorder(): Promise<{ argv(): Promise<string[]>; stdin(): Promise<string> }> {
+  const script = join(scratch, 'stub.cjs');
+  await writeFile(script, [
+    "const fs = require('node:fs'), path = require('node:path');",
+    "fs.writeFileSync(path.join(__dirname, 'argv.json'), JSON.stringify(process.argv.slice(2)));",
+    "let input = ''; process.stdin.setEncoding('utf8');",
+    "process.stdin.on('data', (chunk) => { input += chunk; });",
+    "process.stdin.on('end', () => { fs.writeFileSync(path.join(__dirname, 'stdin.txt'), input, 'utf8'); process.stdout.write(JSON.stringify({ type: 'result', result: '{\"ok\": true}' })); });",
+  ].join('\n'));
+  let launcher: string;
+  if (process.platform === 'win32') {
+    launcher = join(scratch, 'stub.cmd');
+    await writeFile(launcher, '@node "%~dp0\\stub.cjs" %*\r\n');
+  } else {
+    launcher = join(scratch, 'stub.sh');
+    await writeFile(launcher, `#!/bin/sh\nexec "${process.execPath}" "${script}" "$@"\n`);
+    await chmod(launcher, 0o755);
+  }
+  process.env['TERUM_SKILLS_AGENT_CMD'] = launcher;
+  return {
+    argv: async () => JSON.parse(await readFile(join(scratch, 'argv.json'), 'utf8')) as string[],
+    stdin: () => readFile(join(scratch, 'stdin.txt'), 'utf8'),
+  };
+}
+
+describe('a prompt past ARGV_PROMPT_LIMIT goes to claude -p on stdin (Windows spawn ENAMETOOLONG)', () => {
+  // Quotes, newlines and a non-ASCII letter: the stdin path must carry the prompt byte for byte.
+  const long = 'Skill text with "quotes", ünïcode and\nnewlines. '.repeat(Math.ceil((ARGV_PROMPT_LIMIT + 1) / 45));
+
+  it('askJson sends a long prompt on stdin and leaves it off argv', async () => {
+    const seen = await recorder();
+    expect(await systemAgent.askJson(long)).toEqual({ ok: true });
+    const argv = await seen.argv();
+    expect(argv.slice(0, 2)).toEqual(['-p', '--output-format']);
+    expect(argv).not.toContain(long);
+    expect(await seen.stdin()).toBe(long);
+  });
+
+  it('askJson keeps a short prompt on argv, with nothing on stdin', async () => {
+    const seen = await recorder();
+    expect(await systemAgent.askJson('classify')).toEqual({ ok: true });
+    expect((await seen.argv()).slice(0, 2)).toEqual(['-p', 'classify']);
+    expect(await seen.stdin()).toBe('');
+  });
+
+  it('runAgent sends a long task on stdin', async () => {
+    const seen = await recorder();
+    await systemAgent.runAgent(long, scratch);
+    expect((await seen.argv()).slice(0, 2)).toEqual(['-p', '--output-format']);
+    expect(await seen.stdin()).toBe(long);
   });
 });
 

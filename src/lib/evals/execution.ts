@@ -20,6 +20,7 @@ import type { CheckResult, CheckSpec } from './checks.js';
 import { emptyTranscript, fractionPassed, runChecks } from './checks.js';
 import type { AgentApi, Transcript } from './agent.js';
 import { AgentRunError, AgentTimeoutError, DEFAULT_MODEL } from './agent.js';
+import { posixShell } from './agent-command.js';
 import { DEFAULT_ESCALATION_MODEL, judgePair } from './judge.js';
 import type { Result } from '../result.js';
 import { failure, success } from '../result.js';
@@ -140,7 +141,7 @@ export async function missingRequirements(requires: readonly string[]): Promise<
   for (const requirement of requires) {
     const [file, args] = requirement.startsWith('python3:')
       ? ['python3', ['-c', 'import importlib, sys; importlib.import_module(sys.argv[1])', requirement.slice('python3:'.length)]]
-      : ['/bin/sh', ['-c', 'command -v -- "$1"', 'probe', requirement]] as const;
+      : [posixShell(), ['-c', 'command -v -- "$1"', 'probe', requirement]] as const;
     const present = await new Promise<boolean>((resolvePromise) => {
       // 30s: generous enough that concurrent-startup disk contention can't fake a missing tool
       // (measured: pandas probed as missing under a 14-process wave with a 10s cap).
@@ -289,7 +290,7 @@ export async function patchApplies(files: Record<string, string>, patch: string,
 
 /** The one non-agent subprocess in the engine: the case's own setup hook, inside its sandbox. */
 function runSetup(evalCase: EvalCase, sandbox: string): Promise<void> {
-  return runSubprocess('/bin/sh', ['-ce', evalCase.setup!], sandbox, `case '${evalCase.name}': setup failed`).then((error) => {
+  return runSubprocess(posixShell(), ['-ce', evalCase.setup!], sandbox, `case '${evalCase.name}': setup failed`).then((error) => {
     if (error !== null) throw new Error(error);
   });
 }

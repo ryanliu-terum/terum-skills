@@ -201,6 +201,10 @@ Every arm and every repetition gets its own fresh temporary directory under the 
    directories so the skill cannot read its own answer key. Skipped entirely for `baseline`.
 5. Stage the dependency plan. Skipped entirely for `baseline`.
 
+On Windows, which has no `/bin/sh`, the same POSIX shell is Git for Windows' `sh.exe`: beside
+`CLAUDE_CODE_GIT_BASH_PATH`, on `PATH`, in the install that holds the `git` on `PATH`, or in the
+default install. It also runs `requires` probes and `command_succeeds` checks.
+
 ### 9. Run the arm
 
 Each arm is one headless Claude Code session:
@@ -216,6 +220,10 @@ claude -p "<the case's task>" \
   --append-system-prompt "<the headless note>" \
   --model <--model, default sonnet>
 ```
+
+A task longer than 8,000 characters goes to `claude -p` on stdin instead of on the command line, as
+do the generation, trigger and judge prompts past that length, which carry the whole `SKILL.md`:
+Windows caps a command line at 32,767 characters.
 
 The working directory is the sandbox and `CLAUDE_PROJECT_DIR` points at it. The appended system
 prompt is identical for every arm:
