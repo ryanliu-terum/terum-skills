@@ -10,6 +10,7 @@
  * refused on 2026-09-13 with the conventional path alone). A native `claude.exe` spawns as is.
  * Every other platform spawns the name unchanged.
  */
+import { statSync } from 'node:fs';
 import { win32 as winPath } from 'node:path';
 import type { Result } from '../result.js';
 import { failure, success } from '../result.js';
@@ -107,4 +108,74 @@ export function resolveAgentCommand(command: string, args: readonly string[], ev
   if (native !== undefined) return success({ file: native, args: [...args] });
   const looked = fromShim.length > 0 ? ` It launches ${fromShim.join(', ')}, which does not exist.` : text === null ? ' The shim could not be read.' : ' The shim names no script this tool can launch.';
   return failure(`\`${command}\` resolves to the batch shim ${found}, which cannot be launched without a shell.${looked} Install Claude Code with the native Windows installer, or point TERUM_SKILLS_AGENT_CMD at claude.exe.`);
+}
+
+/** A shell to run, and the folders to put first on its PATH (empty when it sets up its own). */
+export interface PosixShell { file: string; path: string[] }
+
+/** The install root a Git-for-Windows-style folder belongs to: `<root>\bin`, `\usr\bin`, `\mingw64\bin` or `\cmd`. */
+function installRoot(dir: string): string | null {
+  const normal = winPath.normalize(dir).replace(/[\\/]+$/, '');
+  const lower = normal.toLowerCase();
+  for (const tail of ['\\usr\\bin', '\\mingw64\\bin', '\\bin', '\\cmd']) if (lower.endsWith(tail)) return normal.slice(0, normal.length - tail.length);
+  return null;
+}
+
+/**
+ * The POSIX shell for a case's `setup` hook, its `requires` probes and its `command_succeeds` checks
+ * (SETUP_RULE in generate.ts). Windows has no `/bin/sh`, so every such case failed there with `spawn
+ * /bin/sh ENOENT` before the skill ran. Claude Code on Windows runs on Git for Windows, so its shell is
+ * there to use. The install is found from CLAUDE_CODE_GIT_BASH_PATH, an `sh.exe` or `git.exe` on PATH,
+ * or the default location, and its `bin\sh.exe` launcher is preferred: it puts `/usr/bin` and
+ * `/mingw64/bin` on PATH itself, where the raw `usr\bin\sh.exe` finds no `mkdir` outside a Git Bash
+ * session. An install with no launcher (MinGit, MSYS2) runs its raw shell with those folders put first
+ * on PATH. Every other platform, and a Windows host with none of those, keeps `/bin/sh`.
+ */
+export function resolvePosixShell(evidence: Pick<AgentCommandEvidence, 'platform' | 'env' | 'isFile'>): PosixShell {
+  if (evidence.platform !== 'win32') return { file: '/bin/sh', path: [] };
+  const bash = envValue(evidence.env, 'CLAUDE_CODE_GIT_BASH_PATH')?.trim().replace(/^"(.*)"$/, '$1');
+  const entries = pathEntries(evidence.env);
+  const programFiles = envValue(evidence.env, 'ProgramFiles')?.trim() || 'C:\\Program Files';
+  const roots: string[] = [];
+  const add = (dir: string): void => { const root = installRoot(dir); if (root !== null && !roots.some((known) => known.toLowerCase() === root.toLowerCase())) roots.push(root); };
+  if (bash) add(winPath.dirname(bash));
+  for (const dir of entries) if (evidence.isFile(winPath.join(dir, 'sh.exe')) || evidence.isFile(winPath.join(dir, 'git.exe'))) add(dir);
+  add(winPath.join(programFiles, 'Git', 'cmd'));
+  for (const root of roots) {
+    const launcher = winPath.join(root, 'bin', 'sh.exe');
+    if (evidence.isFile(launcher)) return { file: launcher, path: [] };
+    const raw = winPath.join(root, 'usr', 'bin', 'sh.exe');
+    if (evidence.isFile(raw)) return { file: raw, path: [winPath.join(root, 'usr', 'bin'), winPath.join(root, 'mingw64', 'bin')] };
+  }
+  // An sh.exe on PATH outside any such layout (busybox, a tools folder) already has its PATH.
+  const loose = entries.map((dir) => winPath.join(dir, 'sh.exe')).find((candidate) => evidence.isFile(candidate));
+  if (loose !== undefined) return { file: loose, path: [] };
+  if (bash && evidence.isFile(bash)) return { file: bash, path: [] };
+  return { file: '/bin/sh', path: [] };
+}
+
+let hostShell: PosixShell | undefined;
+/** `resolvePosixShell` for this host, resolved once per process. */
+export function posixShell(): PosixShell {
+  hostShell ??= resolvePosixShell({
+    platform: process.platform, env: process.env,
+    isFile: (path) => { try { return statSync(path).isFile(); } catch { return false; } },
+  });
+  return hostShell;
+}
+
+/** The environment variable a script travels in on Windows (see shellCommand). */
+export const SCRIPT_VAR = 'TERUM_SKILLS_SCRIPT';
+
+/**
+ * How to run `script` under the host's POSIX shell, with `extra` as its positional parameters. On
+ * Windows the script travels in the environment and the shell `eval`s it: the MSYS runtime re-parses
+ * its command line, and Node quotes an argument only when it holds a space, so a multi-line script
+ * with no spaces was split at its newlines and ran only its first line (`true\nfalse` exited 0).
+ */
+export function shellCommand(script: string, flags: '-c' | '-ce', extra: readonly string[] = [], shell: PosixShell = posixShell(), platform: NodeJS.Platform = process.platform, env: NodeJS.ProcessEnv = process.env): { file: string; args: string[]; env: NodeJS.ProcessEnv } {
+  if (platform !== 'win32') return { file: shell.file, args: [flags, script, ...extra], env: { ...env } };
+  const pathKey = Object.keys(env).find((key) => key.toUpperCase() === 'PATH') ?? 'Path';
+  const path = [...shell.path, ...(env[pathKey] ? [env[pathKey]] : [])].join(';');
+  return { file: shell.file, args: [flags, `eval "$${SCRIPT_VAR}"`, ...extra], env: { ...env, [pathKey]: path, [SCRIPT_VAR]: script } };
 }

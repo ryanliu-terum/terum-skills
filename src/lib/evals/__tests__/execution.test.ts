@@ -4,7 +4,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { AgentRunError, AgentTimeoutError, Transcript, type AgentApi } from '../agent.js';
-import { casePathViolation, ContaminationError, decide, dryRunCase, loadCase, loadSuite, missingRequirements, runCase, runSuite, seedSandbox, type EvalCase, type EvalSuite } from '../execution.js';
+import { posixShell, shellCommand } from '../agent-command.js';
+import { casePathViolation, ContaminationError, decide, dryRunCase, loadCase, loadSuite, missingRequirements, runCase, runSubprocess, runSuite, seedSandbox, type EvalCase, type EvalSuite } from '../execution.js';
 
 let scratch: string;
 beforeEach(async () => { scratch = await mkdtemp(join(tmpdir(), 'exec-')); });
@@ -50,11 +51,37 @@ describe('suite loading (§3.2)', () => {
   });
 });
 
-// The engine runs setup hooks, requirement probes and `command_succeeds` checks under `/bin/sh` (spec:
-// eval-purpose-suites; SETUP_RULE in generate.ts). Windows has no `/bin/sh`, so every case that reaches
-// a shell fails there before the code under test runs — a product gap of the eval engine, not of these
-// tests, and one that a Windows user sees as "setup failed: spawn /bin/sh ENOENT".
+// The engine runs setup hooks, requirement probes and `command_succeeds` checks under a POSIX shell (spec:
+// eval-purpose-suites; SETUP_RULE in generate.ts): `/bin/sh`, or on Windows Git for Windows' `sh.exe`
+// (posixShell). The tests gated on POSIX_SHELL also lean on exec bits and POSIX paths, so they stay
+// POSIX-only; the block after this one runs the shell itself wherever one resolves, Windows included.
 const POSIX_SHELL = process.platform !== 'win32';
+const ANY_SHELL = process.platform !== 'win32' || posixShell().file !== '/bin/sh';
+
+describe.skipIf(!ANY_SHELL)('the POSIX shell resolves on every platform (Windows: spawn /bin/sh ENOENT)', () => {
+  it('runs a setup hook in the sandbox and probes binary requirements', async () => {
+    const sandbox = await seedSandbox(caseOf({ setup: 'mkdir -p out && printf ok > out/made.txt' }), { caseDir: scratch, arm: null, scratch });
+    expect(await readFile(join(sandbox, 'out', 'made.txt'), 'utf8')).toBe('ok');
+    expect(await missingRequirements(['sh', 'mkdir'])).toEqual([]);
+    expect(await missingRequirements(['definitely-not-a-real-binary-xq7'])).toEqual(['definitely-not-a-real-binary-xq7']);
+  });
+
+  it('dry-runs a case the way generation does, reporting prose in setup as a failed start', async () => {
+    expect(await dryRunCase(caseOf({ setup: 'printf ok > made.txt' }), scratch)).toBeNull();
+    expect(await dryRunCase(caseOf({ setup: 'Assume codex is logged in.' }), scratch)).toMatch(/^case 'c': setup failed \(rc=127\)/);
+  });
+
+  it('runs every line of a multi-line setup with no spaces (MSYS split it at the newline)', async () => {
+    expect(await dryRunCase(caseOf({ setup: 'true\nfalse' }), scratch)).toMatch(/^case 'c': setup failed \(rc=1\)/);
+  });
+
+  it('settles at the cap even when the shell leaves children holding stderr', async () => {
+    const shell = shellCommand('sleep 30', '-ce');
+    const started = Date.now();
+    expect(await runSubprocess(shell.file, shell.args, scratch, 'setup failed', { env: shell.env, timeoutMs: 1_000 })).toMatch(/^setup failed \(rc=killed\)/);
+    expect(Date.now() - started).toBeLessThan(10_000);
+  }, 20_000);
+});
 
 describe('environment requirements (§7.1 rev 8)', () => {
   it.skipIf(!POSIX_SHELL)('parses requires, probes binaries and python modules', async () => {

@@ -8,6 +8,7 @@
 import { existsSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { resolve, sep } from 'node:path';
+import { shellCommand } from './agent-command.js';
 
 /** The slice of a transcript the checks read. `agent.ts`'s Transcript satisfies it structurally. */
 export interface TranscriptText {
@@ -97,7 +98,8 @@ const CHECKS: Record<string, Check> = {
   // Rev 9: run a shell command in the sandbox; pass = exit 0. Exists for deterministic script
   // verifiers (SkillsBench-style pytest checks) — deterministic given the sandbox state.
   command_succeeds: (arg, _transcript, sandbox) => {
-    const result = spawnSync('/bin/sh', ['-ce', String(arg)], { cwd: sandbox, timeout: 120_000, encoding: 'utf8' });
+    const shell = shellCommand(String(arg), '-ce');
+    const result = spawnSync(shell.file, shell.args, { cwd: sandbox, env: shell.env, timeout: 120_000, encoding: 'utf8' });
     const ok = result.status === 0;
     const detail = ok ? '' : `rc=${result.status ?? 'killed'}: ${((result.stderr || result.stdout) ?? '').slice(-300)}`;
     return { name: `command_succeeds:${String(arg).slice(0, 60)}`, passed: ok, detail };

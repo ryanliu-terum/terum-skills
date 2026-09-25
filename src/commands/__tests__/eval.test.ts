@@ -5,6 +5,7 @@ import { dirname, join, sep } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { createConfigStore, type ConfigStore } from '../../lib/config.js';
 import { AgentTimeoutError, type AgentApi, Transcript } from '../../lib/evals/agent.js';
+import { posixShell } from '../../lib/evals/agent-command.js';
 import { success } from '../../lib/result.js';
 import { bareTeam, cloneWithIdentity, git, holdCloneLock, NonInteractivePrompter, pushFromSeed, ScriptedPrompter, temporaryDirectory } from '../../lib/__tests__/fixtures.js';
 import { receiptSchema } from '../../lib/evals/receipt.js';
@@ -12,6 +13,9 @@ import { skillContentDigest } from '../../lib/skills.js';
 import { sourceFiles } from '../../lib/skill-source.js';
 import { queueItemsFor, run, saveGeneratedAssets } from '../eval.js';
 import { run as publishRun } from '../publish.js';
+
+/** A Windows host with no Git for Windows has no POSIX shell for generation's setup dry-run. */
+const NO_SHELL = process.platform === 'win32' && posixShell().file === '/bin/sh';
 
 // Clone the ESM namespace so one fs call can be observed or made to fail, then restored (the
 // local-skills.test.ts pattern).
@@ -296,8 +300,8 @@ describe('eval (§6 / IE2)', () => {
     expect(await readFile(join(folder, 'evals', 'triggers.yaml'), 'utf8')).toContain('should_trigger');
   });
 
-  // Generation dry-runs each case's setup under `/bin/sh`, which Windows lacks (see lib/evals/__tests__/execution.test.ts).
-  it.skipIf(process.platform === 'win32')('writes a generated suite to evals/suite.yaml and runs its sub-cases in the same invocation', async () => {
+  // Generation dry-runs each case's setup under the POSIX shell (posixShell; Git for Windows' sh.exe on Windows).
+  it.skipIf(NO_SHELL)('writes a generated suite to evals/suite.yaml and runs its sub-cases in the same invocation', async () => {
     const generatedSuite = { suite: {
       task: 'Review the diff.', files: { 'src/a.js': 'const a = 1;\n', 'src/b.js': 'const b = 2;\n' },
       plants_diff: 'diff --git a/src/a.js b/src/a.js\n--- a/src/a.js\n+++ b/src/a.js\n@@ -1 +1 @@\n-const a = 1;\n+const a = -1;\ndiff --git a/src/b.js b/src/b.js\n--- a/src/b.js\n+++ b/src/b.js\n@@ -1 +1 @@\n-const b = 2;\n+const b = -2;\n',
@@ -619,7 +623,7 @@ describe('D72 — the B3 full review highs on eval', () => {
     expect(lines).toEqual([`sample: ${folder} is not a usable skill folder: ${detail}; it was not queued.`]);
   });
 
-  // Generation dry-runs each case's setup under `/bin/sh`, which Windows lacks (see lib/evals/__tests__/execution.test.ts).
+  // POSIX-only: the planted failure is a path through a file, which POSIX reports as ENOTDIR and Windows as ENOENT.
   it.skipIf(process.platform === 'win32')('a write that fails part-way leaves no evals/cases and no staging folder behind, and reports it', async () => {
     const { folder } = await evalFixture();
     // The second file's path runs THROUGH the first, so its write fails (ENOTDIR) after the first
@@ -650,7 +654,7 @@ describe('D72 — the B3 full review highs on eval', () => {
 });
 
 describe('B3 confirmation review — where saveGeneratedAssets stages, and what its failure says', () => {
-  // Generation dry-runs each case's setup under `/bin/sh`, which Windows lacks (see lib/evals/__tests__/execution.test.ts).
+  // POSIX-only: the planted failure is a path through a file, which POSIX reports as ENOTDIR and Windows as ENOENT.
   it.skipIf(process.platform === 'win32')('stages in the skill folder’s parent, never inside it, so a crash mid-write cannot leave a folder publish would digest', async () => {
     // Confirmation-review HIGH 2 on refactor/b3-versions-keystone: the staging folder was
     // `<skill>/evals/.generated.terum-*`, inside the tree `sourceFiles`/`skillContentDigest` walk

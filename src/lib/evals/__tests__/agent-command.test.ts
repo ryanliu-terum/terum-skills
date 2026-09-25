@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { resolveAgentCommand, shimScripts, type AgentCommandEvidence } from '../agent-command.js';
+import { resolveAgentCommand, resolvePosixShell, SCRIPT_VAR, shellCommand, shimScripts, type AgentCommandEvidence, type PosixShell } from '../agent-command.js';
 
 const NODE = 'C:\\Program Files\\nodejs\\node.exe';
 const ARGS = ['-p', 'line one\nline two "quoted" %PATH% ^caret', '--output-format', 'json'];
@@ -132,5 +132,56 @@ describe('resolveAgentCommand follows a shim to a native binary (Claude Code ≥
     expect(none.ok).toBe(false);
     if (none.ok) throw new Error('expected a failure');
     expect(none.error).toContain('native Windows installer');
+  });
+});
+
+describe('resolvePosixShell (case setup, requires probes, command_succeeds)', () => {
+  const GIT = 'C:\\Program Files\\Git';
+  const LAUNCHER = `${GIT}\\bin\\sh.exe`, RAW = `${GIT}\\usr\\bin\\sh.exe`;
+  const shell = (file: string, path: string[] = []): PosixShell => ({ file, path });
+
+  it.each(['darwin', 'linux'] as const)('is /bin/sh on %s', (platform) => {
+    expect(resolvePosixShell(evidence([], { PATH: '' }, platform))).toEqual(shell('/bin/sh'));
+  });
+
+  it('prefers the install\'s bin\\sh.exe launcher over the raw usr\\bin shell, from any of its folders', () => {
+    const files = [LAUNCHER, RAW, `${GIT}\\usr\\bin\\bash.exe`, `${GIT}\\cmd\\git.exe`, `${GIT}\\mingw64\\bin\\git.exe`];
+    const nowhere = { ProgramFiles: 'C:\\Nowhere' };
+    expect(resolvePosixShell(evidence(files, { ...nowhere, CLAUDE_CODE_GIT_BASH_PATH: `"${GIT}\\usr\\bin\\bash.exe"`, PATH: 'C:\\Windows' }))).toEqual(shell(LAUNCHER));
+    expect(resolvePosixShell(evidence(files, { ...nowhere, Path: `C:\\Windows;${GIT}\\usr\\bin` }))).toEqual(shell(LAUNCHER));
+    expect(resolvePosixShell(evidence(files, { ...nowhere, PATH: `C:\\Windows;${GIT}\\cmd` }))).toEqual(shell(LAUNCHER));
+    expect(resolvePosixShell(evidence(files, { ...nowhere, PATH: `${GIT}\\mingw64\\bin` }))).toEqual(shell(LAUNCHER));
+  });
+
+  it('runs a raw shell with its usr\\bin and mingw64\\bin first on PATH when the install has no launcher (MinGit)', () => {
+    const min = 'D:\\MinGit';
+    expect(resolvePosixShell(evidence([`${min}\\cmd\\git.exe`, `${min}\\usr\\bin\\sh.exe`], { PATH: `${min}\\cmd`, ProgramFiles: 'C:\\Nowhere' })))
+      .toEqual(shell(`${min}\\usr\\bin\\sh.exe`, [`${min}\\usr\\bin`, `${min}\\mingw64\\bin`]));
+  });
+
+  it('takes CLAUDE_CODE_GIT_BASH_PATH\'s install first, and runs that bash when it is all there is', () => {
+    const portable = 'D:\\PortableGit';
+    const env = { CLAUDE_CODE_GIT_BASH_PATH: `${portable}\\bin\\bash.exe`, PATH: `${GIT}\\cmd` };
+    expect(resolvePosixShell(evidence([`${portable}\\bin\\sh.exe`, `${portable}\\bin\\bash.exe`, LAUNCHER, `${GIT}\\cmd\\git.exe`], env))).toEqual(shell(`${portable}\\bin\\sh.exe`));
+    expect(resolvePosixShell(evidence(['E:\\tools\\bash.exe'], { CLAUDE_CODE_GIT_BASH_PATH: 'E:\\tools\\bash.exe', PATH: 'C:\\Windows', ProgramFiles: 'C:\\Nowhere' }))).toEqual(shell('E:\\tools\\bash.exe'));
+  });
+
+  it('falls back to the default install, a loose sh.exe on PATH, and /bin/sh when there is none', () => {
+    expect(resolvePosixShell(evidence([LAUNCHER], { PATH: 'C:\\Windows' }))).toEqual(shell(LAUNCHER));
+    expect(resolvePosixShell(evidence(['C:\\busybox\\sh.exe'], { PATH: 'C:\\busybox', ProgramFiles: 'C:\\Nowhere' }))).toEqual(shell('C:\\busybox\\sh.exe'));
+    expect(resolvePosixShell(evidence([], { PATH: 'C:\\Windows' }))).toEqual(shell('/bin/sh'));
+  });
+});
+
+describe('shellCommand', () => {
+  it('passes the script as the argument on POSIX', () => {
+    const run = shellCommand('mkdir out\ntouch out/x', '-ce', [], { file: '/bin/sh', path: [] }, 'linux', { PATH: '/usr/bin' });
+    expect(run).toEqual({ file: '/bin/sh', args: ['-ce', 'mkdir out\ntouch out/x'], env: { PATH: '/usr/bin' } });
+  });
+
+  it('on Windows, keeps the script off the MSYS command line and puts the raw shell\'s folders first on the existing PATH key', () => {
+    const run = shellCommand('true\nfalse', '-c', ['probe', 'git'], { file: 'D:\\MinGit\\usr\\bin\\sh.exe', path: ['D:\\MinGit\\usr\\bin', 'D:\\MinGit\\mingw64\\bin'] }, 'win32', { Path: 'C:\\Windows' });
+    expect(run.args).toEqual(['-c', `eval "$${SCRIPT_VAR}"`, 'probe', 'git']);
+    expect(run.env).toEqual({ Path: 'D:\\MinGit\\usr\\bin;D:\\MinGit\\mingw64\\bin;C:\\Windows', [SCRIPT_VAR]: 'true\nfalse' });
   });
 });

@@ -201,6 +201,15 @@ Every arm and every repetition gets its own fresh temporary directory under the 
    directories so the skill cannot read its own answer key. Skipped entirely for `baseline`.
 5. Stage the dependency plan. Skipped entirely for `baseline`.
 
+On Windows, which has no `/bin/sh`, the POSIX shell comes from Git for Windows. The install is the
+one `CLAUDE_CODE_GIT_BASH_PATH` names, then one holding an `sh.exe` or `git.exe` on `PATH`, then
+`%ProgramFiles%\Git`, and its `bin\sh.exe` launcher runs the script. An install without the launcher
+(MinGit, MSYS2) runs `usr\bin\sh.exe` with `usr\bin` and `mingw64\bin` first on `PATH`. The script
+travels in the environment rather than on the command line, which the MSYS runtime would split at
+newlines. With no such shell, setup fails to start (`spawn /bin/sh ENOENT`). The same shell runs
+`requires` probes and `command_succeeds` checks. On timeout the setup is abandoned at 60 seconds,
+but on Windows a process it started can outlive the shell and keep running.
+
 ### 9. Run the arm
 
 Each arm is one headless Claude Code session:
@@ -216,6 +225,10 @@ claude -p "<the case's task>" \
   --append-system-prompt "<the headless note>" \
   --model <--model, default sonnet>
 ```
+
+A task longer than 8,000 characters goes to `claude -p` on stdin instead of on the command line, as
+do the generation, trigger and judge prompts past that length, which carry the whole `SKILL.md`:
+Windows caps a command line at 32,767 characters.
 
 The working directory is the sandbox and `CLAUDE_PROJECT_DIR` points at it. The appended system
 prompt is identical for every arm:
