@@ -20,7 +20,7 @@ import type { CheckResult, CheckSpec } from './checks.js';
 import { emptyTranscript, fractionPassed, runChecks } from './checks.js';
 import type { AgentApi, Transcript } from './agent.js';
 import { AgentRunError, AgentTimeoutError, DEFAULT_MODEL } from './agent.js';
-import { posixShell } from './agent-command.js';
+import { shellCommand } from './agent-command.js';
 import { DEFAULT_ESCALATION_MODEL, judgePair } from './judge.js';
 import type { Result } from '../result.js';
 import { failure, success } from '../result.js';
@@ -139,13 +139,13 @@ export function loadSuite(source: string, name: string): Result<EvalSuite> {
 export async function missingRequirements(requires: readonly string[]): Promise<string[]> {
   const missing: string[] = [];
   for (const requirement of requires) {
-    const [file, args] = requirement.startsWith('python3:')
-      ? ['python3', ['-c', 'import importlib, sys; importlib.import_module(sys.argv[1])', requirement.slice('python3:'.length)]]
-      : [posixShell(), ['-c', 'command -v -- "$1"', 'probe', requirement]] as const;
+    const { file, args, env } = requirement.startsWith('python3:')
+      ? { file: 'python3', args: ['-c', 'import importlib, sys; importlib.import_module(sys.argv[1])', requirement.slice('python3:'.length)], env: process.env }
+      : shellCommand('command -v -- "$1"', '-c', ['probe', requirement]);
     const present = await new Promise<boolean>((resolvePromise) => {
       // 30s: generous enough that concurrent-startup disk contention can't fake a missing tool
       // (measured: pandas probed as missing under a 14-process wave with a 10s cap).
-      const child = spawn(file, args as string[], { stdio: 'ignore' });
+      const child = spawn(file, args, { stdio: 'ignore', env });
       const timer = setTimeout(() => { child.kill('SIGKILL'); }, 30_000);
       child.on('error', () => { clearTimeout(timer); resolvePromise(false); });
       child.on('close', (code) => { clearTimeout(timer); resolvePromise(code === 0); });
@@ -290,23 +290,31 @@ export async function patchApplies(files: Record<string, string>, patch: string,
 
 /** The one non-agent subprocess in the engine: the case's own setup hook, inside its sandbox. */
 function runSetup(evalCase: EvalCase, sandbox: string): Promise<void> {
-  return runSubprocess(posixShell(), ['-ce', evalCase.setup!], sandbox, `case '${evalCase.name}': setup failed`).then((error) => {
+  const shell = shellCommand(evalCase.setup!, '-ce');
+  return runSubprocess(shell.file, shell.args, sandbox, `case '${evalCase.name}': setup failed`, { env: shell.env }).then((error) => {
     if (error !== null) throw new Error(error);
   });
 }
 
 /** The sole captured-output subprocess seam for eval generation and setup hooks. */
-function runSubprocess(file: string, args: string[], cwd: string, label: string): Promise<string | null> {
+export function runSubprocess(file: string, args: string[], cwd: string, label: string, options: { env?: NodeJS.ProcessEnv; timeoutMs?: number } = {}): Promise<string | null> {
   return new Promise((resolvePromise) => {
-    const child = spawn(file, args, { cwd, stdio: ['ignore', 'ignore', 'pipe'] });
+    const child = spawn(file, args, { cwd, stdio: ['ignore', 'ignore', 'pipe'], ...(options.env ? { env: options.env } : {}) });
     const err: Buffer[] = [];
-    const timer = setTimeout(() => child.kill('SIGKILL'), 60_000);
+    let settled = false;
+    const settle = (value: string | null): void => { if (!settled) { settled = true; clearTimeout(timer); resolvePromise(value); } };
+    const killed = (): string => `${label} (rc=killed): ${Buffer.concat(err).toString('utf8').slice(-500)}`;
+    const timer = setTimeout(() => {
+      child.kill('SIGKILL');
+      // Settle on the kill, not on 'close': on Windows the shell's own children outlive it holding
+      // stderr open (Git's bin\sh.exe is a launcher, and MSYS runs each command as its own process),
+      // so 'close' waited for whatever the setup had started, past the cap and possibly for ever.
+      child.stderr.destroy();
+      settle(killed());
+    }, options.timeoutMs ?? 60_000);
     child.stderr.on('data', (chunk: Buffer) => err.push(chunk));
-    child.on('error', (error) => { clearTimeout(timer); resolvePromise(`${label}: ${error.message}`); });
-    child.on('close', (code) => {
-      clearTimeout(timer);
-      resolvePromise(code === 0 ? null : `${label} (rc=${code ?? 'killed'}): ${Buffer.concat(err).toString('utf8').slice(-500)}`);
-    });
+    child.on('error', (error) => settle(`${label}: ${error.message}`));
+    child.on('close', (code) => settle(code === 0 ? null : code === null ? killed() : `${label} (rc=${code}): ${Buffer.concat(err).toString('utf8').slice(-500)}`));
   });
 }
 

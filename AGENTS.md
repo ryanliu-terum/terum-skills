@@ -65,8 +65,10 @@ hold for code written here, and this file wins over any comment or doc that cont
   the source: anything that creates a symlink is gated on `SYMLINKS_SUPPORTED`
   (`src/lib/__tests__/fixtures.ts`, a probe that needs Developer Mode or an elevated shell); POSIX
   mode assertions (0600/0700, executable bits) are guarded by `process.platform !== 'win32'`; and
-  the eval engine's setup hooks, requirement probes and `command_succeeds` checks run under
-  `/bin/sh`, which Windows lacks, so those cases skip there; tests that make an entry unreadable
+  the eval engine's setup hooks, requirement probes and `command_succeeds` checks run under the
+  POSIX shell `posixShell()` resolves (Git for Windows' `sh.exe` on Windows), so those cases skip
+  only on a Windows host without Git, and tests that also lean on exec bits or POSIX errno values
+  stay POSIX-only; tests that make an entry unreadable
   with `chmod` skip on win32 too, since Windows ignores POSIX mode bits. Repo-relative paths a
   plan reports (`copies`, `entries[].to`) come from `path.relative`, so expectations spell them
   with `join(...)`, never a literal `/`. A skip is not a pass: report the skipped count next to

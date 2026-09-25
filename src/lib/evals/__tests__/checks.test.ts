@@ -18,12 +18,14 @@ beforeAll(async () => {
 
 describe('command_succeeds (§5.1 rev 9)', () => {
   // The check runs its command under the POSIX shell: `/bin/sh`, or Git for Windows' `sh.exe` (posixShell).
-  it.skipIf(process.platform === 'win32' && posixShell() === '/bin/sh')('passes on exit 0 in the sandbox, fails with rc and stderr tail otherwise', () => {
+  it.skipIf(process.platform === 'win32' && posixShell().file === '/bin/sh')('passes on exit 0 in the sandbox, fails with rc and stderr tail otherwise', () => {
     expect(runChecks([{ command_succeeds: 'test -f deployed.marker' }], emptyTranscript, sandbox)[0]).toMatchObject({ passed: true });
     const failed = runChecks([{ command_succeeds: 'echo boom >&2; exit 3' }], emptyTranscript, sandbox)[0];
     expect(failed).toMatchObject({ passed: false });
     expect(failed!.detail).toContain('rc=3');
     expect(failed!.detail).toContain('boom');
+    // Every line runs: on Windows MSYS used to split a no-space script at its newline and run only the first.
+    expect(runChecks([{ command_succeeds: 'true\nfalse' }], emptyTranscript, sandbox)[0]).toMatchObject({ passed: false });
   });
 });
 

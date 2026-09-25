@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { AgentRunError, Transcript, type AgentApi } from '../agent.js';
+import { posixShell } from '../agent-command.js';
 import { loadCase, loadSuite } from '../execution.js';
 import { BRIEF_MAX, GENERATION_TIMEOUT_MS, casePrompt, checkBriefNeutrality, deriveBrief, generate } from '../generate.js';
 import { parseTriggers } from '../triggers.js';
@@ -47,9 +48,9 @@ function agent(responses: (Record<string, unknown> | Error)[], prompts: string[]
 const at = (now = '2026-09-14T00:00:00Z') => ({ skill, files: ['SKILL.md'], catalog: '', model: 'sonnet', engineVersion: 'test', now: new Date(now), cases: true as const });
 const withCase = (extra: Record<string, unknown>) => ({ cases: [{ ...validCases.cases[0]!, ...extra }, validCases.cases[1], validCases.cases[2]] });
 
-// Generation dry-runs every case's setup under `/bin/sh` (SETUP_RULE); Windows has no `/bin/sh`, so the
-// dry-run refuses every case there before the code under test runs. See execution.test.ts for the same gate.
-const POSIX_SHELL = process.platform !== 'win32';
+// Generation dry-runs every case's setup under the POSIX shell (SETUP_RULE): `/bin/sh`, or Git for
+// Windows' `sh.exe` (posixShell). Only a Windows host with neither refuses every case before the code runs.
+const POSIX_SHELL = process.platform !== 'win32' || posixShell().file !== '/bin/sh';
 
 describe('eval generation (IE5)', () => {
   it.skipIf(!POSIX_SHELL)('materializes, loads, and dry-runs a valid ground-truth suite with probes and a patch', async () => {
